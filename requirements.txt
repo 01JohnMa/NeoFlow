@@ -1,0 +1,62 @@
+# ============================================================
+# OCR文档智能处理系统 - Python依赖清单
+# ============================================================
+# 安装命令：pip install -r requirements.txt
+# ============================================================
+
+# ============ Web框架 ============
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# ============ 数据验证 ============
+pydantic==2.5.3
+pydantic-settings==2.1.0
+email-validator==2.1.0
+
+# ============ Supabase ============
+supabase==2.3.4
+postgrest==0.16.1
+
+# ============ LangChain & LangGraph ============
+langchain==0.1.0
+langchain-openai==0.0.5
+langchain-core==0.1.10
+langgraph==0.0.26
+
+# ============ OCR ============
+# PaddlePaddle (CPU版本)
+paddlepaddle==2.6.0
+# 如需GPU版本，使用：
+# paddlepaddle-gpu==2.6.0
+
+paddleocr==2.7.3
+
+# ============ 图像处理 ============
+opencv-python-headless==4.9.0.80
+Pillow==10.2.0
+pdf2image==1.17.0
+
+# ============ 异步与HTTP ============
+aiofiles==23.2.1
+httpx==0.26.0
+
+# ============ 工具库 ============
+python-dotenv==1.0.0
+tenacity==8.2.3
+
+# ============ 日志 ============
+loguru==0.7.2
+
+# ============ 开发依赖 ============
+pytest==7.4.4
+pytest-asyncio==0.23.3
+
+# ============ 可选依赖 ============
+# Redis缓存支持 (如需要)
+# redis==5.0.1
+# aioredis==2.0.1
+
+# Celery任务队列 (如需要)
+# celery==5.3.6
+
