@@ -201,3 +201,4 @@ class OCRService:
 # 单例实例
 ocr_service = OCRService()
 
+

@@ -281,3 +281,4 @@ class SupabaseService:
 # 单例实例
 supabase_service = SupabaseService()
 
+

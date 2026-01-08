@@ -26,9 +26,9 @@ langgraph==0.0.26
 
 # ============ OCR ============
 # PaddlePaddle (CPU版本)
-paddlepaddle==2.6.0
+paddlepaddle==2.6.2
 # 如需GPU版本，使用：
-# paddlepaddle-gpu==2.6.0
+# paddlepaddle-gpu==2.6.2
 
 paddleocr==2.7.3
 
