@@ -1,0 +1,18 @@
+2026-01-04 18:30 | feat | 添加React前端业务页面包含登录上传文档列表和审核功能
+2026-01-04 18:30 | feat | 后端新增文档审核验证API接口validate和reject
+2026-01-04 18:45 | fix | 降级Vite和React支持Node 18环境运行
+2026-01-05 09:30 | fix | 解决Supabase Storage迁移脚本与postgres镜像不兼容问题
+2026-01-06 17:30 | feat | 实现用户权限隔离基于Supabase RLS策略自动过滤文档
+2026-01-06 17:30 | feat | 添加管理员RLS策略支持管理员查看所有文档
+2026-01-07 15:30 | feat | 新增display_name字段和自动规范化命名支持手动重命名
+2026-01-08 14:30 | refactor | 重构抽样单字段结构从10个调整为12个新业务字段
+2026-01-08 20:30 | feat | 新增飞书多维表格推送服务支持inspection_reports实时同步
+2026-01-12 20:15 | fix | 修复触发器竞态导致document_type为空时返回404的问题
+2026-01-12 20:45 | refactor | 飞书推送改为审核保存后触发仅限测试单类型
+2026-01-13 16:00 | refactor | 拆分documents路由为upload/process/query/review模块
+2026-01-13 16:00 | refactor | 新增统一异常体系和FastAPI认证依赖注入
+2026-01-13 16:00 | refactor | 统一表格映射到SupabaseService删除重复Prompt配置
+2026-01-13 17:30 | docs | 创建项目构建PRD经验总结文档指导未来项目开发
+2026-01-13 21:00 | feat | 新增pending_review状态实现OCR后强制审核流程
+2026-01-13 21:00 | feat | 测试单检验结论字段未审核时橙色高亮提醒
+2026-01-13 21:30 | refactor | 重构Supabase迁移脚本解决部署时初始化失败问题

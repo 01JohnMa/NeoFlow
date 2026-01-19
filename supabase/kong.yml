@@ -1,7 +1,7 @@
 # Kong API Gateway 配置
 # Supabase 服务路由配置
 
-_format_version: "2.1"
+_format_version: '2.1'
 _transform: true
 
 ###

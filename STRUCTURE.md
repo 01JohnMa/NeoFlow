@@ -10,8 +10,28 @@ ocr_agentic_system/
 │   ├── main.py                # FastAPI 主应用入口
 │   └── routes/
 │       ├── __init__.py
-│       ├── documents.py       # 文档处理路由
+│       ├── documents.py       # 文档处理路由 (含审核API)
 │       └── health.py          # 健康检查路由
+│
+├── web/                        # React 前端应用 [NEW]
+│   ├── src/
+│   │   ├── components/        # 组件
+│   │   │   ├── ui/           # 基础UI组件
+│   │   │   └── layout/       # 布局组件
+│   │   ├── pages/            # 页面组件
+│   │   │   ├── Login.tsx     # 登录页
+│   │   │   ├── Register.tsx  # 注册页
+│   │   │   ├── Dashboard.tsx # 仪表盘
+│   │   │   ├── Upload.tsx    # 上传页
+│   │   │   ├── Documents.tsx # 文档列表
+│   │   │   └── DocumentDetail.tsx # 文档详情
+│   │   ├── hooks/            # 自定义Hooks
+│   │   ├── services/         # API服务
+│   │   ├── store/            # 状态管理
+│   │   ├── lib/              # 工具库
+│   │   └── types/            # TypeScript类型
+│   ├── package.json
+│   └── vite.config.ts
 │
 ├── agents/                     # LangGraph 智能体
 │   ├── __init__.py
@@ -38,7 +58,7 @@ ocr_agentic_system/
 │   ├── kong.yml               # Kong网关配置
 │   ├── .env                   # Supabase环境变量
 │   ├── migrations/            # 数据库迁移脚本
-│   │   └── 001_init.sql
+│   │   └── 000_init_roles.sql
 │   └── volumes/               # 数据卷 (gitignore)
 │       ├── db/
 │       └── storage/
@@ -101,7 +121,14 @@ uvicorn api.main:app --reload --port 8080
 python -m api.main
 ```
 
-### 5. 测试API
+### 5. 启动前端服务
+```bash
+cd web
+npm install
+npm run dev
+```
+
+### 6. 测试API
 ```bash
 # 健康检查
 curl http://localhost:8080/api/health
@@ -114,6 +141,7 @@ curl http://localhost:8080/api/health
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
+| Web Frontend | 3000 | Vite开发服务器 |
 | FastAPI | 8080 | 主API服务 |
 | Supabase API | 8000 | Kong网关 |
 | Supabase Studio | 3001 | 管理界面 |

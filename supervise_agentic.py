@@ -5,7 +5,7 @@ ocrt提取助手 - 基于 LangGraph + paddleocr 的真实ocr系统
 3. 将对应的字段存到数据库当中
 """
 from text_pipline_ocr import ocr_process
-from prompt_config import *
+from config.prompts import *
 import json
 import asyncio
 from typing import TypedDict, Annotated
@@ -29,7 +29,7 @@ class AgentState(TypedDict):
     
 # 初始化模型
 llm = ChatOpenAI(
-    model=os.getenv("LLM_MODEL_ID", "gpt-4o-mini"),
+    model=os.getenv("LLM_MODEL_ID"),
     api_key=os.getenv("LLM_API_KEY"),
     base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
     temperature=0.7,

@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://localhost:8080"
     ALLOWED_HOSTS: str = "localhost,127.0.0.1"
     
+    # ============ 飞书配置 ============
+    FEISHU_APP_ID: str = ""
+    FEISHU_APP_SECRET: str = ""
+    FEISHU_BITABLE_APP_TOKEN: str = ""  # 多维表格 app_token
+    FEISHU_BITABLE_TABLE_ID: str = ""   # 数据表 table_id
+    FEISHU_PUSH_ENABLED: bool = False   # 是否启用推送
+    
     @property
     def allowed_extensions_list(self) -> List[str]:
         """获取允许的文件扩展名列表"""
@@ -88,5 +95,8 @@ class Settings(BaseSettings):
 
 # 单例实例
 settings = Settings()
+
+
+
 
 

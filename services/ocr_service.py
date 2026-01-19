@@ -60,7 +60,7 @@ class OCRService:
             raise
     
     def _init_ocr_sync(self) -> PaddleOCR:
-        """同步初始化PaddleOCR - 来自MVP代码"""
+        """同步初始化PaddleOCR - 完全按照MVP代码 text_pipline_ocr.py"""
         return PaddleOCR(
             lang='ch',
             det_model_dir=settings.OCR_DET_MODEL_PATH,
@@ -70,9 +70,7 @@ class OCRService:
             use_doc_orientation_classify=True,
             use_doc_unwarping=False,
             det_limit_side_len=960,
-            det_limit_type='max',
-            use_angle_cls=True,
-            show_log=False
+            det_limit_type='max'
         )
     
     async def process_document(self, file_path: str) -> Dict[str, Any]:
@@ -105,29 +103,40 @@ class OCRService:
         return result
     
     def _process_sync(self, file_path: str) -> Dict[str, Any]:
-        """同步执行OCR - 基于MVP代码逻辑"""
-        result = self.ocr_engine.predict(input=file_path)
+        """同步执行OCR - 使用 PaddleOCR 的 ocr() 方法"""
+        # PaddleOCR 使用 ocr() 方法，不是 predict()
+        result = self.ocr_engine.ocr(file_path, cls=True)
         
         lines = []
         total_score = 0
         valid_count = 0
         
-        for page_result in result:
-            texts = page_result.get("rec_texts", [])
-            scores = page_result.get("rec_scores", [])
-            
-            for text, score in zip(texts, scores):
-                text = text.strip()
-                # 过滤低置信度和水印 - 来自MVP逻辑
-                if (score >= self._threshold 
-                    and text 
-                    and not any(wm in text.lower() for wm in self._watermarks)):
-                    lines.append({
-                        "text": text,
-                        "confidence": float(score)
-                    })
-                    total_score += score
-                    valid_count += 1
+        # PaddleOCR ocr() 返回格式: [[box, (text, score)], ...] 每页一个列表
+        if result:
+            for page_result in result:
+                if page_result is None:
+                    continue
+                for line_info in page_result:
+                    if line_info is None or len(line_info) < 2:
+                        continue
+                    # line_info 格式: [box_coords, (text, confidence)]
+                    text_info = line_info[1]
+                    if isinstance(text_info, tuple) and len(text_info) >= 2:
+                        text = str(text_info[0]).strip()
+                        score = float(text_info[1])
+                    else:
+                        continue
+                    
+                    # 过滤低置信度和水印 - 来自MVP逻辑
+                    if (score >= self._threshold 
+                        and text 
+                        and not any(wm in text.lower() for wm in self._watermarks)):
+                        lines.append({
+                            "text": text,
+                            "confidence": float(score)
+                        })
+                        total_score += score
+                        valid_count += 1
         
         # 计算平均置信度
         avg_confidence = total_score / valid_count if valid_count > 0 else 0.0
@@ -157,19 +166,28 @@ class OCRService:
         if not self.ocr_engine:
             self.ocr_engine = self._init_ocr_sync()
         
-        result = self.ocr_engine.predict(input=file_path)
+        # PaddleOCR 使用 ocr() 方法
+        result = self.ocr_engine.ocr(file_path, cls=True)
         
         filtered_results = []
-        for page_result in result:
-            texts = page_result.get("rec_texts", [])
-            scores = page_result.get("rec_scores", [])
-            
-            for text, score in zip(texts, scores):
-                text = text.strip()
-                if (score >= self._threshold 
-                    and text 
-                    and not any(wm in text.lower() for wm in self._watermarks)):
-                    filtered_results.append(text)
+        if result:
+            for page_result in result:
+                if page_result is None:
+                    continue
+                for line_info in page_result:
+                    if line_info is None or len(line_info) < 2:
+                        continue
+                    text_info = line_info[1]
+                    if isinstance(text_info, tuple) and len(text_info) >= 2:
+                        text = str(text_info[0]).strip()
+                        score = float(text_info[1])
+                    else:
+                        continue
+                    
+                    if (score >= self._threshold 
+                        and text 
+                        and not any(wm in text.lower() for wm in self._watermarks)):
+                        filtered_results.append(text)
         
         return filtered_results
     
@@ -200,5 +218,6 @@ class OCRService:
 
 # 单例实例
 ocr_service = OCRService()
+
 
 
