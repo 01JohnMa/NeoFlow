@@ -18,9 +18,12 @@ from config.prompts import (
     DOC_CLASSIFY_PROMPT, 
     TEXTREPORT_PROMPT, 
     EXPRESS_PROMPT, 
-    SAMPLING_FORM_PROMPT
+    SAMPLING_FORM_PROMPT,
+    JIFENQIU_PROMPT,
+    GUANGFENBU_PROMPT
 )
 from services.ocr_service import ocr_service
+from services.template_service import template_service
 
 
 class WorkflowState(TypedDict):
@@ -312,6 +315,234 @@ class OCRWorkflow:
                 "document_id": document_id,
                 "error": str(e)
             }
+
+
+    # ============ 模板化提取方法 ============
+    
+    async def process_with_template(
+        self, 
+        document_id: str, 
+        file_path: str, 
+        template_id: str,
+        tenant_id: str
+    ) -> Dict[str, Any]:
+        """使用模板配置执行工作流
+        
+        Args:
+            document_id: 文档ID
+            file_path: 文件路径
+            template_id: 模板ID
+            tenant_id: 租户ID
+            
+        Returns:
+            处理结果字典
+        """
+        processing_start = datetime.now()
+        
+        try:
+            # 1. 获取模板配置
+            template = await template_service.get_template_with_details(template_id)
+            if not template:
+                return {
+                    "success": False,
+                    "document_id": document_id,
+                    "error": f"模板不存在: {template_id}"
+                }
+            
+            logger.info(f"使用模板 [{template['name']}] 处理文档")
+            
+            # 2. OCR 提取
+            logger.info(f"开始OCR处理: {file_path}")
+            ocr_result = await ocr_service.process_document(file_path)
+            ocr_text = ocr_result["text"]
+            ocr_confidence = ocr_result["confidence"]
+            logger.info(f"OCR完成，提取{ocr_result['total_lines']}行，置信度{ocr_confidence:.2f}")
+            
+            # 3. 使用模板动态构建 Prompt 并提取
+            prompt = template_service.build_extraction_prompt(template, ocr_text)
+            response = await self.llm.ainvoke(prompt)
+            
+            # 4. 解析结果
+            try:
+                extraction_data = json.loads(response.content)
+            except json.JSONDecodeError:
+                extraction_data = self._clean_json_response(response.content)
+            
+            processing_time = (datetime.now() - processing_start).total_seconds()
+            
+            logger.info(f"模板化提取完成: {len(extraction_data)}个字段，耗时{processing_time:.2f}s")
+            
+            return {
+                "success": True,
+                "document_id": document_id,
+                "template_id": template_id,
+                "template_name": template.get("name"),
+                "document_type": template.get("name"),  # 使用模板名称作为文档类型
+                "extraction_data": extraction_data,
+                "ocr_text": ocr_text[:500] + "..." if len(ocr_text) > 500 else ocr_text,
+                "ocr_confidence": ocr_confidence,
+                "processing_time": processing_time,
+                "step": "completed",
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"模板化处理失败: {e}")
+            return {
+                "success": False,
+                "document_id": document_id,
+                "error": str(e),
+                "processing_time": (datetime.now() - processing_start).total_seconds()
+            }
+    
+    async def process_merge(
+        self, 
+        document_id: str, 
+        files: list,  # [{file_path, doc_type}, ...]
+        template_id: str,
+        tenant_id: str
+    ) -> Dict[str, Any]:
+        """Merge 模式处理：多份文档分别提取后合并
+        
+        用于照明事业部等场景：上传积分球+光分布两份文档，
+        分别用各自的子模板提取，然后合并结果。
+        
+        Args:
+            document_id: 文档ID
+            files: 文件列表，每项包含 file_path 和 doc_type
+            template_id: 合并模板ID（process_mode='merge'）
+            tenant_id: 租户ID
+            
+        Returns:
+            合并后的处理结果
+        """
+        processing_start = datetime.now()
+        
+        try:
+            # 1. 获取合并模板配置
+            template = await template_service.get_merge_template_info(template_id)
+            if not template:
+                return {
+                    "success": False,
+                    "document_id": document_id,
+                    "error": f"模板不存在: {template_id}"
+                }
+            
+            if template.get("process_mode") != "merge":
+                return {
+                    "success": False,
+                    "document_id": document_id,
+                    "error": f"模板 {template['name']} 不是合并模式"
+                }
+            
+            logger.info(f"使用合并模板 [{template['name']}] 处理 {len(files)} 份文档")
+            
+            # 2. 获取合并规则和子模板
+            merge_rule = await template_service.get_merge_rule(template_id)
+            if not merge_rule:
+                return {
+                    "success": False,
+                    "document_id": document_id,
+                    "error": "合并规则配置缺失"
+                }
+            
+            sub_template_a = template.get("sub_template_a")
+            sub_template_b = template.get("sub_template_b")
+            
+            # 3. 分别处理每份文档
+            result_a = None
+            result_b = None
+            ocr_texts = []
+            
+            for file_info in files:
+                file_path = file_info.get("file_path")
+                doc_type = file_info.get("doc_type", "")
+                
+                if not file_path:
+                    continue
+                
+                # OCR 提取
+                logger.info(f"OCR处理文档: {file_path} (类型: {doc_type})")
+                ocr_result = await ocr_service.process_document(file_path)
+                ocr_text = ocr_result["text"]
+                ocr_texts.append(ocr_text)
+                
+                # 根据文档类型选择子模板
+                if doc_type == merge_rule.get("doc_type_a") and sub_template_a:
+                    prompt = template_service.build_extraction_prompt(sub_template_a, ocr_text)
+                    response = await self.llm.ainvoke(prompt)
+                    try:
+                        result_a = json.loads(response.content)
+                    except json.JSONDecodeError:
+                        result_a = self._clean_json_response(response.content)
+                    logger.info(f"文档A ({doc_type}) 提取完成: {len(result_a)}个字段")
+                    
+                elif doc_type == merge_rule.get("doc_type_b") and sub_template_b:
+                    prompt = template_service.build_extraction_prompt(sub_template_b, ocr_text)
+                    response = await self.llm.ainvoke(prompt)
+                    try:
+                        result_b = json.loads(response.content)
+                    except json.JSONDecodeError:
+                        result_b = self._clean_json_response(response.content)
+                    logger.info(f"文档B ({doc_type}) 提取完成: {len(result_b)}个字段")
+            
+            # 4. 合并结果
+            merged_data = template_service.merge_extraction_results(result_a, result_b)
+            
+            processing_time = (datetime.now() - processing_start).total_seconds()
+            
+            logger.info(f"合并提取完成: {len(merged_data)}个字段，耗时{processing_time:.2f}s")
+            
+            return {
+                "success": True,
+                "document_id": document_id,
+                "template_id": template_id,
+                "template_name": template.get("name"),
+                "document_type": template.get("name"),
+                "extraction_data": merged_data,
+                "sub_results": {
+                    "result_a": result_a,
+                    "result_b": result_b
+                },
+                "processing_time": processing_time,
+                "step": "completed",
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"合并处理失败: {e}")
+            return {
+                "success": False,
+                "document_id": document_id,
+                "error": str(e),
+                "processing_time": (datetime.now() - processing_start).total_seconds()
+            }
+    
+    async def extract_with_prompt(
+        self, 
+        ocr_text: str, 
+        prompt_template: str
+    ) -> Dict[str, Any]:
+        """使用指定 Prompt 模板提取字段（底层方法）
+        
+        Args:
+            ocr_text: OCR 文本
+            prompt_template: Prompt 模板（已包含字段定义和示例）
+            
+        Returns:
+            提取的字段字典
+        """
+        try:
+            response = await self.llm.ainvoke(prompt_template)
+            
+            try:
+                return json.loads(response.content)
+            except json.JSONDecodeError:
+                return self._clean_json_response(response.content)
+                
+        except Exception as e:
+            logger.error(f"字段提取失败: {e}")
+            return {"error": str(e)}
 
 
 # 单例工作流

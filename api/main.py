@@ -1,3 +1,4 @@
+
 # api/main.py
 """FastAPI 主应用"""
 
@@ -11,7 +12,8 @@ import os
 from config.settings import settings
 from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
-from api.routes import documents, health
+from api.routes import documents_router, health_router
+from api.routes.tenants import router as tenants_router
 
 
 # 配置日志
@@ -85,26 +87,54 @@ app.add_middleware(
 )
 
 # 注册路由
-app.include_router(health.router, prefix="/api", tags=["健康检查"])
-app.include_router(documents.router, prefix="/api/documents", tags=["文档处理"])
+app.include_router(health_router, prefix="/api", tags=["健康检查"])
+app.include_router(documents_router, prefix="/api/documents", tags=["文档处理"])
+app.include_router(tenants_router, prefix="/api", tags=["租户管理"])
 
 
 # 全局异常处理
+from api.exceptions import AppException
+
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request, exc: AppException):
+    """处理业务异常 - 返回统一格式"""
+    logger.warning(f"业务异常 [{exc.code}]: {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "code": exc.code,
+            "status_code": exc.status_code
+        }
+    )
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
+    """处理 HTTP 异常"""
     logger.error(f"HTTP异常: {exc.status_code} - {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail, "status_code": exc.status_code}
+        content={
+            "error": exc.detail,
+            "code": "HTTP_ERROR",
+            "status_code": exc.status_code
+        }
     )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
+    """处理未捕获异常"""
     logger.error(f"未处理异常: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"error": "内部服务器错误", "detail": str(exc)}
+        content={
+            "error": "内部服务器错误",
+            "code": "INTERNAL_ERROR",
+            "detail": str(exc)
+        }
     )
 
 
