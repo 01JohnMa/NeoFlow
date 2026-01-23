@@ -14,14 +14,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from loguru import logger
 
 from config.settings import settings
-from config.prompts import (
-    DOC_CLASSIFY_PROMPT, 
-    TEXTREPORT_PROMPT, 
-    EXPRESS_PROMPT, 
-    SAMPLING_FORM_PROMPT,
-    JIFENQIU_PROMPT,
-    GUANGFENBU_PROMPT
-)
+from config.prompts import DOC_CLASSIFY_PROMPT
 from services.ocr_service import ocr_service
 from services.template_service import template_service
 
@@ -38,6 +31,7 @@ class WorkflowState(TypedDict):
     step: str
     error: Optional[str]
     processing_start: Optional[datetime]
+    tenant_id: Optional[str]  # 租户ID，用于查询模板配置
 
 
 class OCRWorkflow:
@@ -54,7 +48,6 @@ class OCRWorkflow:
         self.workflow = self._build_workflow()
     
     def _build_workflow(self) -> StateGraph:
-        """构建工作流 - 对应MVP的create_ocr_assitant"""
         workflow = StateGraph(WorkflowState)
         
         # 添加节点 - 对应MVP的节点
@@ -132,26 +125,43 @@ class OCRWorkflow:
             return {"error": str(e), "step": "classify_failed"}
     
     async def _extract_node(self, state: WorkflowState) -> Dict[str, Any]:
-        """字段提取节点 - 对应MVP的extract_node"""
+        """字段提取节点 - 从数据库获取模板配置构建 prompt"""
         try:
             doc_type = state.get("document_type", "")
             ocr_text = state.get("ocr_text", "")
+            tenant_id = state.get("tenant_id")
             
-            logger.info(f"开始字段提取，文档类型: {doc_type}")
+            logger.info(f"开始字段提取，文档类型: {doc_type}, 租户: {tenant_id}")
             
-            # 根据文档类型选择Prompt - 与MVP逻辑一致
-            if doc_type == "测试单":
-                prompt = f"{TEXTREPORT_PROMPT}\n\nOCR文本：\n{ocr_text}"
-            elif doc_type == "快递单":
-                prompt = f"{EXPRESS_PROMPT}\n\nOCR文本：\n{ocr_text}"
-            elif doc_type == "抽样单":
-                prompt = f"{SAMPLING_FORM_PROMPT}\n\nOCR文本：\n{ocr_text}"
-            else:
+            # 检查必要参数
+            if not tenant_id:
+                logger.error(f"字段提取失败: 文档 {state.get('document_id')} 缺少租户ID，请确保用户已选择所属部门")
                 return {
-                    "extraction_data": {"error": f"不支持的文档类型: {doc_type}"},
+                    "extraction_data": {},
                     "step": "extract_failed",
-                    "messages": [AIMessage(content=f"不支持的文档类型: {doc_type}")]
+                    "error": "缺少租户ID，用户未选择所属部门",
+                    "messages": [AIMessage(content="缺少租户ID，无法获取模板配置")]
                 }
+            
+            if not doc_type:
+                return {
+                    "extraction_data": {"error": "缺少文档类型"},
+                    "step": "extract_failed",
+                    "messages": [AIMessage(content="缺少文档类型，无法获取模板配置")]
+                }
+            
+            # 从数据库获取模板配置
+            template = await template_service.get_template_by_code(tenant_id, doc_type)
+            if not template:
+                return {
+                    "extraction_data": {"error": f"未找到模板配置: {doc_type}"},
+                    "step": "extract_failed",
+                    "messages": [AIMessage(content=f"未找到文档类型 [{doc_type}] 的模板配置")]
+                }
+            
+            # 构建 prompt 并提取
+            prompt = template_service.build_extraction_prompt(template, ocr_text)
+            logger.info(f"使用数据库模板 [{template.get('name')}] 构建 prompt")
             
             response = await self.llm.ainvoke(prompt)
             
@@ -181,7 +191,7 @@ class OCRWorkflow:
         elif any(kw in text for kw in ["抽样编号", "抽样基数", "备样量", "被抽样单位"]):
             return "抽样单"
         elif any(kw in text for kw in ["检测项目", "检测结果", "检验依据", "检验结论"]):
-            return "测试单"
+            return "检测报告"
         else:
             return "未知"
     
@@ -201,12 +211,18 @@ class OCRWorkflow:
         except:
             return {"raw_response": content}
     
-    async def process(self, document_id: str, file_path: str) -> Dict[str, Any]:
-        """执行工作流 - 主入口
+    async def process(
+        self, 
+        document_id: str, 
+        file_path: str,
+        tenant_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """执行工作流 - 主入口（自动分类模式）
         
         Args:
             document_id: 文档ID
             file_path: 文件路径
+            tenant_id: 租户ID（可选，用于从数据库获取模板配置）
             
         Returns:
             处理结果字典
@@ -223,7 +239,8 @@ class OCRWorkflow:
             "extraction_data": {},
             "step": "start",
             "error": None,
-            "processing_start": processing_start
+            "processing_start": processing_start,
+            "tenant_id": tenant_id
         }
         
         config = {"configurable": {"thread_id": document_id}}
@@ -254,7 +271,12 @@ class OCRWorkflow:
                 "processing_time": (datetime.now() - processing_start).total_seconds()
             }
     
-    async def process_with_text(self, document_id: str, ocr_text: str) -> Dict[str, Any]:
+    async def process_with_text(
+        self, 
+        document_id: str, 
+        ocr_text: str,
+        tenant_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """使用已有OCR文本执行工作流（跳过OCR步骤）
         
         用于已经完成OCR的场景，直接进行分类和提取
@@ -262,6 +284,7 @@ class OCRWorkflow:
         Args:
             document_id: 文档ID
             ocr_text: OCR提取的文本
+            tenant_id: 租户ID（可选，用于从数据库获取模板配置）
             
         Returns:
             处理结果字典
@@ -279,7 +302,8 @@ class OCRWorkflow:
             "extraction_data": {},
             "step": "ocr_completed",
             "error": None,
-            "processing_start": processing_start
+            "processing_start": processing_start,
+            "tenant_id": tenant_id
         }
         
         # 构建一个简化的工作流（跳过OCR）
@@ -377,7 +401,7 @@ class OCRWorkflow:
                 "document_id": document_id,
                 "template_id": template_id,
                 "template_name": template.get("name"),
-                "document_type": template.get("name"),  # 使用模板名称作为文档类型
+                "document_type": template.get("code"),  # 使用模板 code 作为文档类型（解耦）
                 "extraction_data": extraction_data,
                 "ocr_text": ocr_text[:500] + "..." if len(ocr_text) > 500 else ocr_text,
                 "ocr_confidence": ocr_confidence,
@@ -498,7 +522,7 @@ class OCRWorkflow:
                 "document_id": document_id,
                 "template_id": template_id,
                 "template_name": template.get("name"),
-                "document_type": template.get("name"),
+                "document_type": template.get("code"),  # 使用模板 code 作为文档类型（解耦）
                 "extraction_data": merged_data,
                 "sub_results": {
                     "result_a": result_a,
@@ -516,6 +540,84 @@ class OCRWorkflow:
                 "document_id": document_id,
                 "error": str(e),
                 "processing_time": (datetime.now() - processing_start).total_seconds()
+            }
+    
+    async def process_auto(
+        self,
+        document_id: str,
+        files: list,  # [{file_path, doc_type?}, ...]
+        template_id: str,
+        tenant_id: str
+    ) -> Dict[str, Any]:
+        """统一处理入口，自动根据模板的 process_mode 选择处理方式
+        
+        这是推荐的处理入口，会根据模板配置自动选择：
+        - single 模式：调用 process_with_template()
+        - merge 模式：调用 process_merge()
+        
+        Args:
+            document_id: 文档ID
+            files: 文件列表，每项包含 file_path 和可选的 doc_type
+                   单文档模式: [{"file_path": "xxx"}]
+                   合并模式: [{"file_path": "xxx", "doc_type": "积分球"}, ...]
+            template_id: 模板ID
+            tenant_id: 租户ID
+            
+        Returns:
+            处理结果字典
+        """
+        try:
+            # 1. 获取模板信息
+            template = await template_service.get_template(template_id)
+            if not template:
+                return {
+                    "success": False,
+                    "document_id": document_id,
+                    "error": f"模板不存在: {template_id}"
+                }
+            
+            process_mode = template.get("process_mode", "single")
+            logger.info(f"统一处理入口: 模板={template.get('name')}, 模式={process_mode}, 文件数={len(files)}")
+            
+            # 2. 根据 process_mode 选择处理方式
+            if process_mode == "merge":
+                # 合并模式：多文档分别提取后合并
+                return await self.process_merge(
+                    document_id=document_id,
+                    files=files,
+                    template_id=template_id,
+                    tenant_id=tenant_id
+                )
+            else:
+                # 单文档模式
+                if not files:
+                    return {
+                        "success": False,
+                        "document_id": document_id,
+                        "error": "文件列表为空"
+                    }
+                
+                file_path = files[0].get("file_path")
+                if not file_path:
+                    return {
+                        "success": False,
+                        "document_id": document_id,
+                        "error": "文件路径为空"
+                    }
+                
+                return await self.process_with_template(
+                    document_id=document_id,
+                    file_path=file_path,
+                    template_id=template_id,
+                    tenant_id=tenant_id
+                )
+                
+        except Exception as e:
+            logger.error(f"统一处理入口失败: {e}")
+            return {
+                "success": False,
+                "document_id": document_id,
+                "error": str(e)
             }
     
     async def extract_with_prompt(

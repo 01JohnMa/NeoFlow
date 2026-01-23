@@ -8,10 +8,10 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Scan,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/useAuth'
+import Logo from '@/assets/neoflow-logo.png'
 
 const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
@@ -55,12 +55,10 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center justify-between px-4 border-b border-border-default">
         <Link to="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg shadow-primary-500/25">
-            <Scan className="h-5 w-5 text-white" />
-          </div>
+          <img src={Logo} alt="NeoFlow Logo" className="h-10 w-10 rounded-xl shadow-lg shadow-primary-500/25" />
           {sidebarOpen && (
             <span className="font-semibold text-text-primary gradient-text">
-              OCR智能系统
+              NeoFlow
             </span>
           )}
         </Link>

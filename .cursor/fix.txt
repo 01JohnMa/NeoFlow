@@ -1,0 +1,44 @@
+== OCR Agentic System 修复记录 ===
+
+## 2026-01-19 | 多租户 & 字段提取问题修复
+
+### 问题描述
+- 快递单字段提取为空（"未识别"状态）
+- 后端日志：`过滤掉 AI 返回的额外字段: {'error'}`
+- 用户租户 ID (tenant_id) 为 None
+
+### 根本原因
+1. database trigger `handle_new_user()` 未从 raw_user_meta_data 提取 tenant_id
+2. process_document_task 未传递 tenant_id 给 ocr_workflow.process()
+3. 文档分类结果 ("测试单") 与模板 code ("inspection_report") 不匹配
+
+### 修复措施
+- supabase/migrations/011_fix_profile_tenant_id.sql: trigger 更新和用户数据回填
+- api/routes/documents/process.py: 添加 tenant_id 参数传递
+- services/template_service.py: 添加中文别名映射和 fallback 逻辑
+- api/routes/documents/upload.py: 检查 tenant_id 有效性
+- agents/workflow.py: 优化错误日志
+
+---
+
+## 2026-01-20 | 统一分类结果为"检测报告"
+
+### 修改目标
+将"测试单"和"检验报告"统一改为"检测报告"，移除历史别名
+
+### 修改清单 (10处)
+
+后端 (6处):
+1. config/prompts.py - 分类 Prompt
+2. agents/workflow.py - _fallback_classify()
+3. services/supabase_service.py - TABLE_MAP & generate_display_name
+4. services/template_service.py - DOC_TYPE_TO_CODE
+5. api/routes/documents/review.py - 类型判断
+6. api/routes/documents/query.py - 兜底查询
+
+前端 (3处):
+7. web/src/pages/Upload.tsx - 提示文字
+8. web/src/pages/DocumentDetail.tsx - 类型判断
+9. web/src/pages/Documents.tsx - 下拉选项
+
+数据库 (1处):

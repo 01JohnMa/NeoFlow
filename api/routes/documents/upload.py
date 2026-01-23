@@ -20,6 +20,7 @@ router = APIRouter()
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
+    template_id: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
     user: CurrentUser = Depends(get_current_user)
 ):
@@ -27,10 +28,15 @@ async def upload_document(
     上传文档（需要登录）
     
     - **file**: 上传的文件（PDF或图像）
+    - **template_id**: 文档模板ID（可选，指定后使用对应模板提取字段）
     - **metadata**: 额外的元数据（JSON字符串，可选）
     - 用户ID从JWT token中自动提取
     """
     try:
+        # 检查用户是否已关联租户（必需，否则无法获取模板配置）
+        if not user.tenant_id:
+            raise ProcessingError("请先在个人设置中选择所属部门后再上传文档")
+        
         # 验证文件类型
         if not validate_file_extension(file.filename):
             raise FileTypeError(settings.ALLOWED_EXTENSIONS)
@@ -60,7 +66,9 @@ async def upload_document(
             "file_type": file.content_type,
             "file_extension": file_ext,
             "mime_type": file.content_type,
-            "status": "uploaded"
+            "status": "uploaded",
+            "template_id": template_id,
+            "tenant_id": user.tenant_id
         }
         
         try:

@@ -73,7 +73,7 @@ function getTemplateDescription(code: string) {
 
 export function Dashboard() {
   const { data: documents, isLoading } = useDocumentList({ limit: 5 })
-  const { profile, templates, tenantName, tenantCode, displayName, isLoading: profileLoading } = useProfile()
+  const { templates, tenantName, displayName, isLoading: profileLoading } = useProfile()
 
   // Calculate stats
   const stats = {
@@ -120,7 +120,7 @@ export function Dashboard() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-text-primary">
-            {displayName ? `${displayName}，` : ''}欢迎使用 OCR 智能系统
+            {displayName ? `${displayName}，` : ''}欢迎使用 NeoFlow
           </h2>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-text-secondary">

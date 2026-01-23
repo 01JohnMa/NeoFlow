@@ -1,7 +1,7 @@
 import { Outlet, Navigate } from 'react-router-dom'
-import { Scan } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { PageLoader } from '@/components/ui/spinner'
+import Logo from '@/assets/neoflow-logo.png'
 
 export function AuthLayout() {
   const { session, isLoading } = useAuth()
@@ -25,19 +25,17 @@ export function AuthLayout() {
 
         <div className="relative z-10 text-center">
           <div className="flex items-center justify-center mb-8">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-2xl shadow-primary-500/30 animate-pulse-glow">
-              <Scan className="h-10 w-10 text-white" />
-            </div>
+            <img src={Logo} alt="NeoFlow Logo" className="h-20 w-20 rounded-2xl shadow-2xl shadow-primary-500/30 animate-pulse-glow" />
           </div>
-          <h1 className="text-4xl font-bold gradient-text mb-4">OCR智能文档处理</h1>
+          <h1 className="text-4xl font-bold gradient-text mb-4">NeoFlow 智能文档处理平台</h1>
           <p className="text-lg text-text-secondary max-w-md">
-            基于LangGraph的智能文档识别系统，支持检验报告、快递单、抽样单等多种文档的自动识别与结构化提取
+            基于 LangGraph 的智能文档识别平台
           </p>
 
           {/* Features */}
           <div className="mt-12 grid grid-cols-2 gap-6 text-left">
             {[
-              { title: '智能识别', desc: 'AI驱动的OCR技术' },
+              { title: '智能识别', desc: 'AI 驱动的 OCR 技术' },
               { title: '多类型支持', desc: '检验/快递/抽样单' },
               { title: '人工审核', desc: '结果可编辑修改' },
               { title: '移动端适配', desc: '支持拍照上传' },
@@ -60,9 +58,7 @@ export function AuthLayout() {
         <div className="w-full max-w-md">
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center mb-8">
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg">
-              <Scan className="h-8 w-8 text-white" />
-            </div>
+            <img src={Logo} alt="NeoFlow Logo" className="h-16 w-16 rounded-xl shadow-lg" />
           </div>
           <Outlet />
         </div>

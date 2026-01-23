@@ -14,7 +14,7 @@ from services.supabase_service import supabase_service
 from services.template_service import template_service
 from services.feishu_service import feishu_service
 from agents.workflow import ocr_workflow
-from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError
+from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
 from api.dependencies.auth import get_current_user, CurrentUser
 
 
@@ -44,15 +44,23 @@ router = APIRouter()
 async def process_document(
     document_id: str,
     background_tasks: BackgroundTasks,
-    sync: bool = False
+    sync: bool = False,
+    user: CurrentUser = Depends(get_current_user)
 ):
     """
-    处理文档
+    处理文档（需要登录）
     
     - **document_id**: 文档ID
     - **sync**: 是否同步处理（默认异步后台处理）
+    
+    如果文档关联了 template_id，将使用模板化处理流程；
+    否则使用原有的自动分类处理流程（质量运营）。
     """
     try:
+        # 检查用户是否已关联租户
+        if not user.tenant_id:
+            raise ProcessingError("请先在个人设置中选择所属部门后再处理文档")
+        
         # 获取文档信息
         document = await supabase_service.get_document(document_id)
         
@@ -69,9 +77,28 @@ async def process_document(
             if not os.path.exists(file_path):
                 raise FileNotFoundError(file_path)
         
+        # 检查文档是否关联了模板
+        template_id = document.get("template_id") if document else None
+        # 优先使用当前用户的 tenant_id（支持重新处理时使用更新后的租户）
+        tenant_id = user.tenant_id or document.get("tenant_id")
+        
+        # 如果文档的 tenant_id 为空，更新为当前用户的 tenant_id
+        if document and not document.get("tenant_id") and user.tenant_id:
+            await supabase_service.update_document(document_id, {"tenant_id": user.tenant_id})
+        
         if sync:
             # 同步处理
-            result = await ocr_workflow.process(document_id, file_path)
+            if template_id:
+                # 使用模板化处理
+                result = await ocr_workflow.process_with_template(
+                    document_id=document_id,
+                    file_path=file_path,
+                    template_id=template_id,
+                    tenant_id=tenant_id
+                )
+            else:
+                # 原有流程（质量运营分类）
+                result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
             
             # 保存结果到数据库
             if result["success"] and result.get("extraction_data"):
@@ -89,6 +116,8 @@ async def process_document(
                     await supabase_service.update_document(document_id, {
                         "status": "pending_review",
                         "display_name": display_name,
+                        "template_id": template_id,
+                        "tenant_id": tenant_id,
                         "error_message": None
                     })
                 except Exception as e:
@@ -100,7 +129,9 @@ async def process_document(
             background_tasks.add_task(
                 process_document_task,
                 document_id=document_id,
-                file_path=file_path
+                file_path=file_path,
+                template_id=template_id,
+                tenant_id=tenant_id
             )
             
             # 更新状态
@@ -113,7 +144,8 @@ async def process_document(
                 "document_id": document_id,
                 "status": "processing",
                 "message": "文档处理已开始（后台任务）",
-                "estimated_time": "30-60秒"
+                "estimated_time": "30-60秒",
+                "use_template": template_id is not None
             }
         
     except (DocumentNotFoundError, FileNotFoundError):
@@ -123,12 +155,35 @@ async def process_document(
         raise ProcessingError(f"处理失败: {str(e)}")
 
 
-async def process_document_task(document_id: str, file_path: str):
-    """后台处理任务"""
+async def process_document_task(
+    document_id: str, 
+    file_path: str,
+    template_id: Optional[str] = None,
+    tenant_id: Optional[str] = None
+):
+    """后台处理任务
+    
+    Args:
+        document_id: 文档ID
+        file_path: 文件路径
+        template_id: 模板ID（可选，有则使用模板化处理）
+        tenant_id: 租户ID（可选）
+    """
     try:
-        logger.info(f"开始后台处理: {document_id}")
+        logger.info(f"开始后台处理: {document_id}, 模板: {template_id or '无(自动分类)'}")
         
-        result = await ocr_workflow.process(document_id, file_path)
+        # 根据是否有模板选择处理方式
+        if template_id:
+            # 使用模板化处理
+            result = await ocr_workflow.process_with_template(
+                document_id=document_id,
+                file_path=file_path,
+                template_id=template_id,
+                tenant_id=tenant_id
+            )
+        else:
+            # 原有流程（质量运营分类）
+            result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
         
         if result["success"] and result.get("extraction_data"):
             # 第一步：保存提取结果到对应的表
@@ -150,6 +205,8 @@ async def process_document_task(document_id: str, file_path: str):
                 "status": "pending_review",
                 "document_type": result["document_type"],
                 "display_name": display_name,
+                "template_id": template_id,
+                "tenant_id": tenant_id,
                 "ocr_text": result.get("ocr_text", ""),
                 "ocr_confidence": result.get("ocr_confidence"),
                 "processed_at": datetime.now().isoformat(),
@@ -350,6 +407,7 @@ async def process_merge_documents(
     - **template_id**: 合并模板ID（process_mode='merge'）
     - **files**: 文件列表，每项包含 file_path 和 doc_type
     """
+    document_id = None
     try:
         if not user.tenant_id:
             raise HTTPException(status_code=400, detail="请先选择所属部门")
@@ -357,8 +415,12 @@ async def process_merge_documents(
         if not request.files:
             raise HTTPException(status_code=400, detail="请提供至少一个文件")
         
-        # 获取模板
-        template = await template_service.get_template(request.template_id)
+        # 获取模板（支持 UUID 或 code）
+        # 先尝试按 code 查询（前端可能传 'lighting_combined' 等模板代码）
+        template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
+        if not template:
+            # 如果按 code 没找到，尝试按 UUID 查询（向后兼容）
+            template = await template_service.get_template(request.template_id)
         if not template:
             raise HTTPException(status_code=404, detail="模板不存在")
         
@@ -368,8 +430,9 @@ async def process_merge_documents(
         if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
             raise HTTPException(status_code=403, detail="无权使用此模板")
         
-        # 验证文件存在
+        # 验证文件存在并收集原始文档ID
         files = []
+        source_doc_ids = []
         for file_info in request.files:
             if not os.path.exists(file_info.file_path):
                 raise FileNotFoundError(file_info.file_path)
@@ -377,17 +440,91 @@ async def process_merge_documents(
                 "file_path": file_info.file_path,
                 "doc_type": file_info.doc_type
             })
+            # 根据文件路径查找原始文档ID
+            source_doc = await supabase_service.get_document_by_file_path(file_info.file_path)
+            if source_doc:
+                source_doc_ids.append(source_doc["id"])
         
-        # 生成文档 ID
+        # 生成合并文档 ID
         document_id = str(uuid.uuid4())
+        
+        # 获取模板的真实 UUID（前端可能传的是 code）
+        template_uuid = template.get("id")
+        
+        # 先创建合并文档记录，避免前端无法查询状态
+        base_display_name = f"合并文档_{template.get('name')}"
+        merged_doc_data = {
+            "id": document_id,
+            "user_id": user.user_id,
+            "tenant_id": user.tenant_id,
+            "template_id": template_uuid,  # 使用真实的模板 UUID
+            "document_type": template.get("name", "照明综合报告"),
+            "status": "processing",
+            "display_name": base_display_name,
+            "original_file_name": base_display_name,
+            "file_name": f"merged_{document_id}",
+            "file_path": "",  # 合并文档无实体文件
+            "source_document_ids": source_doc_ids,
+        }
+        await supabase_service.create_document(merged_doc_data)
         
         # 执行合并处理
         result = await ocr_workflow.process_merge(
             document_id=document_id,
             files=files,
-            template_id=request.template_id,
+            template_id=template_uuid,  # 使用真实的模板 UUID
             tenant_id=user.tenant_id
         )
+        
+        # 检查处理结果 - 失败时抛出业务异常而非返回带无效 ID 的响应
+        if not result.get("success"):
+            error_msg = result.get("error", "合并处理失败")
+            logger.error(f"合并处理失败: {error_msg}")
+            raise AppException(
+                code="MERGE_FAILED",
+                detail=error_msg,
+                status_code=500
+            )
+        
+        # 处理成功后，更新文档记录并保存结果
+        extraction_data = result.get("extraction_data") or {}
+        if not extraction_data:
+            await supabase_service.update_document_status(
+                document_id,
+                "failed",
+                error_message="未提取到有效字段，请检查模板与文档类型"
+            )
+            raise AppException(
+                code="MERGE_EMPTY_RESULT",
+                detail="未提取到有效字段，请检查模板与文档类型",
+                status_code=500
+            )
+        
+        # 1. 生成规范化显示名称
+        display_name = supabase_service.generate_display_name(
+            document_type=result.get("template_name", "照明综合报告"),
+            extraction_data=extraction_data
+        )
+        
+        # 2. 更新合并文档记录
+        await supabase_service.update_document(document_id, {
+            "document_type": result.get("template_name", "照明综合报告"),
+            "status": "pending_review",
+            "display_name": display_name,
+            "ocr_text": result.get("ocr_text", ""),
+            "ocr_confidence": result.get("ocr_confidence"),
+            "processed_at": datetime.now().isoformat(),
+            "error_message": None
+        })
+        logger.info(f"合并文档记录已更新: {document_id}, 关联原文档: {source_doc_ids}")
+        
+        # 3. 保存提取结果到 lighting_reports 表
+        await supabase_service.save_extraction_result(
+            document_id=document_id,
+            document_type=result.get("template_name", "照明综合报告"),
+            extraction_data=extraction_data
+        )
+        logger.info(f"照明提取结果已保存: {document_id}")
         
         return result
         
@@ -395,6 +532,13 @@ async def process_merge_documents(
         raise
     except Exception as e:
         logger.error(f"合并处理失败: {e}")
+        try:
+            if document_id:
+                await supabase_service.update_document_status(
+                    document_id, "failed", str(e)
+                )
+        except Exception:
+            pass
         raise ProcessingError(f"处理失败: {str(e)}")
 
 

@@ -22,6 +22,16 @@ export interface Template {
   required_doc_count: number
 }
 
+// 合并规则类型
+export interface MergeRule {
+  id: string
+  template_id: string
+  doc_type_a: string
+  doc_type_b: string
+  sub_template_a_id: string
+  sub_template_b_id: string
+}
+
 interface AuthState {
   user: User | null
   session: Session | null
@@ -36,9 +46,11 @@ interface AuthState {
 interface ProfileState {
   profile: UserProfile | null
   templates: Template[]
+  mergeRules: MergeRule[]
   isLoading: boolean
   setProfile: (profile: UserProfile | null) => void
   setTemplates: (templates: Template[]) => void
+  setMergeRules: (rules: MergeRule[]) => void
   setLoading: (loading: boolean) => void
   reset: () => void
 }
@@ -76,11 +88,13 @@ export const useAuthStore = create<AuthState>()((set) => ({
 export const useProfileStore = create<ProfileState>()((set) => ({
   profile: null,
   templates: [],
+  mergeRules: [],
   isLoading: false,
   setProfile: (profile) => set({ profile }),
   setTemplates: (templates) => set({ templates }),
+  setMergeRules: (mergeRules) => set({ mergeRules }),
   setLoading: (isLoading) => set({ isLoading }),
-  reset: () => set({ profile: null, templates: [], isLoading: false }),
+  reset: () => set({ profile: null, templates: [], mergeRules: [], isLoading: false }),
 }))
 
 // 检测是否为移动端

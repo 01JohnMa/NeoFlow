@@ -29,7 +29,7 @@ async def validate_document(
     审核通过并更新字段（需要登录）
     
     - **document_id**: 文档ID
-    - **document_type**: 文档类型（测试单/快递单/抽样单）
+    - **document_type**: 文档类型（检测报告/快递单/抽样单）
     - **data**: 修改后的字段数据
     - **validation_notes**: 审核备注（可选）
     """
@@ -69,13 +69,32 @@ async def validate_document(
         
         logger.info(f"文档审核通过: {document_id}, 用户: {user.user_id}")
         
-        # 审核保存后推送到飞书多维表格（仅测试单/检验报告类型）
-        if request.document_type in ("测试单", "inspection_report"):
+        file_name_for_push = (
+            (document.get("display_name") or "").strip()
+            or (document.get("original_file_name") or "").strip()
+            or (document.get("file_name") or "").strip()
+        )
+
+        # 审核保存后推送到飞书多维表格
+        if request.document_type in ("检测报告", "inspection_report"):
             try:
-                await feishu_service.push_inspection_report(result.data[0])
-                logger.info(f"飞书推送成功: {document_id}")
+                await feishu_service.push_inspection_report(
+                    result.data[0],
+                    attachment_path=document.get("file_path"),
+                    file_name=file_name_for_push
+                )
+                logger.info(f"检测报告飞书推送成功: {document_id}")
             except Exception as feishu_error:
-                logger.warning(f"飞书推送失败（不影响审核结果）: {feishu_error}")
+                logger.warning(f"检测报告飞书推送失败（不影响审核结果）: {feishu_error}")
+        elif request.document_type in ("照明综合报告", "lighting_combined", "lighting_report"):
+            try:
+                await feishu_service.push_lighting_report(
+                    result.data[0],
+                    file_name=file_name_for_push
+                )
+                logger.info(f"照明报告飞书推送成功: {document_id}")
+            except Exception as feishu_error:
+                logger.warning(f"照明报告飞书推送失败（不影响审核结果）: {feishu_error}")
         
         return {
             "success": True,

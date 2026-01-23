@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { documentsService } from '@/services/documents'
-import { useUploadStore, useAuthStore } from '@/store/useStore'
+import { useUploadStore } from '@/store/useStore'
 import type { DocumentStatus } from '@/types'
 
 // Query keys
@@ -57,20 +57,18 @@ export function useExtractionResult(documentId: string, enabled: boolean = true)
 // Upload mutation
 export function useUploadDocument() {
   const queryClient = useQueryClient()
-  const { user } = useAuthStore()
   const { setUploadProgress, removeUploadProgress } = useUploadStore()
 
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, templateId }: { file: File; templateId?: string }) => {
       const tempId = `upload-${Date.now()}`
       setUploadProgress(tempId, 0)
 
       try {
-        const result = await documentsService.upload(
-          file,
-          user?.id,
-          (progress) => setUploadProgress(tempId, progress)
-        )
+        const result = await documentsService.upload(file, {
+          templateId,
+          onProgress: (progress) => setUploadProgress(tempId, progress)
+        })
         removeUploadProgress(tempId)
         return result
       } catch (error) {
@@ -206,6 +204,75 @@ export function useRenameDocument() {
     },
     onSuccess: (_, { documentId }) => {
       queryClient.invalidateQueries({ queryKey: documentKeys.status(documentId) })
+      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
+    },
+  })
+}
+
+// Upload multiple files for merge mode
+export function useUploadMultiple() {
+  const queryClient = useQueryClient()
+  const { setUploadProgress, removeUploadProgress } = useUploadStore()
+
+  return useMutation({
+    mutationFn: async ({
+      files,
+      templateId,
+    }: {
+      files: Array<{ file: File; docType: string }>
+      templateId?: string
+    }) => {
+      const tempId = `upload-merge-${Date.now()}`
+      setUploadProgress(tempId, 0)
+
+      try {
+        const result = await documentsService.uploadMultiple(files, {
+          templateId,
+          onProgress: (fileIndex, progress) => {
+            // 计算总进度
+            const totalProgress = Math.round(((fileIndex + progress / 100) / files.length) * 100)
+            setUploadProgress(tempId, totalProgress)
+          },
+        })
+        removeUploadProgress(tempId)
+        return result
+      } catch (error) {
+        removeUploadProgress(tempId)
+        throw error
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
+    },
+  })
+}
+
+// Process merge mutation (合并模式处理)
+export function useProcessMerge() {
+  const queryClient = useQueryClient()
+  const { addProcessingDocument, removeProcessingDocument } = useUploadStore()
+
+  return useMutation({
+    mutationFn: async ({
+      templateId,
+      files,
+    }: {
+      templateId: string
+      files: Array<{ file_path: string; doc_type: string }>
+    }) => {
+      const tempId = `merge-${Date.now()}`
+      addProcessingDocument(tempId)
+
+      try {
+        const result = await documentsService.processMerge(templateId, files)
+        removeProcessingDocument(tempId)
+        return result
+      } catch (error) {
+        removeProcessingDocument(tempId)
+        throw error
+      }
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
     },
   })

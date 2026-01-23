@@ -359,10 +359,25 @@ CREATE POLICY "Super admin can view all documents" ON documents
 -- PART 7: 创建自动创建 profile 的触发器
 -- ############################################################
 
--- 当新用户注册时，自动创建 profile 记录
+-- 当新用户注册时，自动创建 profile 记录（包含 tenant_id）
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+    v_tenant_id UUID;
 BEGIN
+    -- 从 raw_user_meta_data 中获取 tenant_id（注册时传入）
+    v_tenant_id := (NEW.raw_user_meta_data->>'tenant_id')::UUID;
+    
+    INSERT INTO public.profiles (id, tenant_id, role, display_name)
+    VALUES (
+        NEW.id,
+        v_tenant_id,
+        'user',
+        COALESCE(NEW.raw_user_meta_data->>'display_name', NEW.email)
+    );
+    RETURN NEW;
+EXCEPTION WHEN invalid_text_representation THEN
+    -- 如果 tenant_id 格式无效，忽略它
     INSERT INTO public.profiles (id, role, display_name)
     VALUES (
         NEW.id,

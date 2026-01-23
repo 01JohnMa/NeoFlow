@@ -1,6 +1,6 @@
-# OCR 文档智能处理系统 - Web 前端
+# NeoFlow - Web 前端
 
-基于 React + Vite + TailwindCSS 的 OCR 文档智能处理系统前端应用。
+基于 React + Vite + TailwindCSS 的 NeoFlow 前端应用。
 
 ## 技术栈
 

@@ -1,10 +1,10 @@
 import { useEffect, useCallback } from 'react'
-import { useProfileStore, UserProfile, Template } from '@/store/useStore'
+import { useProfileStore, UserProfile, Template, MergeRule } from '@/store/useStore'
 import { useAuthStore } from '@/store/useStore'
 import { api } from '@/services/api'
 
 export function useProfile() {
-  const { profile, templates, isLoading, setProfile, setTemplates, setLoading, reset } = useProfileStore()
+  const { profile, templates, mergeRules, isLoading, setProfile, setTemplates, setMergeRules, setLoading, reset } = useProfileStore()
   const { session } = useAuthStore()
 
   // 获取用户 profile
@@ -42,15 +42,32 @@ export function useProfile() {
     }
   }, [session, setTemplates])
 
+  // 获取合并规则（用于 merge 模式）
+  const fetchMergeRules = useCallback(async () => {
+    if (!session) {
+      setMergeRules([])
+      return
+    }
+
+    try {
+      const { data } = await api.get<MergeRule[]>('/tenants/me/merge-rules')
+      setMergeRules(data || [])
+    } catch (error) {
+      console.error('获取合并规则失败:', error)
+      setMergeRules([])
+    }
+  }, [session, setMergeRules])
+
   // 初始化
   useEffect(() => {
     if (session) {
       fetchProfile()
       fetchTemplates()
+      fetchMergeRules()
     } else {
       reset()
     }
-  }, [session, fetchProfile, fetchTemplates, reset])
+  }, [session, fetchProfile, fetchTemplates, fetchMergeRules, reset])
 
   // 更新 profile
   const updateProfile = useCallback(async (data: { tenant_id?: string; display_name?: string }) => {
@@ -71,9 +88,11 @@ export function useProfile() {
   return {
     profile,
     templates,
+    mergeRules,
     isLoading,
     fetchProfile,
     fetchTemplates,
+    fetchMergeRules,
     updateProfile,
     // 便捷方法
     isSuperAdmin: profile?.role === 'super_admin',

@@ -17,13 +17,24 @@ class SupabaseService:
     _client: Optional[Client] = None
     
     # ============ 表格映射（统一定义） ============
+    # 支持模板 code、中文名和历史别名，降低耦合性
     TABLE_MAP = {
-        "测试单": "inspection_reports",
-        "inspection_report": "inspection_reports",
-        "快递单": "expresses",
-        "express": "expresses",
-        "抽样单": "sampling_forms",
-        "sampling_form": "sampling_forms"
+        # 质量运营 - 检测报告
+        "inspection_report": "inspection_reports",  # 模板 code
+        "检测报告": "inspection_reports",           # 统一显示名
+        
+        # 质量运营 - 快递单
+        "express": "expresses",                     # 模板 code
+        "快递单": "expresses",                      # 中文名
+        
+        # 质量运营 - 抽样单（注意：模板 code 是 sampling，不是 sampling_form）
+        "sampling": "sampling_forms",               # 模板 code
+        "sampling_form": "sampling_forms",          # 历史别名
+        "抽样单": "sampling_forms",                 # 中文名
+        
+        # 照明事业部
+        "lighting_combined": "lighting_reports",    # 模板 code
+        "照明综合报告": "lighting_reports",         # 中文名
     }
     
     # 各表的日期字段定义
@@ -54,6 +65,16 @@ class SupabaseService:
             "specification_model", "production_date_batch", "sample_storage_location",
             "sampling_channel", "sampling_unit", "sampling_date",
             "sampled_province", "sampled_city"
+        ],
+        # 照明综合报告（20个字段）
+        "lighting_reports": [
+            # 来自积分球（14个）
+            "sample_model", "chromaticity_x", "chromaticity_y", "duv", "cct",
+            "ra", "r9", "cqs", "sdcm", "power_sphere", "luminous_flux_sphere",
+            "luminous_efficacy_sphere", "rf", "rg",
+            # 来自光分布（6个）
+            "lamp_specification", "power", "luminous_flux", "luminous_efficacy",
+            "peak_intensity", "beam_angle"
         ]
     }
     
@@ -380,6 +401,44 @@ class SupabaseService:
             logger.error(f"获取抽样单失败: {e}")
             return None
     
+    # ============ 照明报告操作 ============
+    
+    async def save_lighting_report(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """保存照明综合报告"""
+        try:
+            # 先过滤掉 AI 返回的额外字段
+            filtered_data = self._filter_allowed_fields(data, "lighting_reports")
+            # 保存原始提取数据（含额外字段，用于调试）
+            filtered_data["raw_extraction_data"] = data.copy()
+            filtered_data["document_id"] = document_id
+            # 清理数据，处理空日期字段（照明报告一般没有日期字段，但保持一致性）
+            cleaned_data = self._clean_data_for_db(filtered_data, "lighting_reports")
+            result = self.client.table("lighting_reports").upsert(cleaned_data, on_conflict="document_id").execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"保存照明报告失败: {e}")
+            raise
+    
+    async def get_lighting_report(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """获取照明综合报告"""
+        try:
+            result = self.client.table("lighting_reports").select("*").eq("document_id", document_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"获取照明报告失败: {e}")
+            return None
+    
+    # ============ 文档查询辅助方法 ============
+    
+    async def get_document_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """根据文件路径获取文档"""
+        try:
+            result = self.client.table("documents").select("*").eq("file_path", file_path).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"根据路径获取文档失败: {e}")
+            return None
+    
     # ============ 通用保存方法 ============
     
     async def save_extraction_result(
@@ -388,16 +447,27 @@ class SupabaseService:
         document_type: str, 
         extraction_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """根据文档类型保存提取结果"""
-        if document_type == "测试单":
-            return await self.save_inspection_report(document_id, extraction_data)
-        elif document_type == "快递单":
-            return await self.save_express(document_id, extraction_data)
-        elif document_type == "抽样单":
-            return await self.save_sampling_form(document_id, extraction_data)
-        else:
+        """根据文档类型保存提取结果（使用 TABLE_MAP 解耦）"""
+        # 通过 TABLE_MAP 查找对应的表名
+        table_name = self.TABLE_MAP.get(document_type)
+        if not table_name:
             logger.warning(f"未知文档类型: {document_type}")
             return None
+        
+        # 根据表名调用对应的保存方法
+        save_methods = {
+            "inspection_reports": self.save_inspection_report,
+            "expresses": self.save_express,
+            "sampling_forms": self.save_sampling_form,
+            "lighting_reports": self.save_lighting_report,
+        }
+        
+        save_method = save_methods.get(table_name)
+        if save_method:
+            return await save_method(document_id, extraction_data)
+        
+        logger.warning(f"未找到表 {table_name} 的保存方法")
+        return None
     
     async def get_extraction_result(
         self, 
@@ -483,7 +553,7 @@ class SupabaseService:
         根据文档类型和提取结果生成规范的显示名称
         
         命名规则：
-        - 检验报告(测试单): 报告_{样品名称}_{抽样日期}
+        - 检验报告(测试单): 报告_{样品名称}_{规格型号}_{抽样日期}
         - 快递单: 快递_{快递单号}_{收件人}
         - 抽样单: 抽样_{产品名称}_{省份城市}
         - 未知类型: 文档_{当前时间}
@@ -512,14 +582,19 @@ class SupabaseService:
             return name[:max_len] if len(name) > max_len else name
         
         try:
-            if document_type in ["测试单", "inspection_report"]:
-                # 检验报告: 报告_{样品名称}_{抽样日期}
+            # 检测报告
+            if document_type in ["inspection_report", "检测报告"]:
+                # 检测报告: 报告_{样品名称}_{规格型号}_{抽样日期}
                 sample_name = clean_name(extraction_data.get("sample_name"))
+                specification_model = clean_name(extraction_data.get("specification_model"))
                 sampling_date = extraction_data.get("sampling_date", "")
                 if sample_name:
+                    name_parts = ["报告", sample_name]
+                    if specification_model:
+                        name_parts.append(specification_model)
                     if sampling_date:
-                        return f"报告_{sample_name}_{sampling_date}"
-                    return f"报告_{sample_name}"
+                        name_parts.append(sampling_date)
+                    return "_".join(name_parts)
                     
             elif document_type in ["快递单", "express"]:
                 # 快递单: 快递_{快递单号}_{收件人}
@@ -532,7 +607,8 @@ class SupabaseService:
                 elif recipient:
                     return f"快递_{recipient}"
                     
-            elif document_type in ["抽样单", "sampling_form"]:
+            # 抽样单（支持所有别名，注意模板 code 是 sampling）
+            elif document_type in ["抽样单", "sampling_form", "sampling"]:
                 # 抽样单: 抽样_{产品名称}_{省份城市}
                 product = clean_name(extraction_data.get("product_name"))
                 province = extraction_data.get("sampled_province", "")
@@ -543,15 +619,27 @@ class SupabaseService:
                         return f"抽样_{product}_{location}"
                     return f"抽样_{product}"
             
+            elif document_type in ["照明综合报告", "lighting_combined"]:
+                # 照明综合报告: 照明_{样品型号}_{色温}
+                sample_model = clean_name(extraction_data.get("sample_model"))
+                cct = clean_name(extraction_data.get("cct"), max_len=10)
+                if sample_model:
+                    if cct:
+                        return f"照明_{sample_model}_{cct}"
+                    return f"照明_{sample_model}"
+            
             # 如果无法生成有意义的名称，使用时间戳
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             type_prefix = {
-                "测试单": "报告",
                 "inspection_report": "报告",
+                "检测报告": "报告",
                 "快递单": "快递",
                 "express": "快递",
                 "抽样单": "抽样",
-                "sampling_form": "抽样"
+                "sampling_form": "抽样",
+                "sampling": "抽样",
+                "照明综合报告": "照明",
+                "lighting_combined": "照明",
             }.get(document_type, "文档")
             
             return f"{type_prefix}_{timestamp}"

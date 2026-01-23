@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
 # 创建FastAPI应用
 app = FastAPI(
     title=settings.APP_NAME,
-    description="基于LangGraph的OCR文档智能处理系统",
+    description="NeoFlow 智能文档处理平台",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

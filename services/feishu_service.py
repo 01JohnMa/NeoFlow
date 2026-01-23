@@ -2,6 +2,8 @@
 """飞书多维表格推送服务 - 支持多租户动态配置"""
 
 import httpx
+import mimetypes
+import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from loguru import logger
@@ -39,6 +41,36 @@ class FeishuService:
         "approver": "批准人",
         "notes": "备注",
     }
+    
+    # 照明综合报告字段映射（20个字段）
+    LIGHTING_REPORT_FIELD_MAPPING = {
+        # 来自积分球（14个字段）
+        "sample_model": "样品型号",
+        "chromaticity_x": "色品坐标X",
+        "chromaticity_y": "色品坐标Y",
+        "duv": "Duv",
+        "cct": "色温CCT",
+        "ra": "Ra",
+        "r9": "R9",
+        "cqs": "CQS",
+        "sdcm": "色容差SDCM",
+        "power_sphere": "功率(积分球)",
+        "luminous_flux_sphere": "光通量(积分球)",
+        "luminous_efficacy_sphere": "光效(积分球)",
+        "rf": "Rf",
+        "rg": "Rg",
+        # 来自光分布（6个字段）
+        "lamp_specification": "灯具规格",
+        "power": "功率",
+        "luminous_flux": "光通量(光分布)",
+        "luminous_efficacy": "光效(光分布)",
+        "peak_intensity": "峰值光强",
+        "beam_angle": "光束角",
+    }
+    
+    # 照明综合报告飞书多维表格配置
+    LIGHTING_REPORT_BITABLE_TOKEN = "IIJMb0tQNaV5sHsfmX3ccEJLnDb"
+    LIGHTING_REPORT_TABLE_ID = "tblDpL7MIZjKX89H"
     
     # 向后兼容别名
     FIELD_MAPPING = DEFAULT_FIELD_MAPPING
@@ -102,6 +134,65 @@ class FeishuService:
         except Exception as e:
             logger.error(f"获取飞书 token 异常: {e}")
             return None
+
+    async def _upload_file_to_feishu(self, file_path: str, parent_node: str) -> Optional[str]:
+        """
+        上传文件到飞书云文档，返回 file_token
+
+        Args:
+            file_path: 本地文件路径
+            parent_node: 多维表格 app_token
+        """
+        if not file_path or not os.path.exists(file_path):
+            logger.warning(f"附件文件不存在，跳过上传: {file_path}")
+            return None
+
+        token = await self._get_tenant_access_token()
+        if not token:
+            logger.error("无法获取飞书 token，附件上传失败")
+            return None
+
+        try:
+            file_size = os.path.getsize(file_path)
+            filename = os.path.basename(file_path)
+            content_type, _ = mimetypes.guess_type(file_path)
+            content_type = content_type or "application/octet-stream"
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                with open(file_path, "rb") as file_obj:
+                    response = await client.post(
+                        f"{self.BASE_URL}/drive/v1/medias/upload_all",
+                        headers={
+                            "Authorization": f"Bearer {token}"
+                        },
+                        data={
+                            "parent_type": "bitable_file",
+                            "parent_node": parent_node,
+                            "file_type": "file",
+                            "file_name": filename,
+                            "size": str(file_size)
+                        },
+                        files={
+                            "file": (filename, file_obj, content_type)
+                        }
+                    )
+
+            result = response.json()
+            if result.get("code") != 0:
+                logger.error(f"飞书附件上传失败: code={result.get('code')}, msg={result.get('msg')}")
+                logger.error(f"完整响应: {result}")
+                return None
+
+            file_token = result.get("data", {}).get("file_token")
+            if not file_token:
+                logger.error("飞书附件上传成功但未返回 file_token")
+                return None
+
+            logger.info(f"飞书附件上传成功: {filename}")
+            return file_token
+        except Exception as e:
+            logger.error(f"飞书附件上传异常: {e}")
+            return None
     
     def _convert_to_feishu_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -145,12 +236,18 @@ class FeishuService:
         
         return fields
     
-    async def push_inspection_report(self, data: Dict[str, Any]) -> bool:
+    async def push_inspection_report(
+        self,
+        data: Dict[str, Any],
+        attachment_path: Optional[str] = None,
+        file_name: Optional[str] = None
+    ) -> bool:
         """
         【向后兼容】推送检验报告数据到飞书多维表格（使用默认配置）
         
         Args:
             data: inspection_reports 表的记录数据
+            attachment_path: 可选附件文件路径（本地文件）
             
         Returns:
             推送是否成功
@@ -167,11 +264,60 @@ class FeishuService:
         
         # 转换字段格式
         fields = self._convert_to_feishu_fields(data)
+        if file_name:
+            fields["文件名称"] = file_name
+
+        # 可选附件上传
+        if attachment_path:
+            file_token = await self._upload_file_to_feishu(
+                attachment_path,
+                settings.FEISHU_BITABLE_APP_TOKEN
+            )
+            if file_token:
+                fields["附件"] = [{"file_token": file_token}]
         
         # 使用默认表格配置推送
         return await self._push_to_table(
             settings.FEISHU_BITABLE_APP_TOKEN,
             settings.FEISHU_BITABLE_TABLE_ID,
+            fields
+        )
+    
+    async def push_lighting_report(
+        self,
+        data: Dict[str, Any],
+        file_name: Optional[str] = None
+    ) -> bool:
+        """
+        推送照明综合报告数据到飞书多维表格
+        
+        Args:
+            data: lighting_reports 表的记录数据
+            
+        Returns:
+            推送是否成功
+        """
+        # 检查是否启用推送
+        if not settings.FEISHU_PUSH_ENABLED:
+            logger.debug("飞书推送未启用，跳过")
+            return True
+        
+        # 检查基础配置
+        if not self._is_configured():
+            logger.warning("飞书应用配置不完整，跳过推送")
+            return False
+        
+        # 转换字段格式
+        fields = self._convert_by_field_mapping(data, self.LIGHTING_REPORT_FIELD_MAPPING)
+        if file_name:
+            fields["文件名称"] = file_name
+        
+        logger.info(f"准备推送照明报告到飞书: {len(fields)} 个字段")
+        
+        # 推送到照明报告专用表格
+        return await self._push_to_table(
+            self.LIGHTING_REPORT_BITABLE_TOKEN,
+            self.LIGHTING_REPORT_TABLE_ID,
             fields
         )
     

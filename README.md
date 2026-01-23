@@ -1,6 +1,6 @@
-# OCR Agentic System
+# NeoFlow
 
-基于 PaddleOCR + LangGraph 的智能文档识别系统，支持测试单、快递单、抽样单等多类型文档的 OCR 识别与结构化提取。
+NeoFlow 是基于 PaddleOCR + LangGraph 的智能文档识别系统，支持测试单、快递单、抽样单等多类型文档的 OCR 识别与结构化提取。
 
 ## 技术栈
 
@@ -81,6 +81,10 @@ ocr_agentic_system/
 3. **智能提取** - LLM 结构化字段提取
 4. **人工审核** - 识别结果校验与修正
 5. **数据存储** - Supabase 持久化存储
+
+## 显示名称规则
+
+- **检测报告(测试单)**: `报告_{样品名称}_{规格型号}_{抽样日期}`
 
 ## API 接口
 

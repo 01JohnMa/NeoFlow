@@ -92,6 +92,8 @@ async def get_current_user(
         from services.tenant_service import tenant_service
         profile = await tenant_service.get_user_profile(user_id)
         
+        logger.debug(f"获取用户 profile: user_id={user_id}, profile={profile}")
+        
         if profile:
             user_data.tenant_id = profile.get("tenant_id")
             user_data.role = profile.get("role", "user")
@@ -102,6 +104,10 @@ async def get_current_user(
             if tenant:
                 user_data.tenant_code = tenant.get("code")
                 user_data.tenant_name = tenant.get("name")
+            
+            logger.debug(f"用户信息: tenant_id={user_data.tenant_id}, role={user_data.role}")
+        else:
+            logger.warning(f"用户 {user_id} 没有 profile 记录")
     except Exception as e:
         logger.warning(f"获取用户 profile 失败: {e}")
     

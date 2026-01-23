@@ -98,7 +98,43 @@ export interface SamplingForm {
   updated_at: string
 }
 
-export type ExtractionResult = InspectionReport | Express | SamplingForm
+export interface LightingReport {
+  id: string
+  document_id: string
+  // 来自积分球（14个字段）
+  sample_model: string | null           // 样品型号
+  chromaticity_x: string | null         // 色品坐标X
+  chromaticity_y: string | null         // 色品坐标Y
+  duv: string | null                    // duv
+  cct: string | null                    // 色温(CCT)
+  ra: string | null                     // Ra
+  r9: string | null                     // R9
+  cqs: string | null                    // CQS
+  sdcm: string | null                   // 色容差SDCM
+  power_sphere: string | null           // 功率(积分球)
+  luminous_flux_sphere: string | null   // 光通量(积分球)
+  luminous_efficacy_sphere: string | null // 光效(积分球)
+  rf: string | null                     // Rf
+  rg: string | null                     // Rg
+  // 来自光分布（6个字段）
+  lamp_specification: string | null     // 灯具规格
+  power: string | null                  // 功率
+  luminous_flux: string | null          // 光通量(光分布)
+  luminous_efficacy: string | null      // 光效(光分布)
+  peak_intensity: string | null         // 峰值光强
+  beam_angle: string | null             // 光束角
+  // 元数据
+  extraction_confidence: number | null
+  raw_extraction_data: Record<string, unknown> | null
+  is_validated: boolean
+  validated_by: string | null
+  validated_at: string | null
+  validation_notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ExtractionResult = InspectionReport | Express | SamplingForm | LightingReport
 
 // API Response types
 export interface UploadResponse {
@@ -193,6 +229,31 @@ export const SAMPLING_FORM_FIELDS: FieldDefinition[] = [
   { key: 'sampling_date', label: '抽样日期', type: 'date' },
   { key: 'sampled_province', label: '被抽检省份', type: 'text' },
   { key: 'sampled_city', label: '被抽检市', type: 'text' },
+]
+
+export const LIGHTING_REPORT_FIELDS: FieldDefinition[] = [
+  // 来自积分球（14个字段）
+  { key: 'sample_model', label: '样品型号', type: 'text' },
+  { key: 'chromaticity_x', label: '色品坐标X', type: 'text' },
+  { key: 'chromaticity_y', label: '色品坐标Y', type: 'text' },
+  { key: 'duv', label: 'Duv', type: 'text' },
+  { key: 'cct', label: '色温(CCT)', type: 'text' },
+  { key: 'ra', label: 'Ra', type: 'text' },
+  { key: 'r9', label: 'R9', type: 'text' },
+  { key: 'cqs', label: 'CQS', type: 'text' },
+  { key: 'sdcm', label: '色容差SDCM', type: 'text' },
+  { key: 'power_sphere', label: '功率(积分球)', type: 'text' },
+  { key: 'luminous_flux_sphere', label: '光通量(积分球)', type: 'text' },
+  { key: 'luminous_efficacy_sphere', label: '光效(积分球)', type: 'text' },
+  { key: 'rf', label: 'Rf', type: 'text' },
+  { key: 'rg', label: 'Rg', type: 'text' },
+  // 来自光分布（6个字段）
+  { key: 'lamp_specification', label: '灯具规格', type: 'text' },
+  { key: 'power', label: '功率', type: 'text' },
+  { key: 'luminous_flux', label: '光通量(光分布)', type: 'text' },
+  { key: 'luminous_efficacy', label: '光效(光分布)', type: 'text' },
+  { key: 'peak_intensity', label: '峰值光强', type: 'text' },
+  { key: 'beam_angle', label: '光束角', type: 'text' },
 ]
 
 

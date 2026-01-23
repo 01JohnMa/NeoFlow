@@ -106,7 +106,7 @@ async def get_extraction_result(
                 
                 result = None
                 inferred_type = None
-                for type_name, tbl_name in [("测试单", "inspection_reports"), ("快递单", "expresses"), ("抽样单", "sampling_forms")]:
+                for type_name, tbl_name in [("检测报告", "inspection_reports"), ("快递单", "expresses"), ("抽样单", "sampling_forms")]:
                     try:
                         query_result = user_client.table(tbl_name).select("*").eq("document_id", document_id).execute()
                         if query_result.data:

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """应用配置类"""
     
     # ============ 基础配置 ============
-    APP_NAME: str = "OCR-Document-Processor"
+    APP_NAME: str = "NeoFlow"
     DEBUG: bool = True
     HOST: str = "0.0.0.0"
     PORT: int = 8080

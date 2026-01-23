@@ -1,22 +1,21 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useDocumentList, useDeleteDocument } from '@/hooks/useDocuments'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { cn, getStatusColor, getStatusText, formatDate, formatFileSize } from '@/lib/utils'
+import { shouldHideDownloadForType } from '@/config/features'
 import type { DocumentStatus } from '@/types'
 import {
   FileText,
   Trash2,
-  Eye,
   Download,
   Filter,
   ChevronLeft,
   ChevronRight,
-  Search,
   RefreshCw,
 } from 'lucide-react'
 import { documentsService } from '@/services/documents'
@@ -114,7 +113,7 @@ export function Documents() {
               className="w-36"
             >
               <option value="">全部类型</option>
-              <option value="测试单">检验报告</option>
+              <option value="检测报告">检测报告</option>
               <option value="快递单">快递单</option>
               <option value="抽样单">抽样单</option>
             </Select>
@@ -152,12 +151,14 @@ export function Documents() {
 
               {/* Table Body */}
               <div className="divide-y divide-border-default">
-                {data?.items.map((doc) => (
-                  <Link
-                    key={doc.id}
-                    to={`/documents/${doc.id}`}
-                    className="block hover:bg-bg-hover transition-colors"
-                  >
+                {data?.items.map((doc) => {
+                  const hideDownload = shouldHideDownloadForType(doc.document_type)
+                  return (
+                    <Link
+                      key={doc.id}
+                      to={`/documents/${doc.id}`}
+                      className="block hover:bg-bg-hover transition-colors"
+                    >
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 px-6 py-4 items-center">
                       {/* File Name */}
                       <div className="md:col-span-4 flex items-center gap-3">
@@ -202,14 +203,16 @@ export function Documents() {
 
                       {/* Actions */}
                       <div className="md:col-span-2 flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={(e) => handleDownload(doc.id, doc.original_file_name || doc.file_name, e)}
-                          title="下载"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
+                        {!hideDownload && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={(e) => handleDownload(doc.id, doc.original_file_name || doc.file_name, e)}
+                            title="下载"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -222,7 +225,8 @@ export function Documents() {
                       </div>
                     </div>
                   </Link>
-                ))}
+                  )
+                })}
               </div>
             </>
           )}

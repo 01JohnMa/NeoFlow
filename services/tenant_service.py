@@ -133,10 +133,22 @@ class TenantService:
             用户 profile 信息
         """
         try:
-            result = self._get_client().table("profiles").select(
-                "*, tenants(id, name, code)"
-            ).eq("id", user_id).execute()
-            return result.data[0] if result.data else None
+            # 先查询 profile 基础信息
+            result = self._get_client().table("profiles").select("*").eq("id", user_id).execute()
+            if not result.data:
+                return None
+            
+            profile = result.data[0]
+            
+            # 如果有 tenant_id，单独查询租户信息
+            if profile.get("tenant_id"):
+                tenant_result = self._get_client().table("tenants").select(
+                    "id, name, code"
+                ).eq("id", profile["tenant_id"]).execute()
+                if tenant_result.data:
+                    profile["tenants"] = tenant_result.data[0]
+            
+            return profile
         except Exception as e:
             logger.error(f"获取用户 profile 失败: {e}")
             return None

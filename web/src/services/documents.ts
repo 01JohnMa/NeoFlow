@@ -11,13 +11,15 @@ export const documentsService = {
   // Upload document
   async upload(
     file: File,
-    userId?: string,
-    onProgress?: (progress: number) => void
+    options?: {
+      templateId?: string
+      onProgress?: (progress: number) => void
+    }
   ): Promise<UploadResponse> {
     const formData = new FormData()
     formData.append('file', file)
-    if (userId) {
-      formData.append('user_id', userId)
+    if (options?.templateId) {
+      formData.append('template_id', options.templateId)
     }
 
     const response = await api.post<UploadResponse>('/documents/upload', formData, {
@@ -25,9 +27,9 @@ export const documentsService = {
         'Content-Type': 'multipart/form-data',
       },
       onUploadProgress: (progressEvent) => {
-        if (progressEvent.total && onProgress) {
+        if (progressEvent.total && options?.onProgress) {
           const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
+          options.onProgress(progress)
         }
       },
     })
@@ -152,6 +154,58 @@ export const documentsService = {
       display_name: displayName,
     })
     return response.data
+  },
+
+  // Process merge (合并模式处理 - 照明事业部等场景)
+  async processMerge(
+    templateId: string,
+    files: Array<{ file_path: string; doc_type: string }>
+  ): Promise<ProcessResponse> {
+    const response = await api.post<ProcessResponse>('/documents/process-merge', {
+      template_id: templateId,
+      files,
+    })
+    return response.data
+  },
+
+  // Upload multiple files for merge mode
+  async uploadMultiple(
+    files: Array<{ file: File; docType: string }>,
+    options?: {
+      templateId?: string
+      onProgress?: (fileIndex: number, progress: number) => void
+    }
+  ): Promise<Array<{ document_id: string; file_path: string; doc_type: string }>> {
+    const results: Array<{ document_id: string; file_path: string; doc_type: string }> = []
+
+    for (let i = 0; i < files.length; i++) {
+      const { file, docType } = files[i]
+      const formData = new FormData()
+      formData.append('file', file)
+      if (options?.templateId) {
+        formData.append('template_id', options.templateId)
+      }
+
+      const response = await api.post<UploadResponse>('/documents/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && options?.onProgress) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            options.onProgress(i, progress)
+          }
+        },
+      })
+
+      results.push({
+        document_id: response.data.document_id,
+        file_path: response.data.file_path,
+        doc_type: docType,
+      })
+    }
+
+    return results
   },
 }
 

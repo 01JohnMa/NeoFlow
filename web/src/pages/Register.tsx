@@ -98,7 +98,7 @@ export function Register() {
       <CardHeader className="space-y-1">
         <CardTitle className="text-2xl font-bold text-center">创建账户</CardTitle>
         <CardDescription className="text-center">
-          注册新账户开始使用OCR智能系统
+          注册新账户开始使用 NeoFlow
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -97,28 +97,47 @@ class TemplateService:
             logger.error(f"获取模板失败: {e}")
             return None
     
+    # 文档分类结果到模板 code 的映射
+    DOC_TYPE_TO_CODE = {
+        "检测报告": "inspection_report",
+        "快递单": "express",
+        "抽样单": "sampling",
+    }
+    
     async def get_template_by_code(
         self, 
         tenant_id: str, 
         code: str
     ) -> Optional[Dict[str, Any]]:
         """
-        根据代码获取模板（含字段和示例）
+        根据代码或名称获取模板（含字段和示例）
+        
+        支持按 code、name 或中文分类结果查询
         
         Args:
             tenant_id: 租户ID
-            code: 模板代码
+            code: 模板代码、名称或分类结果
             
         Returns:
             模板信息（含 fields 和 examples）
         """
         try:
-            # 获取模板基本信息
+            # 先尝试映射中文分类结果到模板 code
+            mapped_code = self.DOC_TYPE_TO_CODE.get(code, code)
+            
+            # 先按 code 查询
             result = self._get_client().table("document_templates").select(
                 "*, template_fields(*), template_examples(*)"
-            ).eq("tenant_id", tenant_id).eq("code", code).execute()
+            ).eq("tenant_id", tenant_id).eq("code", mapped_code).execute()
+            
+            # 如果没找到，再按 name 查询
+            if not result.data:
+                result = self._get_client().table("document_templates").select(
+                    "*, template_fields(*), template_examples(*)"
+                ).eq("tenant_id", tenant_id).eq("name", code).execute()
             
             if not result.data:
+                logger.warning(f"未找到模板: tenant={tenant_id}, code/name={code}, mapped={mapped_code}")
                 return None
             
             template = result.data[0]
@@ -150,13 +169,18 @@ class TemplateService:
             
         Returns:
             模板完整信息
+            
+        Raises:
+            Exception: 数据库查询异常（向上抛出，让调用者处理）
         """
         try:
+            # 注意：template_merge_rules 有多个外键关系，需要明确指定使用 template_id 外键
             result = self._get_client().table("document_templates").select(
-                "*, template_fields(*), template_examples(*), template_merge_rules(*)"
+                "*, template_fields(*), template_examples(*), template_merge_rules!template_merge_rules_template_id_fkey(*)"
             ).eq("id", template_id).execute()
             
             if not result.data:
+                logger.debug(f"模板不存在: {template_id}")
                 return None
             
             template = result.data[0]
@@ -174,8 +198,8 @@ class TemplateService:
             
             return template
         except Exception as e:
-            logger.error(f"获取模板详情失败: {e}")
-            return None
+            logger.error(f"获取模板详情失败 [{template_id}]: {type(e).__name__}: {e}")
+            raise  # 向上抛出，让调用者处理
     
     # ============ 字段操作 ============
     
@@ -368,34 +392,60 @@ class TemplateService:
             合并模板信息，包含子模板 A 和 B 的完整配置
         """
         try:
+            logger.debug(f"开始获取合并模板信息: {template_id}")
+            
             # 获取主模板
             template = await self.get_template_with_details(template_id)
             if not template:
+                logger.warning(f"主模板不存在: {template_id}")
                 return None
+            
+            logger.debug(f"主模板获取成功: {template.get('name')}, process_mode={template.get('process_mode')}")
             
             if template.get("process_mode") != "merge":
                 return template
             
-            # 获取合并规则
-            merge_rules = template.get("template_merge_rules", [])
-            if not merge_rules:
-                return template
-            
-            merge_rule = merge_rules[0]
+            # 获取合并规则（优先走独立查询，避免结构不一致）
+            merge_rule = await self.get_merge_rule(template_id)
+            if not merge_rule:
+                merge_rules = template.get("template_merge_rules")
+                merge_rules_type = type(merge_rules).__name__
+                if isinstance(merge_rules, dict):
+                    merge_rules = list(merge_rules.values())
+                logger.debug(
+                    f"合并规则类型: {merge_rules_type}, "
+                    f"数量: {len(merge_rules) if isinstance(merge_rules, list) else 0}"
+                )
+
+                if not merge_rules:
+                    logger.warning(f"模板 {template_id} 没有合并规则")
+                    return template
+
+                if not isinstance(merge_rules, list):
+                    logger.warning(
+                        f"模板 {template_id} 合并规则结构异常: {merge_rules_type}"
+                    )
+                    return template
+
+                merge_rule = merge_rules[0]
+            sub_a_id = merge_rule.get("sub_template_a_id")
+            sub_b_id = merge_rule.get("sub_template_b_id")
+            logger.debug(f"子模板ID: A={sub_a_id}, B={sub_b_id}")
             
             # 获取子模板详情
-            sub_template_a_id = merge_rule.get("sub_template_a_id")
-            sub_template_b_id = merge_rule.get("sub_template_b_id")
+            if sub_a_id:
+                template["sub_template_a"] = await self.get_template_with_details(sub_a_id)
+                logger.debug(f"子模板A获取: {'成功' if template.get('sub_template_a') else '失败'}")
             
-            if sub_template_a_id:
-                template["sub_template_a"] = await self.get_template_with_details(sub_template_a_id)
-            
-            if sub_template_b_id:
-                template["sub_template_b"] = await self.get_template_with_details(sub_template_b_id)
+            if sub_b_id:
+                template["sub_template_b"] = await self.get_template_with_details(sub_b_id)
+                logger.debug(f"子模板B获取: {'成功' if template.get('sub_template_b') else '失败'}")
             
             return template
         except Exception as e:
-            logger.error(f"获取合并模板信息失败: {e}")
+            logger.error(f"获取合并模板信息失败: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"堆栈: {traceback.format_exc()}")
             return None
     
     def merge_extraction_results(

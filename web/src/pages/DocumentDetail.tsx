@@ -17,10 +17,12 @@ import { Label } from '@/components/ui/label'
 import { Spinner, PageLoader } from '@/components/ui/spinner'
 import { cn, getStatusColor, getStatusText, formatDate, getDocumentTypeText } from '@/lib/utils'
 import { documentsService } from '@/services/documents'
+import { shouldHideDownloadForType } from '@/config/features'
 import {
   INSPECTION_REPORT_FIELDS,
   EXPRESS_FIELDS,
   SAMPLING_FORM_FIELDS,
+  LIGHTING_REPORT_FIELDS,
   type FieldDefinition,
 } from '@/types'
 import {
@@ -34,7 +36,6 @@ import {
   AlertTriangle,
   RefreshCw,
   FileText,
-  Clock,
   Eye,
   Pencil,
   Check,
@@ -66,20 +67,22 @@ export function DocumentDetail() {
   // Initialize edit data when result loads
   useEffect(() => {
     if (result?.extraction_data) {
-      setEditedData(result.extraction_data as Record<string, unknown>)
+      setEditedData(result.extraction_data as unknown as Record<string, unknown>)
     }
   }, [result])
 
   // Get field definitions based on document type
   const getFields = (): FieldDefinition[] => {
     const type = status?.document_type || result?.document_type
-    if (type === '测试单' || type === 'inspection_report') return INSPECTION_REPORT_FIELDS
+    if (type === '检测报告' || type === 'inspection_report') return INSPECTION_REPORT_FIELDS
     if (type === '快递单' || type === 'express') return EXPRESS_FIELDS
     if (type === '抽样单' || type === 'sampling_form') return SAMPLING_FORM_FIELDS
+    if (type === '照明综合报告' || type === 'lighting_combined' || type === 'lighting_report') return LIGHTING_REPORT_FIELDS
     return []
   }
 
   const fields = getFields()
+  const hideDownload = shouldHideDownloadForType(status?.document_type || result?.document_type)
 
   // Handle field change
   const handleFieldChange = (key: string, value: string) => {
@@ -110,7 +113,7 @@ export function DocumentDetail() {
   // Cancel editing
   const handleCancel = () => {
     if (result?.extraction_data) {
-      setEditedData(result.extraction_data as Record<string, unknown>)
+      setEditedData(result.extraction_data as unknown as Record<string, unknown>)
     }
     setValidationNotes('')
     setIsEditing(false)
@@ -236,20 +239,22 @@ export function DocumentDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              try {
-                await documentsService.download(id!)
-              } catch (err) {
-                console.error('Download failed:', err)
-              }
-            }}
-          >
-            <Download className="h-4 w-4 mr-2" />
-            下载
-          </Button>
+          {!hideDownload && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await documentsService.download(id!)
+                } catch (err) {
+                  console.error('Download failed:', err)
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              下载
+            </Button>
+          )}
           {isFailed && (
             <Button
               variant="outline"
@@ -382,13 +387,13 @@ export function DocumentDetail() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {fields.map((field) => {
                   const value = (editedData[field.key] as string) || ''
-                  const originalValue = (result?.extraction_data as Record<string, unknown>)?.[field.key] as string || ''
+                  const originalValue = (result?.extraction_data as unknown as Record<string, unknown>)?.[field.key] as string || ''
                   const isChanged = isEditing && value !== originalValue
                   
-                  // 判断是否需要高亮（待审核状态 + 测试单 + 检验结论字段）
+                  // 判断是否需要高亮（待审核状态 + 检测报告 + 检验结论字段）
                   const documentType = status?.document_type || result?.document_type
                   const needsHighlight = status?.status === 'pending_review' 
-                    && (documentType === '测试单' || documentType === 'inspection_report')
+                    && (documentType === '检测报告' || documentType === 'inspection_report')
                     && field.key === 'inspection_conclusion'
 
                   return (
