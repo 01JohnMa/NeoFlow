@@ -2,7 +2,7 @@
 -- 多租户初始化数据脚本
 -- ============================================================
 -- 功能：创建质量运营部和照明事业部的租户及模板配置
--- 执行顺序：在 006_multi_tenant.sql 之后执行
+-- 执行顺序：在 001_multi_tenant.sql 之后执行
 -- ============================================================
 
 -- ############################################################
@@ -24,9 +24,9 @@ ON CONFLICT (code) DO NOTHING;
 -- PART 2: 质量运营部模板
 -- ############################################################
 
--- 2.1 测试单/检验报告模板
+-- 2.1 检测报告模板
 INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', '检验报告', 'inspection_report', '产品质量检验报告', 'single', 1, TRUE, 1)
+    ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', '检测报告', 'inspection_report', '产品质量检测报告', 'single', 1, TRUE, 1)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 2.2 快递单模板
@@ -44,7 +44,7 @@ ON CONFLICT (tenant_id, code) DO NOTHING;
 -- PART 3: 质量运营部模板字段
 -- ############################################################
 
--- 3.1 检验报告字段（18个）
+-- 3.1 检测报告字段（18个）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order) VALUES
     ('b0000000-0000-0000-0000-000000000001', 'sample_name', '样品名称', '样品名称', 'text', TRUE, 1),
     ('b0000000-0000-0000-0000-000000000001', 'specification_model', '规格型号', '规格型号', 'text', FALSE, 2),
@@ -97,14 +97,14 @@ ON CONFLICT (template_id, field_key) DO NOTHING;
 -- PART 4: 照明事业部模板
 -- ############################################################
 
--- 4.1 积分球测试模板（子模板）
+-- 4.1 积分球测试模板（子模板，不在前端显示）
 INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 'single', 1, TRUE, 1)
+    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 'single', 1, FALSE, 1)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
--- 4.2 光分布测试模板（子模板）
+-- 4.2 光分布测试模板（子模板，不在前端显示）
 INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 'single', 1, TRUE, 2)
+    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 'single', 1, FALSE, 2)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 4.3 照明综合报告模板（合并模板）
@@ -185,12 +185,12 @@ ON CONFLICT (template_id) DO NOTHING;
 -- PART 7: 质量运营部模板示例（few-shot）
 -- ############################################################
 
--- 7.1 检验报告示例
+-- 7.1 检测报告示例
 INSERT INTO template_examples (template_id, example_input, example_output, description, sort_order, is_active) VALUES
     ('b0000000-0000-0000-0000-000000000001', 
      '检测报告...样品名称：小型断路器...规格型号：LB12-63a C16...生产日期：2025-07-03...受检单位：公牛家装官方旗舰店（武汉市美雀商贸有限公司）...地址：湖北省武汉市江汉区常青路49号恒大御园4栋/单元13层6号...电话：18086049695...生产单位：宁波公牛低压电气有限公司...地址：浙江省慈溪市匡堰镇龙舌村...电话：0574-58586185...任务来源：国家市场监督管理总局...抽样机构：大连产品质量检验检测研究院有限公司...抽样日期：2025-08-14...检验结论：该样品所检项目符合标准要求...检验类别：国家监督抽查...备注：样品购买的电子商务平台：拼多多...主检：马永康...审核：林海石...批准：丛林',
      '{"sample_name": "小型断路器", "specification_model": "LB12-63a C16 AC230/400V 1P", "production_date_batch": "2025-07-03", "inspected_unit_name": "公牛家装官方旗舰店（武汉市美雀商贸有限公司）", "inspected_unit_address": "湖北省武汉市江汉区常青路49号恒大御园4栋/单元13层6号", "inspected_unit_phone": "18086049695", "manufacturer_name": "宁波公牛低压电气有限公司", "manufacturer_address": "浙江省慈溪市匡堰镇龙舌村", "manufacturer_phone": "0574-58586185", "task_source": "国家市场监督管理总局", "sampling_agency": "大连产品质量检验检测研究院有限公司", "sampling_date": "2025-08-14", "inspection_conclusion": "合格", "inspection_category": "国家监督抽查", "notes": "样品购买的电子商务平台：拼多多。", "inspector": "马永康", "reviewer": "林海石", "approver": "丛林"}',
-     '检验报告标准示例',
+     '检测报告标准示例',
      1, TRUE)
 ON CONFLICT DO NOTHING;
 
@@ -222,7 +222,7 @@ ON CONFLICT DO NOTHING;
 -- 完成
 -- ############################################################
 
-SELECT '007_init_tenant_data.sql: 租户和模板初始化数据创建完成！' as message;
+SELECT '002_init_data.sql: 租户和模板初始化数据创建完成！' as message;
 SELECT '已创建租户: 质量运营部(quality), 照明事业部(lighting)' as tenants;
-SELECT '质量运营部模板: 检验报告, 快递单, 抽样单' as quality_templates;
+SELECT '质量运营部模板: 检测报告, 快递单, 抽样单' as quality_templates;
 SELECT '照明事业部模板: 积分球测试, 光分布测试, 照明综合报告(合并模式)' as lighting_templates;
