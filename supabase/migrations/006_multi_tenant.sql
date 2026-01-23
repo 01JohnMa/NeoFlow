@@ -6,6 +6,27 @@
 -- ============================================================
 
 -- ############################################################
+-- PART 0: 修复表所有权问题（确保 postgres 角色可以操作）
+-- ############################################################
+-- 说明：Supabase 中某些表可能由 supabase_admin 创建，
+-- 需要将所有权转给 postgres 才能执行 ALTER TABLE 和 RLS 策略修改
+
+DO $$
+BEGIN
+    -- 修改 documents 表所有权（如果表存在）
+    IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'documents') THEN
+        EXECUTE 'ALTER TABLE documents OWNER TO postgres';
+        RAISE NOTICE 'documents 表所有权已转给 postgres';
+    END IF;
+    
+    -- 修改 extraction_logs 表所有权（如果表存在）
+    IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'extraction_logs') THEN
+        EXECUTE 'ALTER TABLE extraction_logs OWNER TO postgres';
+        RAISE NOTICE 'extraction_logs 表所有权已转给 postgres';
+    END IF;
+END $$;
+
+-- ############################################################
 -- PART 1: 创建多租户基础表
 -- ############################################################
 
