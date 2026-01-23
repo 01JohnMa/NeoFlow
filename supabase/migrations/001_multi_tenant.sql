@@ -398,4 +398,4 @@ CREATE TRIGGER on_auth_user_created
 -- 完成
 -- ############################################################
 
-SELECT '006_multi_tenant.sql: 多租户表结构创建完成！' as message;
+SELECT '001_multi_tenant.sql: 多租户表结构创建完成！' as message;
