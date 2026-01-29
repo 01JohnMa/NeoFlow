@@ -8,6 +8,7 @@ from supabase import create_client, Client
 from loguru import logger
 
 from config.settings import settings
+from constants.document_types import DocumentTypeTable, DOC_TYPE_TABLE_MAP
 
 
 class SupabaseService:
@@ -16,32 +17,15 @@ class SupabaseService:
     _instance: Optional['SupabaseService'] = None
     _client: Optional[Client] = None
     
-    # ============ 表格映射（统一定义） ============
+    # ============ 表格映射（使用常量模块） ============
     # 支持模板 code、中文名和历史别名，降低耦合性
-    TABLE_MAP = {
-        # 质量运营 - 检测报告
-        "inspection_report": "inspection_reports",  # 模板 code
-        "检测报告": "inspection_reports",           # 统一显示名
-        
-        # 质量运营 - 快递单
-        "express": "expresses",                     # 模板 code
-        "快递单": "expresses",                      # 中文名
-        
-        # 质量运营 - 抽样单（注意：模板 code 是 sampling，不是 sampling_form）
-        "sampling": "sampling_forms",               # 模板 code
-        "sampling_form": "sampling_forms",          # 历史别名
-        "抽样单": "sampling_forms",                 # 中文名
-        
-        # 照明事业部
-        "lighting_combined": "lighting_reports",    # 模板 code
-        "照明综合报告": "lighting_reports",         # 中文名
-    }
+    TABLE_MAP = DOC_TYPE_TABLE_MAP
     
-    # 各表的日期字段定义
+    # 各表的日期字段定义（使用常量模块的表名）
     DATE_FIELDS = {
-        "sampling_forms": ["sampling_date", "production_date", "expiry_date"],
-        "inspection_reports": ["report_date", "inspection_date", "sample_date"],
-        "expresses": ["shipping_date", "delivery_date"],
+        DocumentTypeTable.SAMPLING_FORM: ["sampling_date", "production_date", "expiry_date"],
+        DocumentTypeTable.INSPECTION_REPORT: ["report_date", "inspection_date", "sample_date"],
+        DocumentTypeTable.EXPRESS: ["shipping_date", "delivery_date"],
     }
     
     # 非日期字段（字段名包含 date 但不应进行日期格式校验的复合字段）
@@ -49,25 +33,25 @@ class SupabaseService:
     
     # 各表允许的 AI 提取字段白名单（防止 AI 返回额外字段导致数据库错误）
     ALLOWED_FIELDS = {
-        "inspection_reports": [
+        DocumentTypeTable.INSPECTION_REPORT: [
             "sample_name", "specification_model", "production_date_batch",
             "inspected_unit_name", "inspected_unit_address", "inspected_unit_phone",
             "manufacturer_name", "manufacturer_address", "manufacturer_phone",
             "task_source", "sampling_agency", "sampling_date", "inspection_conclusion",
             "inspection_category", "notes", "inspector", "reviewer", "approver"
         ],
-        "expresses": [
+        DocumentTypeTable.EXPRESS: [
             "tracking_number", "recipient", "delivery_address",
             "sender", "sender_address", "notes"
         ],
-        "sampling_forms": [
+        DocumentTypeTable.SAMPLING_FORM: [
             "task_source", "task_category", "manufacturer", "sample_name",
             "specification_model", "production_date_batch", "sample_storage_location",
             "sampling_channel", "sampling_unit", "sampling_date",
             "sampled_province", "sampled_city"
         ],
         # 照明综合报告（20个字段）
-        "lighting_reports": [
+        DocumentTypeTable.LIGHTING_REPORT: [
             # 来自积分球（14个）
             "sample_model", "chromaticity_x", "chromaticity_y", "duv", "cct",
             "ra", "r9", "cqs", "sdcm", "power_sphere", "luminous_flux_sphere",
