@@ -11,11 +11,20 @@ from loguru import logger
 from config.settings import settings
 
 
+class OCRValidationError(Exception):
+    """OCR 结果验证失败异常"""
+    pass
+
+
 class OCRService:
     """PaddleOCR 服务封装"""
     
     _instance: Optional['OCRService'] = None
     _initialized: bool = False
+    
+    # OCR 结果验证配置
+    MIN_CONFIDENCE_THRESHOLD = 0.3  # 最低可接受置信度
+    MIN_TEXT_LENGTH = 10            # 最短文本长度（字符）
     
     def __new__(cls):
         if cls._instance is None:
@@ -144,12 +153,53 @@ class OCRService:
         # 合并文本
         full_text = "\n".join([line["text"] for line in lines])
         
-        return {
+        result = {
             "text": full_text,
             "confidence": avg_confidence,
             "lines": lines,
             "total_lines": len(lines)
         }
+        
+        # 验证 OCR 结果
+        self._validate_ocr_result(result)
+        
+        return result
+    
+    def _validate_ocr_result(self, result: Dict[str, Any]) -> None:
+        """验证 OCR 结果的完整性和质量
+        
+        Args:
+            result: OCR 处理结果
+            
+        Raises:
+            OCRValidationError: 验证失败时抛出
+        """
+        # 1. 验证必要字段存在
+        required_fields = ["text", "confidence", "lines", "total_lines"]
+        for field in required_fields:
+            if field not in result:
+                raise OCRValidationError(f"OCR 结果缺少必要字段: {field}")
+        
+        # 2. 验证文本不为空（允许短文本，但记录警告）
+        text = result.get("text", "")
+        if not text or not text.strip():
+            raise OCRValidationError("OCR 未能识别到任何文本")
+        
+        if len(text.strip()) < self.MIN_TEXT_LENGTH:
+            logger.warning(f"OCR 识别文本过短: {len(text.strip())} 字符 (最小推荐: {self.MIN_TEXT_LENGTH})")
+        
+        # 3. 验证置信度
+        confidence = result.get("confidence", 0)
+        if confidence < self.MIN_CONFIDENCE_THRESHOLD:
+            logger.warning(
+                f"OCR 置信度较低: {confidence:.2f} (阈值: {self.MIN_CONFIDENCE_THRESHOLD})"
+            )
+        
+        # 4. 验证行数据一致性
+        lines = result.get("lines", [])
+        total_lines = result.get("total_lines", 0)
+        if len(lines) != total_lines:
+            logger.warning(f"行数不一致: lines={len(lines)}, total_lines={total_lines}")
     
     def process_document_sync(self, file_path: str) -> List[str]:
         """同步处理文档 - 兼容MVP代码接口
