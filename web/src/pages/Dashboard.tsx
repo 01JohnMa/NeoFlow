@@ -200,7 +200,7 @@ export function Dashboard() {
                 <Link
                   key={doc.id}
                   to={`/documents/${doc.id}`}
-                  className="flex items-center justify-between p-4 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors border border-border-default"
+                  className="flex items-center justify-between p-4 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors border border-border-default cursor-pointer"
                 >
                   <div className="flex items-center gap-4">
                     <div className="h-10 w-10 rounded-lg bg-primary-500/10 flex items-center justify-center">

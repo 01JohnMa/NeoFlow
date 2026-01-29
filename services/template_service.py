@@ -302,6 +302,7 @@ class TemplateService:
             field_key = field.get("field_key", "")
             field_label = field.get("field_label", "")
             field_type = field.get("field_type", "text")
+            extraction_hint = field.get("extraction_hint", "")
             
             type_hint = ""
             if field_type == "date":
@@ -309,7 +310,8 @@ class TemplateService:
             elif field_type == "number":
                 type_hint = "（数值类型）"
             
-            field_lines.append(f"| {i} | {field_label} | {field_key} | {type_hint}")
+            hint = f"{type_hint} {extraction_hint}".strip()
+            field_lines.append(f"| {i} | {field_label} | {field_key} | {hint}")
         
         field_list = "| 序号 | 字段含义 | JSON键名 | 说明 |\n|------|----------|----------|------|\n" + "\n".join(field_lines)
         

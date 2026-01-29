@@ -87,7 +87,7 @@ export function Login() {
       <CardFooter className="flex flex-col gap-4">
         <div className="text-center text-sm text-text-secondary">
           还没有账户？{' '}
-          <Link to="/register" className="text-primary-400 hover:text-primary-300 font-medium">
+          <Link to="/register" className="text-primary-400 hover:text-primary-300 font-medium transition-colors">
             立即注册
           </Link>
         </div>

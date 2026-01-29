@@ -7,24 +7,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary colors - 深邃科技感配色
+        // Primary colors - OCR-LLM 绿色主色
         primary: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
-          950: '#1e1b4b',
+          50: '#ecfdf3',
+          100: '#d1fae1',
+          200: '#a7f3c8',
+          300: '#6ee7a1',
+          400: '#34d37a',
+          500: '#018c39',
+          600: '#017a32',
+          700: '#016629',
+          800: '#014e20',
+          900: '#013a18',
+          950: '#0b1f10',
         },
         accent: {
-          400: '#22d3ee',
-          500: '#06b6d4',
-          600: '#0891b2',
+          400: '#a78bfa',
+          500: '#8b5cf6',
+          600: '#7c3aed',
         },
         success: {
           500: '#10b981',
@@ -37,27 +37,27 @@ export default {
         },
         // Background
         bg: {
-          primary: '#0f0f23',
-          secondary: '#1a1a2e',
-          tertiary: '#16213e',
-          card: '#1e1e3f',
-          hover: '#252550',
+          primary: '#0f172a',
+          secondary: '#111f36',
+          tertiary: '#13264a',
+          card: '#162b52',
+          hover: '#1b3566',
         },
         // Text
         text: {
-          primary: '#f8fafc',
-          secondary: '#94a3b8',
-          muted: '#64748b',
+          primary: '#f1f5f9',
+          secondary: '#cbd5e1',
+          muted: '#94a3b8',
         },
         // Border
         border: {
           default: '#334155',
-          focus: '#6366f1',
+          focus: '#018c39',
         },
       },
       fontFamily: {
-        sans: ['Noto Sans SC', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+        sans: ['Fira Sans', 'Noto Sans SC', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['Fira Code', 'JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       borderRadius: {
         'xl': '0.75rem',
@@ -78,8 +78,8 @@ export default {
           'to': { opacity: '1', transform: 'translateY(0)' },
         },
         'pulse-glow': {
-          '0%, 100%': { boxShadow: '0 0 20px rgba(99, 102, 241, 0.3)' },
-          '50%': { boxShadow: '0 0 40px rgba(99, 102, 241, 0.6)' },
+          '0%, 100%': { boxShadow: '0 0 20px rgba(1, 140, 57, 0.3)' },
+          '50%': { boxShadow: '0 0 40px rgba(1, 140, 57, 0.6)' },
         },
       },
     },

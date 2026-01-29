@@ -182,7 +182,7 @@ JIFENQIU_PROMPT = """
 - 确保 JSON 语法正确（使用英文双引号、英文逗号）
 
 **示例输出：**
-{"sample_model": "LED-T8-1200", "chromaticity_x": "0.4523", "chromaticity_y": "0.4089", "duv": "0.0012", "cct": "3000K", "ra": "92.3", "r9": "85.6", "cqs": "91.2", "sdcm": "3.2", "power_sphere": "18.5W", "luminous_flux_sphere": "1850lm", "luminous_efficacy_sphere": "100lm/W", "rf": "89.5", "rg": "101.2"}
+{"sample_model": "LED-T8-1200", "chromaticity_x": "0.4523", "chromaticity_y": "0.4089", "duv": "0.0012", "cct": "3000K", "ra": "92.3", "r9": "85.6", "cqs": "91.2", "sdcm": "3.2", "power_sphere": "18.5W", "luminous_flux_sphere": "1850 lm", "luminous_efficacy_sphere": "100lm/W", "rf": "89.5", "rg": "101.2"}
 
 现在，请处理用户提供的OCR文本。"""
 # ============ 兼容别名（用于旧代码迁移，后续可删除） ============

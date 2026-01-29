@@ -102,6 +102,36 @@ class SupabaseService:
                     cleaned[key] = validated_date
         
         return cleaned
+
+    def _normalize_lighting_units(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """修正常见 OCR 单位错误（如 lm 被识别为 1m）"""
+        if not data:
+            return data
+
+        def fix_lm_unit(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            normalized = value
+            # 处理常见错误：1m/W -> lm/W
+            normalized = re.sub(r'(?i)\b1m\s*/\s*w\b', 'lm/W', normalized)
+            # 处理单位错误：数字后 1m -> lm（例如 1200 1m）
+            normalized = re.sub(r'(?i)(?<=\d)\s*1m\b', 'lm', normalized)
+            # 兜底：独立 1m -> lm
+            normalized = re.sub(r'(?i)\b1m\b', 'lm', normalized)
+            return normalized
+
+        normalized = data.copy()
+        target_fields = [
+            "luminous_flux",
+            "luminous_efficacy",
+            "luminous_flux_sphere",
+            "luminous_efficacy_sphere",
+        ]
+        for field in target_fields:
+            if field in normalized:
+                normalized[field] = fix_lm_unit(normalized[field])
+
+        return normalized
     
     def _filter_allowed_fields(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
         """
@@ -410,6 +440,8 @@ class SupabaseService:
             filtered_data = self._filter_allowed_fields(data, "lighting_reports")
             # 保存原始提取数据（含额外字段，用于调试）
             filtered_data["raw_extraction_data"] = data.copy()
+            # 修正常见 OCR 单位错误（如 lm 被识别为 1m）
+            filtered_data = self._normalize_lighting_units(filtered_data)
             filtered_data["document_id"] = document_id
             # 清理数据，处理空日期字段（照明报告一般没有日期字段，但保持一致性）
             cleaned_data = self._clean_data_for_db(filtered_data, "lighting_reports")

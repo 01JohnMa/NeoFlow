@@ -37,7 +37,7 @@ export function Sidebar() {
       {/* 移动端遮罩层 */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          className="fixed inset-0 z-30 bg-black/50 md:hidden cursor-pointer"
           onClick={() => setSidebarOpen(false)}
         />
       )}

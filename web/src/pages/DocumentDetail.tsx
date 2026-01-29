@@ -398,10 +398,13 @@ export function DocumentDetail() {
 
                   return (
                     <div key={field.key} className={cn(field.type === 'textarea' && 'md:col-span-2')}>
-                      <Label className={cn(
-                        isChanged && 'text-warning-500',
-                        needsHighlight && 'text-orange-500 font-semibold'
-                      )}>
+                      <Label 
+                        htmlFor={`field-${field.key}`}
+                        className={cn(
+                          isChanged && 'text-warning-500',
+                          needsHighlight && 'text-orange-500 font-semibold'
+                        )}
+                      >
                         {field.label}
                         {isChanged && <span className="ml-2 text-xs">(已修改)</span>}
                         {needsHighlight && <span className="ml-2 text-xs animate-pulse">(待审核确认)</span>}
@@ -409,6 +412,7 @@ export function DocumentDetail() {
                       {isEditing ? (
                         field.type === 'textarea' ? (
                           <Textarea
+                            id={`field-${field.key}`}
                             value={value}
                             onChange={(e) => handleFieldChange(field.key, e.target.value)}
                             className={cn('mt-1', needsHighlight && 'border-orange-500 border-2')}
@@ -416,6 +420,7 @@ export function DocumentDetail() {
                           />
                         ) : (
                           <Input
+                            id={`field-${field.key}`}
                             type={field.type === 'date' ? 'date' : 'text'}
                             value={value}
                             onChange={(e) => handleFieldChange(field.key, e.target.value)}
@@ -438,8 +443,9 @@ export function DocumentDetail() {
                 {/* Validation Notes */}
                 {isEditing && (
                   <div className="md:col-span-2">
-                    <Label>审核备注</Label>
+                    <Label htmlFor="validation-notes">审核备注</Label>
                     <Textarea
+                      id="validation-notes"
                       value={validationNotes}
                       onChange={(e) => setValidationNotes(e.target.value)}
                       placeholder="添加审核备注（可选）"

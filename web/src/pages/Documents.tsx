@@ -157,7 +157,7 @@ export function Documents() {
                     <Link
                       key={doc.id}
                       to={`/documents/${doc.id}`}
-                      className="block hover:bg-bg-hover transition-colors"
+                      className="block hover:bg-bg-hover transition-colors cursor-pointer"
                     >
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 px-6 py-4 items-center">
                       {/* File Name */}
