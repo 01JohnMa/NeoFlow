@@ -3,6 +3,7 @@
 
 import json
 import asyncio
+from enum import Enum
 from typing import TypedDict, Annotated, Any, Dict, Optional
 from datetime import datetime
 
@@ -17,6 +18,17 @@ from config.settings import settings
 from config.prompts import DOC_CLASSIFY_PROMPT
 from services.ocr_service import ocr_service
 from services.template_service import template_service
+
+
+class WorkflowErrorType(str, Enum):
+    """工作流错误类型枚举"""
+    OCR_FAILED = "ocr_failed"
+    CLASSIFY_FAILED = "classify_failed"
+    EXTRACT_FAILED = "extract_failed"
+    TEMPLATE_NOT_FOUND = "template_not_found"
+    VALIDATION_ERROR = "validation_error"
+    LLM_ERROR = "llm_error"
+    UNKNOWN_ERROR = "unknown_error"
 
 
 class WorkflowState(TypedDict):
@@ -63,15 +75,38 @@ class OCRWorkflow:
         
         return workflow.compile(checkpointer=self.memory)
     
+    def _make_error_response(
+        self, 
+        error_type: WorkflowErrorType, 
+        message: str,
+        step: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """生成统一格式的错误响应
+        
+        Args:
+            error_type: 错误类型枚举
+            message: 错误消息
+            step: 步骤名称（可选，默认使用 error_type.value）
+            
+        Returns:
+            统一格式的错误响应字典
+        """
+        return {
+            "error": message,
+            "error_type": error_type.value,
+            "step": step or error_type.value,
+            "messages": [AIMessage(content=f"[{error_type.value}] {message}")]
+        }
+    
     async def _ocr_node(self, state: WorkflowState) -> Dict[str, Any]:
         """OCR提取节点 - 新增节点，集成OCR服务"""
         try:
             file_path = state.get("file_path", "")
             if not file_path:
-                return {
-                    "error": "文件路径为空",
-                    "step": "ocr_failed"
-                }
+                return self._make_error_response(
+                    WorkflowErrorType.VALIDATION_ERROR,
+                    "文件路径为空"
+                )
             
             logger.info(f"开始OCR处理: {file_path}")
             
@@ -88,7 +123,10 @@ class OCRWorkflow:
             
         except Exception as e:
             logger.error(f"OCR处理失败: {e}")
-            return {"error": str(e), "step": "ocr_failed"}
+            return self._make_error_response(
+                WorkflowErrorType.OCR_FAILED,
+                str(e)
+            )
     
     async def _classify_node(self, state: WorkflowState) -> Dict[str, Any]:
         """文档分类节点 - 对应MVP的doc_classify_node"""
@@ -96,7 +134,10 @@ class OCRWorkflow:
             ocr_text = state.get("ocr_text", "")
             
             if not ocr_text:
-                raise ValueError("OCR文本为空，无法分类")
+                return self._make_error_response(
+                    WorkflowErrorType.VALIDATION_ERROR,
+                    "OCR文本为空，无法分类"
+                )
             
             logger.info("开始文档分类...")
             
@@ -122,7 +163,10 @@ class OCRWorkflow:
             
         except Exception as e:
             logger.error(f"分类失败: {e}")
-            return {"error": str(e), "step": "classify_failed"}
+            return self._make_error_response(
+                WorkflowErrorType.CLASSIFY_FAILED,
+                str(e)
+            )
     
     async def _extract_node(self, state: WorkflowState) -> Dict[str, Any]:
         """字段提取节点 - 从数据库获取模板配置构建 prompt"""
@@ -136,28 +180,24 @@ class OCRWorkflow:
             # 检查必要参数
             if not tenant_id:
                 logger.error(f"字段提取失败: 文档 {state.get('document_id')} 缺少租户ID，请确保用户已选择所属部门")
-                return {
-                    "extraction_data": {},
-                    "step": "extract_failed",
-                    "error": "缺少租户ID，用户未选择所属部门",
-                    "messages": [AIMessage(content="缺少租户ID，无法获取模板配置")]
-                }
+                return self._make_error_response(
+                    WorkflowErrorType.VALIDATION_ERROR,
+                    "缺少租户ID，用户未选择所属部门"
+                )
             
             if not doc_type:
-                return {
-                    "extraction_data": {"error": "缺少文档类型"},
-                    "step": "extract_failed",
-                    "messages": [AIMessage(content="缺少文档类型，无法获取模板配置")]
-                }
+                return self._make_error_response(
+                    WorkflowErrorType.VALIDATION_ERROR,
+                    "缺少文档类型，无法获取模板配置"
+                )
             
             # 从数据库获取模板配置
             template = await template_service.get_template_by_code(tenant_id, doc_type)
             if not template:
-                return {
-                    "extraction_data": {"error": f"未找到模板配置: {doc_type}"},
-                    "step": "extract_failed",
-                    "messages": [AIMessage(content=f"未找到文档类型 [{doc_type}] 的模板配置")]
-                }
+                return self._make_error_response(
+                    WorkflowErrorType.TEMPLATE_NOT_FOUND,
+                    f"未找到文档类型 [{doc_type}] 的模板配置"
+                )
             
             # 构建 prompt 并提取
             prompt = template_service.build_extraction_prompt(template, ocr_text)
@@ -182,7 +222,10 @@ class OCRWorkflow:
             
         except Exception as e:
             logger.error(f"提取失败: {e}")
-            return {"error": str(e), "step": "extract_failed"}
+            return self._make_error_response(
+                WorkflowErrorType.EXTRACT_FAILED,
+                str(e)
+            )
     
     def _fallback_classify(self, text: str) -> str:
         """关键词回退分类"""
