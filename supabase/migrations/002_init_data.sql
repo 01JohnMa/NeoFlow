@@ -186,13 +186,34 @@ ON CONFLICT (template_id) DO NOTHING;
 -- ############################################################
 
 -- 7.1 检测报告示例
-INSERT INTO template_examples (template_id, example_input, example_output, description, sort_order, is_active) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 
+INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
+    ('c0000000-0000-0000-0000-000000000001',
+     'b0000000-0000-0000-0000-000000000001', 
      '检测报告...样品名称：小型断路器...规格型号：LB12-63a C16...生产日期：2025-07-03...受检单位：公牛家装官方旗舰店（武汉市美雀商贸有限公司）...地址：湖北省武汉市江汉区常青路49号恒大御园4栋/单元13层6号...电话：18086049695...生产单位：宁波公牛低压电气有限公司...地址：浙江省慈溪市匡堰镇龙舌村...电话：0574-58586185...任务来源：国家市场监督管理总局...抽样机构：大连产品质量检验检测研究院有限公司...抽样日期：2025-08-14...检验结论：该样品所检项目符合标准要求...检验类别：国家监督抽查...备注：样品购买的电子商务平台：拼多多...主检：马永康...审核：林海石...批准：丛林',
      '{"sample_name": "小型断路器", "specification_model": "LB12-63a C16 AC230/400V 1P", "production_date_batch": "2025-07-03", "inspected_unit_name": "公牛家装官方旗舰店（武汉市美雀商贸有限公司）", "inspected_unit_address": "湖北省武汉市江汉区常青路49号恒大御园4栋/单元13层6号", "inspected_unit_phone": "18086049695", "manufacturer_name": "宁波公牛低压电气有限公司", "manufacturer_address": "浙江省慈溪市匡堰镇龙舌村", "manufacturer_phone": "0574-58586185", "task_source": "国家市场监督管理总局", "sampling_agency": "大连产品质量检验检测研究院有限公司", "sampling_date": "2025-08-14", "inspection_conclusion": "合格", "inspection_category": "国家监督抽查", "notes": "样品购买的电子商务平台：拼多多。", "inspector": "马永康", "reviewer": "林海石", "approver": "丛林"}',
      '检测报告标准示例',
      1, TRUE)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
+
+-- 7.2 快递单示例
+INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
+    ('c0000000-0000-0000-0000-000000000002',
+     'b0000000-0000-0000-0000-000000000002', 
+     '顺丰速运...运单号：1391451353025...寄件人：黄海花 020-32293669...寄件地址：广东省广州市黄埔区开泰大道天泰一路3号（威凯检测技术有限公司）...收件人：王伟 0574-58586166...收件地址：浙江省宁波市慈溪市观海卫镇观附公路28号（宁波公牛数码科技有限公司）...内件品名：充电宝（移动电源）-20251120111511309-样品确认通知书+抽样单第三联一生产',
+     '{"tracking_number": "1391451353025", "sender": "黄海花020-32293669", "sender_address": "广东省广州市黄埔区开泰大道天泰一路3号（威凯检测技术有限公司）", "recipient": "王伟0574-58586166", "delivery_address": "浙江省宁波市慈溪市观海卫镇观附公路28号（宁波公牛数码科技有限公司）", "notes": "充电宝（移动电源）-20251120111511309-样品确认通知书+抽样单第三联一生产"}',
+     '快递单标准示例',
+     1, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- 7.3 抽样单示例
+INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
+    ('c0000000-0000-0000-0000-000000000003',
+     'b0000000-0000-0000-0000-000000000003', 
+     '产品质量监督抽查抽样单...任务来源：西安市市场监督管理局...抽查类别：产品质量监督抽查...生产企业：宁波公牛低压电气有限公司...样品名称：小型断路器...规格型号：LB5-63aC20/1P...生产日期/批号：2025-09-24/13200441...备样封存地点：抽查专用盒...抽样渠道：销售柜台...抽样单位：西安市产品质量监督检验院...抽样日期：2025年9月24日',
+     '{"task_source": "西安市市场监督管理局", "task_category": "产品质量监督抽查", "manufacturer": "宁波公牛低压电气有限公司", "sample_name": "小型断路器", "specification_model": "LB5-63aC20/1P", "production_date_batch": "2025-09-24/13200441", "sample_storage_location": "抽查专用盒", "sampling_channel": "销售柜台", "sampling_unit": "西安市产品质量监督检验院", "sampling_date": "2025-09-24", "sampled_province": "陕西省", "sampled_city": "西安市"}',
+     '抽样单标准示例',
+     1, TRUE)
+ON CONFLICT (id) DO NOTHING;
 
 
 -- ############################################################
@@ -200,22 +221,24 @@ ON CONFLICT DO NOTHING;
 -- ############################################################
 
 -- 8.1 积分球测试示例
-INSERT INTO template_examples (template_id, example_input, example_output, description, sort_order, is_active) VALUES
-    ('b0000000-0000-0000-0000-000000000010', 
+INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
+    ('c0000000-0000-0000-0000-000000000010',
+     'b0000000-0000-0000-0000-000000000010', 
      '积分球光电参数测试报告...型号：LED-T8-1200...色品坐标：x=0.4523 y=0.4089...Duv：0.0012...色温CCT：3000K...Ra：92.3...R9：85.6...CQS：91.2...SDCM：3.2...功率：18.5W...光通量：1850lm...光效：100lm/W...Rf：89.5...Rg：101.2',
      '{"sample_model": "LED-T8-1200", "chromaticity_x": "0.4523", "chromaticity_y": "0.4089", "duv": "0.0012", "cct": "3000K", "ra": "92.3", "r9": "85.6", "cqs": "91.2", "sdcm": "3.2", "power_sphere": "18.5W", "luminous_flux_sphere": "1850lm", "luminous_efficacy_sphere": "100lm/W", "rf": "89.5", "rg": "101.2"}',
      '积分球测试标准示例',
      1, TRUE)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 
 -- 8.2 光分布测试示例
-INSERT INTO template_examples (template_id, example_input, example_output, description, sort_order, is_active) VALUES
-    ('b0000000-0000-0000-0000-000000000011', 
+INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
+    ('c0000000-0000-0000-0000-000000000011',
+     'b0000000-0000-0000-0000-000000000011', 
      '分布光度计测试报告...灯具型号：LED筒灯 Model-A100...功率：15W...光通量：1200lm...光效：80lm/W...峰值光强：850cd...光束角：120°',
      '{"lamp_specification": "LED筒灯 Model-A100", "power": "15W", "luminous_flux": "1200lm", "luminous_efficacy": "80lm/W", "peak_intensity": "850cd", "beam_angle": "120°"}',
      '光分布测试标准示例',
      1, TRUE)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 
 
 -- ############################################################

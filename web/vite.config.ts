@@ -12,6 +12,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  define: {
+    // 强制定义环境变量，确保内网穿透时使用代理
+    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('/supabase'),
+  },
   server: {
     port: 3000,
     host: '0.0.0.0', // 允许局域网访问

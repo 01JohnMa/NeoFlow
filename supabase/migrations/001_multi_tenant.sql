@@ -119,8 +119,10 @@ ALTER TABLE documents
 
 -- 2.2 创建 profiles 表扩展用户信息（Supabase auth.users 不便直接修改）
 -- 存储用户的租户关联和角色信息
+-- 【注意】移除了对 auth.users 的外键约束，因为初始化时 auth.users 尚不存在
+-- 数据一致性通过 handle_new_user 触发器保证
 CREATE TABLE IF NOT EXISTS profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY,  -- 移除外键，auth.users 由 GoTrue 服务动态创建
     tenant_id UUID REFERENCES tenants(id),
     role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('super_admin', 'tenant_admin', 'user')),
     display_name VARCHAR(100),
@@ -330,9 +332,10 @@ CREATE POLICY "Service role full access to profiles" ON profiles
 -- PART 6: 更新 documents 表的 RLS 策略（支持多租户）
 -- ############################################################
 
--- 删除旧策略
+-- 删除旧策略（来自 000_init.sql）
 DROP POLICY IF EXISTS "用户可以管理自己的文档" ON documents;
 DROP POLICY IF EXISTS "管理员可以查看所有文档" ON documents;
+DROP POLICY IF EXISTS "Service role can manage all documents" ON documents;
 
 -- 普通用户只能查看自己的文档
 DROP POLICY IF EXISTS "Users can manage own documents" ON documents;
@@ -354,6 +357,10 @@ CREATE POLICY "Tenant admin can view tenant documents" ON documents
 DROP POLICY IF EXISTS "Super admin can view all documents" ON documents;
 CREATE POLICY "Super admin can view all documents" ON documents
     FOR ALL USING (get_current_user_role() = 'super_admin');
+
+-- Service role 完全访问（后端 API 使用）
+CREATE POLICY "Service role can manage all documents" ON documents
+    FOR ALL USING (auth.role() = 'service_role');
 
 -- ############################################################
 -- PART 7: 创建自动创建 profile 的触发器
@@ -388,11 +395,22 @@ EXCEPTION WHEN invalid_text_representation THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 创建触发器（如果不存在）
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+-- 创建触发器（仅当 auth.users 存在时）
+-- 【注意】auth.users 由 GoTrue 服务启动后创建，初始化时可能不存在
+-- 如果跳过，需在 auth 服务启动后执行 003_post_auth_setup.sql
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables 
+               WHERE table_schema = 'auth' AND table_name = 'users') THEN
+        DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+        CREATE TRIGGER on_auth_user_created
+            AFTER INSERT ON auth.users
+            FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+        RAISE NOTICE 'auth.users 触发器创建成功';
+    ELSE
+        RAISE NOTICE 'auth.users 表不存在，跳过触发器创建（需在 auth 服务启动后执行 003_post_auth_setup.sql）';
+    END IF;
+END $$;
 
 -- ############################################################
 -- 完成
