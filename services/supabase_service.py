@@ -349,116 +349,114 @@ class SupabaseService:
             logger.error(f"统计文档失败: {e}")
             return 0
     
+    # ============ 通用数据操作方法 ============
+    
+    async def _save_to_table(
+        self, 
+        table_name: str, 
+        document_id: str, 
+        data: Dict[str, Any],
+        normalize_func: Optional[callable] = None
+    ) -> Optional[Dict[str, Any]]:
+        """通用保存方法 - 保存数据到指定表
+        
+        Args:
+            table_name: 数据库表名
+            document_id: 文档ID
+            data: 要保存的数据
+            normalize_func: 可选的数据规范化函数（如照明报告的单位修正）
+            
+        Returns:
+            保存后的记录，失败时抛出异常
+        """
+        try:
+            # 1. 过滤掉 AI 返回的额外字段
+            filtered_data = self._filter_allowed_fields(data, table_name)
+            # 2. 保存原始提取数据（含额外字段，用于调试）
+            filtered_data["raw_extraction_data"] = data.copy()
+            # 3. 可选的数据规范化处理
+            if normalize_func:
+                filtered_data = normalize_func(filtered_data)
+            # 4. 设置文档ID
+            filtered_data["document_id"] = document_id
+            # 5. 清理数据，处理空日期字段
+            cleaned_data = self._clean_data_for_db(filtered_data, table_name)
+            # 6. 执行 upsert
+            result = self.client.table(table_name).upsert(
+                cleaned_data, on_conflict="document_id"
+            ).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"保存到 {table_name} 失败: {e}")
+            raise
+    
+    async def _get_from_table(
+        self, 
+        table_name: str, 
+        document_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """通用获取方法 - 根据文档ID获取记录
+        
+        Args:
+            table_name: 数据库表名
+            document_id: 文档ID
+            
+        Returns:
+            记录数据，不存在或失败时返回 None
+        """
+        try:
+            result = self.client.table(table_name).select("*").eq(
+                "document_id", document_id
+            ).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"从 {table_name} 获取数据失败: {e}")
+            return None
+    
     # ============ 检验报告操作 ============
     
     async def save_inspection_report(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """保存检验报告"""
-        try:
-            # 先过滤掉 AI 返回的额外字段
-            filtered_data = self._filter_allowed_fields(data, "inspection_reports")
-            # 保存原始提取数据（含额外字段，用于调试）
-            filtered_data["raw_extraction_data"] = data.copy()
-            filtered_data["document_id"] = document_id
-            # 清理数据，处理空日期字段
-            cleaned_data = self._clean_data_for_db(filtered_data, "inspection_reports")
-            result = self.client.table("inspection_reports").upsert(cleaned_data, on_conflict="document_id").execute()
-            # 注意：飞书推送已移至 /validate API，审核保存后才推送
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"保存检验报告失败: {e}")
-            raise
+        return await self._save_to_table("inspection_reports", document_id, data)
     
     async def get_inspection_report(self, document_id: str) -> Optional[Dict[str, Any]]:
         """获取检验报告"""
-        try:
-            result = self.client.table("inspection_reports").select("*").eq("document_id", document_id).execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取检验报告失败: {e}")
-            return None
+        return await self._get_from_table("inspection_reports", document_id)
     
     # ============ 快递单操作 ============
     
     async def save_express(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """保存快递单"""
-        try:
-            # 先过滤掉 AI 返回的额外字段
-            filtered_data = self._filter_allowed_fields(data, "expresses")
-            # 保存原始提取数据（含额外字段，用于调试）
-            filtered_data["raw_extraction_data"] = data.copy()
-            filtered_data["document_id"] = document_id
-            # 清理数据，处理空日期字段
-            cleaned_data = self._clean_data_for_db(filtered_data, "expresses")
-            result = self.client.table("expresses").upsert(cleaned_data, on_conflict="document_id").execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"保存快递单失败: {e}")
-            raise
+        return await self._save_to_table("expresses", document_id, data)
     
     async def get_express(self, document_id: str) -> Optional[Dict[str, Any]]:
         """获取快递单"""
-        try:
-            result = self.client.table("expresses").select("*").eq("document_id", document_id).execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取快递单失败: {e}")
-            return None
+        return await self._get_from_table("expresses", document_id)
     
     # ============ 抽样单操作 ============
     
     async def save_sampling_form(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """保存抽样单"""
-        try:
-            # 先过滤掉 AI 返回的额外字段
-            filtered_data = self._filter_allowed_fields(data, "sampling_forms")
-            # 保存原始提取数据（含额外字段，用于调试）
-            filtered_data["raw_extraction_data"] = data.copy()
-            filtered_data["document_id"] = document_id
-            # 清理数据，处理空日期字段
-            cleaned_data = self._clean_data_for_db(filtered_data, "sampling_forms")
-            result = self.client.table("sampling_forms").upsert(cleaned_data, on_conflict="document_id").execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"保存抽样单失败: {e}")
-            raise
+        return await self._save_to_table("sampling_forms", document_id, data)
     
     async def get_sampling_form(self, document_id: str) -> Optional[Dict[str, Any]]:
         """获取抽样单"""
-        try:
-            result = self.client.table("sampling_forms").select("*").eq("document_id", document_id).execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取抽样单失败: {e}")
-            return None
+        return await self._get_from_table("sampling_forms", document_id)
     
     # ============ 照明报告操作 ============
     
     async def save_lighting_report(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保存照明综合报告"""
-        try:
-            # 先过滤掉 AI 返回的额外字段
-            filtered_data = self._filter_allowed_fields(data, "lighting_reports")
-            # 保存原始提取数据（含额外字段，用于调试）
-            filtered_data["raw_extraction_data"] = data.copy()
-            # 修正常见 OCR 单位错误（如 lm 被识别为 1m）
-            filtered_data = self._normalize_lighting_units(filtered_data)
-            filtered_data["document_id"] = document_id
-            # 清理数据，处理空日期字段（照明报告一般没有日期字段，但保持一致性）
-            cleaned_data = self._clean_data_for_db(filtered_data, "lighting_reports")
-            result = self.client.table("lighting_reports").upsert(cleaned_data, on_conflict="document_id").execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"保存照明报告失败: {e}")
-            raise
+        """保存照明综合报告（含单位规范化）"""
+        return await self._save_to_table(
+            "lighting_reports", 
+            document_id, 
+            data, 
+            normalize_func=self._normalize_lighting_units
+        )
     
     async def get_lighting_report(self, document_id: str) -> Optional[Dict[str, Any]]:
         """获取照明综合报告"""
-        try:
-            result = self.client.table("lighting_reports").select("*").eq("document_id", document_id).execute()
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取照明报告失败: {e}")
-            return None
+        return await self._get_from_table("lighting_reports", document_id)
     
     # ============ 文档查询辅助方法 ============
     
