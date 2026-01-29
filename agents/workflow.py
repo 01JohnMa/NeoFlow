@@ -3,6 +3,7 @@
 
 import json
 import asyncio
+import httpx
 from enum import Enum
 from typing import TypedDict, Annotated, Any, Dict, Optional
 from datetime import datetime
@@ -13,11 +14,20 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from config.settings import settings
 from config.prompts import DOC_CLASSIFY_PROMPT
 from services.ocr_service import ocr_service
 from services.template_service import template_service
+
+
+# LLM 可重试的异常类型
+LLM_RETRYABLE_EXCEPTIONS = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.ConnectError,
+)
 
 
 class WorkflowErrorType(str, Enum):
@@ -98,6 +108,27 @@ class OCRWorkflow:
             "messages": [AIMessage(content=f"[{error_type.value}] {message}")]
         }
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(LLM_RETRYABLE_EXCEPTIONS),
+        reraise=True
+    )
+    async def _llm_invoke_with_retry(self, prompt: str) -> str:
+        """带重试的 LLM 调用
+        
+        Args:
+            prompt: 提示词
+            
+        Returns:
+            LLM 响应内容
+            
+        Raises:
+            Exception: 重试耗尽后抛出最后一次异常
+        """
+        response = await self.llm.ainvoke(prompt)
+        return response.content
+    
     async def _ocr_node(self, state: WorkflowState) -> Dict[str, Any]:
         """OCR提取节点 - 新增节点，集成OCR服务"""
         try:
@@ -143,11 +174,11 @@ class OCRWorkflow:
             
             # 使用分类Prompt - 与MVP保持一致
             prompt = DOC_CLASSIFY_PROMPT.format(ocr_result=ocr_text[:2000])
-            response = await self.llm.ainvoke(prompt)
+            response_content = await self._llm_invoke_with_retry(prompt)
             
             # 解析响应 - 与MVP逻辑一致
             try:
-                data = json.loads(response.content)
+                data = json.loads(response_content)
                 doc_type = data.get("文档类型", "未知")
             except json.JSONDecodeError:
                 # 回退：关键词匹配
@@ -203,14 +234,14 @@ class OCRWorkflow:
             prompt = template_service.build_extraction_prompt(template, ocr_text)
             logger.info(f"使用数据库模板 [{template.get('name')}] 构建 prompt")
             
-            response = await self.llm.ainvoke(prompt)
+            response_content = await self._llm_invoke_with_retry(prompt)
             
             # 解析JSON
             try:
-                extraction_data = json.loads(response.content)
+                extraction_data = json.loads(response_content)
             except json.JSONDecodeError:
                 # 尝试清理后解析
-                extraction_data = self._clean_json_response(response.content)
+                extraction_data = self._clean_json_response(response_content)
             
             logger.info(f"字段提取完成: {len(extraction_data)}个字段")
             
@@ -425,15 +456,15 @@ class OCRWorkflow:
             ocr_confidence = ocr_result["confidence"]
             logger.info(f"OCR完成，提取{ocr_result['total_lines']}行，置信度{ocr_confidence:.2f}")
             
-            # 3. 使用模板动态构建 Prompt 并提取
+            # 3. 使用模板动态构建 Prompt 并提取（带重试）
             prompt = template_service.build_extraction_prompt(template, ocr_text)
-            response = await self.llm.ainvoke(prompt)
+            response_content = await self._llm_invoke_with_retry(prompt)
             
             # 4. 解析结果
             try:
-                extraction_data = json.loads(response.content)
+                extraction_data = json.loads(response_content)
             except json.JSONDecodeError:
-                extraction_data = self._clean_json_response(response.content)
+                extraction_data = self._clean_json_response(response_content)
             
             processing_time = (datetime.now() - processing_start).total_seconds()
             
@@ -534,23 +565,23 @@ class OCRWorkflow:
                 ocr_text = ocr_result["text"]
                 ocr_texts.append(ocr_text)
                 
-                # 根据文档类型选择子模板
+                # 根据文档类型选择子模板（带重试）
                 if doc_type == merge_rule.get("doc_type_a") and sub_template_a:
                     prompt = template_service.build_extraction_prompt(sub_template_a, ocr_text)
-                    response = await self.llm.ainvoke(prompt)
+                    response_content = await self._llm_invoke_with_retry(prompt)
                     try:
-                        result_a = json.loads(response.content)
+                        result_a = json.loads(response_content)
                     except json.JSONDecodeError:
-                        result_a = self._clean_json_response(response.content)
+                        result_a = self._clean_json_response(response_content)
                     logger.info(f"文档A ({doc_type}) 提取完成: {len(result_a)}个字段")
                     
                 elif doc_type == merge_rule.get("doc_type_b") and sub_template_b:
                     prompt = template_service.build_extraction_prompt(sub_template_b, ocr_text)
-                    response = await self.llm.ainvoke(prompt)
+                    response_content = await self._llm_invoke_with_retry(prompt)
                     try:
-                        result_b = json.loads(response.content)
+                        result_b = json.loads(response_content)
                     except json.JSONDecodeError:
-                        result_b = self._clean_json_response(response.content)
+                        result_b = self._clean_json_response(response_content)
                     logger.info(f"文档B ({doc_type}) 提取完成: {len(result_b)}个字段")
             
             # 4. 合并结果
@@ -678,12 +709,12 @@ class OCRWorkflow:
             提取的字段字典
         """
         try:
-            response = await self.llm.ainvoke(prompt_template)
+            response_content = await self._llm_invoke_with_retry(prompt_template)
             
             try:
-                return json.loads(response.content)
+                return json.loads(response_content)
             except json.JSONDecodeError:
-                return self._clean_json_response(response.content)
+                return self._clean_json_response(response_content)
                 
         except Exception as e:
             logger.error(f"字段提取失败: {e}")

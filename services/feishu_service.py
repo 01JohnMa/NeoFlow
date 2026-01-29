@@ -7,8 +7,31 @@ import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from config.settings import settings
+
+
+class FeishuAPIError(Exception):
+    """飞书 API 错误"""
+    def __init__(self, code: int, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(f"飞书API错误 [{code}]: {message}")
+
+
+def _is_retryable_feishu_error(exception: Exception) -> bool:
+    """判断飞书错误是否可重试
+    
+    排除以下不可重试的错误：
+    - 99991663: 权限不足
+    - 1254043: 多维表格不存在
+    - 1254060: 字段类型错误
+    """
+    if isinstance(exception, FeishuAPIError):
+        return exception.code not in [99991663, 1254043, 1254060]
+    # 网络错误可重试
+    return isinstance(exception, (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError))
 
 
 class FeishuService:
@@ -361,6 +384,57 @@ class FeishuService:
         # 推送到指定表格
         return await self._push_to_table(bitable_token, table_id, fields)
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(_is_retryable_feishu_error),
+        reraise=True
+    )
+    async def _push_to_table_with_retry(
+        self,
+        bitable_token: str,
+        table_id: str,
+        fields: Dict[str, Any],
+        token: str
+    ) -> str:
+        """带重试的推送方法（内部使用）
+        
+        Raises:
+            FeishuAPIError: 飞书 API 返回错误
+            httpx.TimeoutException: 请求超时
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.BASE_URL}/bitable/v1/apps/{bitable_token}/tables/{table_id}/records",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json={"fields": fields}
+            )
+            
+            result = response.json()
+            
+            if result.get("code") != 0:
+                error_code = result.get("code")
+                error_msg = result.get("msg", "未知错误")
+                
+                # 记录详细错误日志
+                logger.error(f"飞书多维表格推送失败: code={error_code}, msg={error_msg}")
+                logger.error(f"推送的字段: {fields}")
+                
+                # 常见错误提示
+                if error_code == 99991663 or "Forbidden" in str(error_msg):
+                    logger.error("权限不足！请在飞书开发者后台添加 bitable:record 权限并发布应用")
+                elif error_code == 1254043:
+                    logger.error("多维表格不存在或无权访问，请检查 app_token 和 table_id")
+                elif error_code == 1254060:
+                    logger.error("文本字段转换失败！请检查飞书多维表格的列是否都设置为'文本'类型")
+                
+                raise FeishuAPIError(error_code, error_msg)
+            
+            return result.get("data", {}).get("record", {}).get("record_id", "")
+    
     async def _push_to_table(
         self,
         bitable_token: str,
@@ -368,7 +442,7 @@ class FeishuService:
         fields: Dict[str, Any]
     ) -> bool:
         """
-        推送数据到指定的飞书多维表格
+        推送数据到指定的飞书多维表格（带重试）
         
         Args:
             bitable_token: 多维表格 app_token
@@ -392,37 +466,16 @@ class FeishuService:
         logger.info(f"准备推送到飞书的字段: {list(fields.keys())}")
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.BASE_URL}/bitable/v1/apps/{bitable_token}/tables/{table_id}/records",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json"
-                    },
-                    json={"fields": fields}
-                )
-                
-                result = response.json()
-                
-                if result.get("code") != 0:
-                    error_code = result.get("code")
-                    error_msg = result.get("msg")
-                    logger.error(f"飞书多维表格推送失败: code={error_code}, msg={error_msg}")
-                    logger.error(f"完整响应: {result}")
-                    logger.error(f"推送的字段: {fields}")
-                    # 常见错误提示
-                    if error_code == 99991663 or "Forbidden" in str(error_msg):
-                        logger.error("权限不足！请在飞书开发者后台添加 bitable:record 权限并发布应用")
-                    elif error_code == 1254043:
-                        logger.error("多维表格不存在或无权访问，请检查 app_token 和 table_id")
-                    elif error_code == 1254060:
-                        logger.error("文本字段转换失败！请检查飞书多维表格的列是否都设置为'文本'类型")
-                    return False
-                
-                record_id = result.get("data", {}).get("record", {}).get("record_id")
-                logger.info(f"飞书多维表格推送成功, record_id: {record_id}")
-                return True
-                
+            record_id = await self._push_to_table_with_retry(
+                bitable_token, table_id, fields, token
+            )
+            logger.info(f"飞书多维表格推送成功, record_id: {record_id}")
+            return True
+            
+        except FeishuAPIError as e:
+            # 不可重试的错误已在 _push_to_table_with_retry 中记录
+            logger.error(f"飞书推送最终失败: {e}")
+            return False
         except Exception as e:
             logger.error(f"飞书多维表格推送异常: {e}")
             return False
