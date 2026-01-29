@@ -40,6 +40,82 @@ class ProcessMergeRequest(BaseModel):
 router = APIRouter()
 
 
+# ============ 后台任务辅助函数 ============
+
+async def _handle_processing_success(
+    document_id: str,
+    result: dict,
+    template_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    generate_display_name: bool = True
+) -> None:
+    """处理成功时的统一逻辑
+    
+    Args:
+        document_id: 文档ID
+        result: 工作流处理结果
+        template_id: 模板ID（可选）
+        tenant_id: 租户ID（可选）
+        generate_display_name: 是否生成显示名称
+    """
+    # 1. 保存提取结果到对应的表
+    await supabase_service.save_extraction_result(
+        document_id=document_id,
+        document_type=result.get("document_type") or result.get("template_name", "未知"),
+        extraction_data=result["extraction_data"]
+    )
+    logger.info(f"提取结果已保存: {document_id}")
+    
+    # 2. 生成规范化显示名称（可选）
+    display_name = None
+    if generate_display_name:
+        display_name = supabase_service.generate_display_name(
+            document_type=result.get("document_type") or result.get("template_name"),
+            extraction_data=result["extraction_data"]
+        )
+    
+    # 3. 更新文档状态为 pending_review（待人工审核）
+    update_data = {
+        "status": "pending_review",
+        "document_type": result.get("document_type") or result.get("template_name"),
+        "template_id": template_id,
+        "tenant_id": tenant_id,
+        "ocr_text": result.get("ocr_text", ""),
+        "ocr_confidence": result.get("ocr_confidence"),
+        "processed_at": datetime.now().isoformat(),
+        "error_message": None
+    }
+    if display_name:
+        update_data["display_name"] = display_name
+    
+    await supabase_service.update_document(document_id, update_data)
+    logger.info(f"后台处理完成: {document_id}" + (f", 显示名称: {display_name}" if display_name else ""))
+
+
+async def _handle_processing_failure(
+    document_id: str,
+    error_message: str
+) -> None:
+    """处理失败时的统一逻辑"""
+    await supabase_service.update_document_status(
+        document_id, "failed",
+        error_message=error_message
+    )
+    logger.error(f"后台处理失败: {document_id} - {error_message}")
+
+
+async def _handle_processing_exception(
+    document_id: str,
+    exception: Exception
+) -> None:
+    """处理异常时的统一逻辑"""
+    logger.error(f"后台任务异常: {exception}")
+    try:
+        await supabase_service.update_document_status(document_id, "failed", str(exception))
+    except:
+        pass
+
+
 @router.post("/{document_id}/process")
 async def process_document(
     document_id: str,
@@ -174,7 +250,6 @@ async def process_document_task(
         
         # 根据是否有模板选择处理方式
         if template_id:
-            # 使用模板化处理
             result = await ocr_workflow.process_with_template(
                 document_id=document_id,
                 file_path=file_path,
@@ -182,50 +257,24 @@ async def process_document_task(
                 tenant_id=tenant_id
             )
         else:
-            # 原有流程（质量运营分类）
             result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
         
         if result["success"] and result.get("extraction_data"):
-            # 第一步：保存提取结果到对应的表
-            await supabase_service.save_extraction_result(
+            await _handle_processing_success(
                 document_id=document_id,
-                document_type=result["document_type"],
-                extraction_data=result["extraction_data"]
+                result=result,
+                template_id=template_id,
+                tenant_id=tenant_id,
+                generate_display_name=True
             )
-            logger.info(f"提取结果已保存: {document_id}")
-            
-            # 生成规范化显示名称
-            display_name = supabase_service.generate_display_name(
-                document_type=result["document_type"],
-                extraction_data=result["extraction_data"]
-            )
-            
-            # 第二步：更新文档状态为 pending_review（待人工审核）
-            await supabase_service.update_document(document_id, {
-                "status": "pending_review",
-                "document_type": result["document_type"],
-                "display_name": display_name,
-                "template_id": template_id,
-                "tenant_id": tenant_id,
-                "ocr_text": result.get("ocr_text", ""),
-                "ocr_confidence": result.get("ocr_confidence"),
-                "processed_at": datetime.now().isoformat(),
-                "error_message": None
-            })
-            logger.info(f"后台处理完成: {document_id}, 显示名称: {display_name}")
         else:
-            await supabase_service.update_document_status(
-                document_id, "failed", 
-                error_message=result.get("error", "处理失败")
+            await _handle_processing_failure(
+                document_id, 
+                result.get("error", "处理失败")
             )
-            logger.error(f"后台处理失败: {document_id} - {result.get('error')}")
             
     except Exception as e:
-        logger.error(f"后台任务异常: {e}")
-        try:
-            await supabase_service.update_document_status(document_id, "failed", str(e))
-        except:
-            pass
+        await _handle_processing_exception(document_id, e)
 
 
 @router.post("/process-text")
@@ -356,42 +405,21 @@ async def process_document_with_template_task(
         )
         
         if result["success"] and result.get("extraction_data"):
-            # 获取模板信息
-            template = await template_service.get_template_with_details(template_id)
-            
-            # 更新文档
-            await supabase_service.update_document(document_id, {
-                "status": "pending_review",
-                "document_type": result.get("template_name"),
-                "template_id": template_id,
-                "tenant_id": tenant_id,
-                "ocr_text": result.get("ocr_text", ""),
-                "ocr_confidence": result.get("ocr_confidence"),
-                "processed_at": datetime.now().isoformat(),
-                "error_message": None
-            })
-            
-            # 保存提取结果
-            await supabase_service.save_extraction_result(
+            await _handle_processing_success(
                 document_id=document_id,
-                document_type=result.get("template_name", "未知"),
-                extraction_data=result["extraction_data"]
+                result=result,
+                template_id=template_id,
+                tenant_id=tenant_id,
+                generate_display_name=False  # 模板化处理不生成显示名称
             )
-            
-            logger.info(f"模板化后台处理完成: {document_id}")
         else:
-            await supabase_service.update_document_status(
-                document_id, "failed",
-                error_message=result.get("error", "处理失败")
+            await _handle_processing_failure(
+                document_id, 
+                result.get("error", "处理失败")
             )
-            logger.error(f"模板化后台处理失败: {document_id}")
             
     except Exception as e:
-        logger.error(f"模板化后台任务异常: {e}")
-        try:
-            await supabase_service.update_document_status(document_id, "failed", str(e))
-        except:
-            pass
+        await _handle_processing_exception(document_id, e)
 
 
 @router.post("/process-merge")
