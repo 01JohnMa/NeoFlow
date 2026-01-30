@@ -24,6 +24,8 @@ class TestPromptExtractionHint(unittest.TestCase):
         self.assertIsNotNone(template)
 
         prompt = template_service.build_extraction_prompt(template, ocr_text)
+        print("\n=== Generated Prompt ===\n")
+        print(prompt)
 
         sdcm_line = next(
             (line for line in prompt.splitlines() if "| sdcm |" in line),
