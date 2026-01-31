@@ -5,8 +5,11 @@ from fastapi import APIRouter, Depends
 from datetime import datetime
 from loguru import logger
 
+import json
+
 from services.supabase_service import supabase_service
 from services.feishu_service import feishu_service
+from services.template_service import template_service
 from api.dependencies.auth import get_current_user, get_user_client, CurrentUser
 from api.exceptions import (
     DocumentNotFoundError, 
@@ -17,6 +20,51 @@ from api.exceptions import (
 from .schemas import ValidateRequest, RejectRequest, RenameRequest
 
 router = APIRouter()
+
+
+def _normalize_review_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().casefold()
+
+
+def _parse_allowed_values(raw_values: object) -> list:
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, list):
+        return [str(item) for item in raw_values if item is not None]
+    if isinstance(raw_values, str):
+        text = raw_values.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except json.JSONDecodeError:
+            pass
+        return [text]
+    return [str(raw_values)]
+
+
+def _validate_review_rules(template: dict, data: dict) -> None:
+    fields = template.get("template_fields") or []
+    for field in fields:
+        if not field or not field.get("review_enforced"):
+            continue
+        field_key = field.get("field_key") or ""
+        if not field_key:
+            continue
+        allowed_values = _parse_allowed_values(field.get("review_allowed_values"))
+        if not allowed_values:
+            continue
+        current_value = data.get(field_key)
+        normalized_current = _normalize_review_value(current_value)
+        normalized_allowed = {_normalize_review_value(v) for v in allowed_values}
+        if not normalized_current or normalized_current not in normalized_allowed:
+            field_label = field.get("field_label") or field_key
+            allowed_text = " / ".join(allowed_values)
+            raise ValidationError(f"字段【{field_label}】必须为：{allowed_text}")
 
 
 @router.put("/{document_id}/validate")
@@ -43,6 +91,17 @@ async def validate_document(
         if not document:
             raise DocumentNotFoundError(document_id)
         
+        # 校验强制审核条件（如果配置了字段规则）
+        template_id = document.get("template_id")
+        tenant_id = document.get("tenant_id")
+        template = None
+        if template_id:
+            template = await template_service.get_template_with_details(template_id)
+        elif tenant_id and request.document_type:
+            template = await template_service.get_template_by_code(tenant_id, request.document_type)
+        if template:
+            _validate_review_rules(template, request.data)
+
         # 准备更新数据
         update_data = {**request.data}
         update_data["is_validated"] = True

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS document_templates (
     description TEXT,                     -- 描述
     process_mode VARCHAR(20) DEFAULT 'single' CHECK (process_mode IN ('single', 'merge')),
     required_doc_count INT DEFAULT 1,     -- merge模式需要几份文档
+    auto_approve BOOLEAN DEFAULT FALSE,   -- 自动通过审核（跳过人工审核直接推送飞书）
     -- 飞书推送配置（每个模板可推送到不同的多维表格）
     feishu_bitable_token VARCHAR(100),    -- 多维表格 app_token
     feishu_table_id VARCHAR(100),         -- 数据表 table_id
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS template_fields (
     feishu_column VARCHAR(100),           -- 飞书多维表格列名
     field_type VARCHAR(20) DEFAULT 'text' CHECK (field_type IN ('text', 'date', 'number', 'boolean')),
     is_required BOOLEAN DEFAULT FALSE,    -- 是否必填
+    review_enforced BOOLEAN DEFAULT FALSE, -- 审核强制校验
+    review_allowed_values JSONB,           -- 审核允许值列表（jsonb数组）
     default_value TEXT,                   -- 默认值
     source_doc_type VARCHAR(50),          -- merge模式：来自哪种文档类型
     sort_order INT DEFAULT 0,             -- 排序

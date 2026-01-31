@@ -78,7 +78,7 @@ class OCRService:
             doc_orientation_classify_model_dir=settings.OCR_DOC_MODEL_PATH,
             use_doc_orientation_classify=True,
             use_doc_unwarping=False,
-            det_limit_side_len=960,
+            det_limit_side_len=640,
             det_limit_type='max'
         )
     
@@ -240,6 +240,95 @@ class OCRService:
                         filtered_results.append(text)
         
         return filtered_results
+    
+    async def process_document_per_page(self, file_path: str) -> List[Dict[str, Any]]:
+        """逐页处理文档，返回每页独立的 OCR 结果
+        
+        用于需要按页分别提取的场景（如照明积分球多样品）
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            每页的 OCR 结果列表:
+            [
+                {"page": 1, "text": "页1文本", "confidence": 0.95, "lines": [...], "total_lines": 10},
+                {"page": 2, "text": "页2文本", "confidence": 0.92, "lines": [...], "total_lines": 8},
+                ...
+            ]
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+        
+        if not self.ocr_engine:
+            await self.initialize()
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self.executor, 
+            self._process_per_page_sync, 
+            file_path
+        )
+        
+        return result
+    
+    def _process_per_page_sync(self, file_path: str) -> List[Dict[str, Any]]:
+        """同步执行逐页 OCR"""
+        # PaddleOCR ocr() 返回格式: [[页1内容], [页2内容], ...] 每页一个列表
+        ocr_result = self.ocr_engine.ocr(file_path, cls=True)
+        
+        page_results = []
+        
+        if ocr_result:
+            for page_idx, page_result in enumerate(ocr_result):
+                if page_result is None:
+                    continue
+                
+                lines = []
+                total_score = 0
+                valid_count = 0
+                
+                for line_info in page_result:
+                    if line_info is None or len(line_info) < 2:
+                        continue
+                    
+                    text_info = line_info[1]
+                    if isinstance(text_info, tuple) and len(text_info) >= 2:
+                        text = str(text_info[0]).strip()
+                        score = float(text_info[1])
+                    else:
+                        continue
+                    
+                    # 过滤低置信度和水印
+                    if (score >= self._threshold 
+                        and text 
+                        and not any(wm in text.lower() for wm in self._watermarks)):
+                        lines.append({
+                            "text": text,
+                            "confidence": float(score)
+                        })
+                        total_score += score
+                        valid_count += 1
+                
+                # 只有当页面有有效内容时才添加
+                if lines:
+                    avg_confidence = total_score / valid_count if valid_count > 0 else 0.0
+                    full_text = "\n".join([line["text"] for line in lines])
+                    
+                    page_results.append({
+                        "page": page_idx + 1,
+                        "text": full_text,
+                        "confidence": avg_confidence,
+                        "lines": lines,
+                        "total_lines": len(lines)
+                    })
+        
+        # 如果没有识别到任何页面，抛出异常
+        if not page_results:
+            raise OCRValidationError("OCR 未能识别到任何文本")
+        
+        logger.info(f"逐页OCR完成: {file_path}, 共{len(page_results)}页有效内容")
+        return page_results
     
     async def process_batch(self, file_paths: List[str]) -> Dict[str, Any]:
         """批量处理文档"""

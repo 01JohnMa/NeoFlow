@@ -66,6 +66,13 @@ INSERT INTO template_fields (template_id, field_key, field_label, feishu_column,
     ('b0000000-0000-0000-0000-000000000001', 'approver', '批准', '批准', 'text', FALSE, 18)
 ON CONFLICT (template_id, field_key) DO NOTHING;
 
+-- 检测报告：检验结论强制审核（合格/不合格）
+UPDATE template_fields
+SET review_enforced = TRUE,
+    review_allowed_values = '["合格","不合格"]'::jsonb
+WHERE template_id = 'b0000000-0000-0000-0000-000000000001'
+  AND field_key = 'inspection_conclusion';
+
 -- 3.2 快递单字段（6个）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order) VALUES
     ('b0000000-0000-0000-0000-000000000002', 'tracking_number', '快递单号', '快递单号', 'text', TRUE, 1),
@@ -107,9 +114,9 @@ INSERT INTO document_templates (id, tenant_id, name, code, description, process_
     ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 'single', 1, FALSE, 2)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
--- 4.3 照明综合报告模板（合并模板）
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000012', 'a0000000-0000-0000-0000-000000000002', '照明综合报告', 'lighting_combined', '积分球+光分布合并报告', 'merge', 2, TRUE, 3)
+-- 4.3 照明综合报告模板（合并模板，自动通过审核）
+INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, auto_approve, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000012', 'a0000000-0000-0000-0000-000000000002', '照明综合报告', 'lighting_combined', '积分球+光分布合并报告', 'merge', 2, TRUE, TRUE, 3)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 

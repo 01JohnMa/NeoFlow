@@ -505,6 +505,9 @@ class OCRWorkflow:
         用于照明事业部等场景：上传积分球+光分布两份文档，
         分别用各自的子模板提取，然后合并结果。
         
+        支持多样品场景：积分球 PDF 可能有多页（每页一个样品），
+        每个样品的积分球数据会与同一份光分布数据合并，生成多条结果。
+        
         Args:
             document_id: 文档ID
             files: 文件列表，每项包含 file_path 和 doc_type
@@ -512,7 +515,7 @@ class OCRWorkflow:
             tenant_id: 租户ID
             
         Returns:
-            合并后的处理结果
+            合并后的处理结果，包含 extraction_results 数组（支持多样品）
         """
         processing_start = datetime.now()
         
@@ -548,7 +551,9 @@ class OCRWorkflow:
             sub_template_b = template.get("sub_template_b")
             
             # 3. 分别处理每份文档
-            result_a = None
+            # doc_type_a（如积分球）支持多样品（逐页提取）
+            # doc_type_b（如光分布）保持单一结果
+            results_a = []  # 改为列表，支持多样品
             result_b = None
             ocr_texts = []
             
@@ -559,23 +564,35 @@ class OCRWorkflow:
                 if not file_path:
                     continue
                 
-                # OCR 提取
-                logger.info(f"OCR处理文档: {file_path} (类型: {doc_type})")
-                ocr_result = await ocr_service.process_document(file_path)
-                ocr_text = ocr_result["text"]
-                ocr_texts.append(ocr_text)
-                
-                # 根据文档类型选择子模板（带重试）
+                # 根据文档类型选择处理方式
                 if doc_type == merge_rule.get("doc_type_a") and sub_template_a:
-                    prompt = template_service.build_extraction_prompt(sub_template_a, ocr_text)
-                    response_content = await self._llm_invoke_with_retry(prompt)
-                    try:
-                        result_a = json.loads(response_content)
-                    except json.JSONDecodeError:
-                        result_a = self._clean_json_response(response_content)
-                    logger.info(f"文档A ({doc_type}) 提取完成: {len(result_a)}个字段")
+                    # doc_type_a（积分球）：逐页处理，支持多样品
+                    logger.info(f"逐页OCR处理文档A: {file_path} (类型: {doc_type})")
+                    page_results = await ocr_service.process_document_per_page(file_path)
+                    
+                    for page in page_results:
+                        ocr_text = page["text"]
+                        ocr_texts.append(ocr_text)
+                        
+                        prompt = template_service.build_extraction_prompt(sub_template_a, ocr_text)
+                        response_content = await self._llm_invoke_with_retry(prompt)
+                        try:
+                            extracted = json.loads(response_content)
+                        except json.JSONDecodeError:
+                            extracted = self._clean_json_response(response_content)
+                        
+                        results_a.append(extracted)
+                        logger.info(f"文档A 第{page['page']}页提取完成: {len(extracted)}个字段")
+                    
+                    logger.info(f"文档A ({doc_type}) 共提取 {len(results_a)} 个样品")
                     
                 elif doc_type == merge_rule.get("doc_type_b") and sub_template_b:
+                    # doc_type_b（光分布）：保持原有逻辑，整体处理
+                    logger.info(f"OCR处理文档B: {file_path} (类型: {doc_type})")
+                    ocr_result = await ocr_service.process_document(file_path)
+                    ocr_text = ocr_result["text"]
+                    ocr_texts.append(ocr_text)
+                    
                     prompt = template_service.build_extraction_prompt(sub_template_b, ocr_text)
                     response_content = await self._llm_invoke_with_retry(prompt)
                     try:
@@ -584,22 +601,41 @@ class OCRWorkflow:
                         result_b = self._clean_json_response(response_content)
                     logger.info(f"文档B ({doc_type}) 提取完成: {len(result_b)}个字段")
             
-            # 4. 合并结果
-            merged_data = template_service.merge_extraction_results(result_a, result_b)
+            # 4. 合并结果：每个 doc_type_a 样品 + 同一份 doc_type_b 数据
+            extraction_results = []
+            
+            if results_a:
+                for i, result_a in enumerate(results_a):
+                    merged = template_service.merge_extraction_results(result_a, result_b)
+                    extraction_results.append({
+                        "sample_index": i + 1,
+                        "data": merged
+                    })
+            else:
+                # 如果没有 doc_type_a 结果，只返回 doc_type_b
+                extraction_results.append({
+                    "sample_index": 1,
+                    "data": result_b or {}
+                })
             
             processing_time = (datetime.now() - processing_start).total_seconds()
             
-            logger.info(f"合并提取完成: {len(merged_data)}个字段，耗时{processing_time:.2f}s")
+            logger.info(f"合并提取完成: {len(extraction_results)}个样品，耗时{processing_time:.2f}s")
             
+            # 返回结构：兼容单样品和多样品
+            # extraction_data 保留第一个样品的数据（向后兼容）
+            # extraction_results 包含所有样品数据（新增）
             return {
                 "success": True,
                 "document_id": document_id,
                 "template_id": template_id,
                 "template_name": template.get("name"),
-                "document_type": template.get("code"),  # 使用模板 code 作为文档类型（解耦）
-                "extraction_data": merged_data,
+                "document_type": template.get("code"),
+                "extraction_data": extraction_results[0]["data"] if extraction_results else {},  # 向后兼容
+                "extraction_results": extraction_results,  # 新增：支持多样品
+                "sample_count": len(extraction_results),  # 新增：样品数量
                 "sub_results": {
-                    "result_a": result_a,
+                    "results_a": results_a,  # 改为列表
                     "result_b": result_b
                 },
                 "processing_time": processing_time,

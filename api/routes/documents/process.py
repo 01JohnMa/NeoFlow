@@ -431,11 +431,12 @@ async def process_merge_documents(
     合并模式处理：多份文档分别提取后合并
     
     用于照明事业部场景：上传积分球+光分布文档，分别提取后合并结果
+    支持多样品：积分球 PDF 多页时，每页一个样品，生成多条记录
     
     - **template_id**: 合并模板ID（process_mode='merge'）
     - **files**: 文件列表，每项包含 file_path 和 doc_type
     """
-    document_id = None
+    created_doc_ids = []  # 记录所有创建的文档ID，用于异常时清理
     try:
         if not user.tenant_id:
             raise HTTPException(status_code=400, detail="请先选择所属部门")
@@ -444,10 +445,8 @@ async def process_merge_documents(
             raise HTTPException(status_code=400, detail="请提供至少一个文件")
         
         # 获取模板（支持 UUID 或 code）
-        # 先尝试按 code 查询（前端可能传 'lighting_combined' 等模板代码）
         template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
         if not template:
-            # 如果按 code 没找到，尝试按 UUID 查询（向后兼容）
             template = await template_service.get_template(request.template_id)
         if not template:
             raise HTTPException(status_code=404, detail="模板不存在")
@@ -468,105 +467,123 @@ async def process_merge_documents(
                 "file_path": file_info.file_path,
                 "doc_type": file_info.doc_type
             })
-            # 根据文件路径查找原始文档ID
             source_doc = await supabase_service.get_document_by_file_path(file_info.file_path)
             if source_doc:
                 source_doc_ids.append(source_doc["id"])
         
-        # 生成合并文档 ID
-        document_id = str(uuid.uuid4())
-        
-        # 获取模板的真实 UUID（前端可能传的是 code）
         template_uuid = template.get("id")
+        template_name = template.get("name", "照明综合报告")
+        auto_approve = template.get("auto_approve", False)
         
-        # 先创建合并文档记录，避免前端无法查询状态
-        base_display_name = f"合并文档_{template.get('name')}"
-        merged_doc_data = {
-            "id": document_id,
-            "user_id": user.user_id,
-            "tenant_id": user.tenant_id,
-            "template_id": template_uuid,  # 使用真实的模板 UUID
-            "document_type": template.get("name", "照明综合报告"),
-            "status": "processing",
-            "display_name": base_display_name,
-            "original_file_name": base_display_name,
-            "file_name": f"merged_{document_id}",
-            "file_path": "",  # 合并文档无实体文件
-            "source_document_ids": source_doc_ids,
-        }
-        await supabase_service.create_document(merged_doc_data)
-        
-        # 执行合并处理
+        # 执行合并处理（支持多样品）
         result = await ocr_workflow.process_merge(
-            document_id=document_id,
+            document_id=str(uuid.uuid4()),  # 临时ID，实际会为每个样品创建独立ID
             files=files,
-            template_id=template_uuid,  # 使用真实的模板 UUID
+            template_id=template_uuid,
             tenant_id=user.tenant_id
         )
         
-        # 检查处理结果 - 失败时抛出业务异常而非返回带无效 ID 的响应
         if not result.get("success"):
             error_msg = result.get("error", "合并处理失败")
             logger.error(f"合并处理失败: {error_msg}")
-            raise AppException(
-                code="MERGE_FAILED",
-                detail=error_msg,
-                status_code=500
-            )
+            raise AppException(code="MERGE_FAILED", detail=error_msg, status_code=500)
         
-        # 处理成功后，更新文档记录并保存结果
-        extraction_data = result.get("extraction_data") or {}
-        if not extraction_data:
-            await supabase_service.update_document_status(
-                document_id,
-                "failed",
-                error_message="未提取到有效字段，请检查模板与文档类型"
-            )
+        # 获取多样品结果
+        extraction_results = result.get("extraction_results", [])
+        if not extraction_results:
             raise AppException(
                 code="MERGE_EMPTY_RESULT",
                 detail="未提取到有效字段，请检查模板与文档类型",
                 status_code=500
             )
         
-        # 1. 生成规范化显示名称
-        display_name = supabase_service.generate_display_name(
-            document_type=result.get("template_name", "照明综合报告"),
-            extraction_data=extraction_data
-        )
+        sample_count = len(extraction_results)
+        logger.info(f"合并处理完成，共 {sample_count} 个样品，auto_approve={auto_approve}")
         
-        # 2. 更新合并文档记录
-        await supabase_service.update_document(document_id, {
-            "document_type": result.get("template_name", "照明综合报告"),
-            "status": "pending_review",
-            "display_name": display_name,
-            "ocr_text": result.get("ocr_text", ""),
-            "ocr_confidence": result.get("ocr_confidence"),
-            "processed_at": datetime.now().isoformat(),
-            "error_message": None
-        })
-        logger.info(f"合并文档记录已更新: {document_id}, 关联原文档: {source_doc_ids}")
+        # 为每个样品创建独立的文档记录
+        for sample_result in extraction_results:
+            sample_index = sample_result.get("sample_index", 1)
+            sample_data = sample_result.get("data", {})
+            
+            if not sample_data:
+                continue
+            
+            # 生成文档ID
+            doc_id = str(uuid.uuid4())
+            created_doc_ids.append(doc_id)
+            
+            # 生成显示名称（多样品时加后缀）
+            base_display_name = supabase_service.generate_display_name(
+                document_type=template_name,
+                extraction_data=sample_data
+            )
+            if sample_count > 1:
+                display_name = f"{base_display_name}_样品{sample_index}"
+            else:
+                display_name = base_display_name
+            
+            # 确定文档状态（auto_approve 时直接完成，跳过审核）
+            doc_status = "completed" if auto_approve else "pending_review"
+            
+            # 创建文档记录
+            doc_data = {
+                "id": doc_id,
+                "user_id": user.user_id,
+                "tenant_id": user.tenant_id,
+                "template_id": template_uuid,
+                "document_type": template_name,
+                "status": doc_status,
+                "display_name": display_name,
+                "original_file_name": display_name,
+                "file_name": f"merged_{doc_id}",
+                "file_path": "",
+                "source_document_ids": source_doc_ids,
+                "ocr_confidence": result.get("ocr_confidence"),
+                "processed_at": datetime.now().isoformat(),
+            }
+            await supabase_service.create_document(doc_data)
+            logger.info(f"样品{sample_index} 文档记录已创建: {doc_id}, 状态: {doc_status}")
+            
+            # 保存提取结果
+            await supabase_service.save_extraction_result(
+                document_id=doc_id,
+                document_type=template_name,
+                extraction_data=sample_data
+            )
+            logger.info(f"样品{sample_index} 提取结果已保存: {doc_id}")
+            
+            # 如果 auto_approve，直接推送飞书
+            if auto_approve:
+                try:
+                    await feishu_service.push_lighting_report(
+                        sample_data,
+                        file_name=display_name
+                    )
+                    logger.info(f"样品{sample_index} 飞书推送成功: {doc_id}")
+                except Exception as feishu_error:
+                    logger.warning(f"样品{sample_index} 飞书推送失败（不影响结果）: {feishu_error}")
         
-        # 3. 保存提取结果到 lighting_reports 表
-        await supabase_service.save_extraction_result(
-            document_id=document_id,
-            document_type=result.get("template_name", "照明综合报告"),
-            extraction_data=extraction_data
-        )
-        logger.info(f"照明提取结果已保存: {document_id}")
-        
-        return result
+        # 返回结果
+        return {
+            "success": True,
+            "sample_count": sample_count,
+            "document_ids": created_doc_ids,
+            "auto_approved": auto_approve,
+            "extraction_results": extraction_results,
+            "template_name": template_name,
+            "processing_time": result.get("processing_time")
+        }
         
     except (FileNotFoundError, HTTPException):
         raise
     except Exception as e:
         logger.error(f"合并处理失败: {e}")
-        try:
-            if document_id:
-                await supabase_service.update_document_status(
-                    document_id, "failed", str(e)
-                )
-        except Exception:
-            pass
+        # 清理已创建的文档记录
+        for doc_id in created_doc_ids:
+            try:
+                await supabase_service.update_document_status(doc_id, "failed", str(e))
+            except Exception:
+                pass
         raise ProcessingError(f"处理失败: {str(e)}")
 
 

@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Spinner, PageLoader } from '@/components/ui/spinner'
+import { Modal } from '@/components/ui/modal'
 import { cn, getStatusColor, getStatusText, formatDate, getDocumentTypeText } from '@/lib/utils'
 import { documentsService } from '@/services/documents'
 import { shouldHideDownloadForType } from '@/config/features'
@@ -48,6 +49,8 @@ export function DocumentDetail() {
   const [isEditing, setIsEditing] = useState(false)
   const [editedData, setEditedData] = useState<Record<string, unknown>>({})
   const [validationNotes, setValidationNotes] = useState('')
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [modalMessage, setModalMessage] = useState('')
   
   // 重命名相关状态
   const [isRenaming, setIsRenaming] = useState(false)
@@ -106,6 +109,13 @@ export function DocumentDetail() {
       refetchResult()
       refetchStatus()  // 刷新状态以更新 document_type
     } catch (err) {
+      const error = err as { response?: { data?: { detail?: string } } }
+      const detail = error?.response?.data?.detail
+      const message = typeof detail === 'string' && detail.trim()
+        ? detail
+        : '审核失败，请检查字段后重试'
+      setModalMessage(message)
+      setIsModalOpen(true)
       console.error('Save failed:', err)
     }
   }
@@ -492,6 +502,13 @@ export function DocumentDetail() {
           </CardContent>
         </Card>
       )}
+
+      <Modal
+        open={isModalOpen}
+        title="审核提示"
+        message={modalMessage}
+        onClose={() => setIsModalOpen(false)}
+      />
     </div>
   )
 }
