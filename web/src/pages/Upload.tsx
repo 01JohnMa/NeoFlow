@@ -238,10 +238,10 @@ export function Upload() {
 
   // Upload and process (照明系统：固定两文件合并模式)
   const handleMergeUpload = async () => {
-    // 检查是否所有文件都已选择
-    const allFilesSelected = mergeFiles.every(item => item.file !== null)
-    if (!allFilesSelected) {
-      setUploadError('请上传所有必需的文档')
+    // 至少选择一个文件即可提交
+    const hasAtLeastOneFile = mergeFiles.some(item => item.file !== null)
+    if (!hasAtLeastOneFile) {
+      setUploadError('请至少上传一个文档')
       return
     }
 
@@ -249,10 +249,12 @@ export function Upload() {
       setUploadError(null)
 
       // 1. 上传所有文件（不传 templateId，因为数据库字段是 UUID 类型）
-      const filesToUpload = mergeFiles.map(item => ({
-        file: item.file!,
-        docType: item.docType,
-      }))
+      const filesToUpload = mergeFiles
+        .filter(item => item.file !== null)
+        .map(item => ({
+          file: item.file!,
+          docType: item.docType,
+        }))
 
       const uploadResults = await uploadMultipleMutation.mutateAsync({
         files: filesToUpload,
@@ -297,7 +299,7 @@ export function Upload() {
                       uploadMultipleMutation.isPending || processMergeMutation.isPending
   
   // 检查照明系统合并模式是否可以提交
-  const canSubmitMerge = uploadMode === 'lighting_merge' && mergeFiles.length > 0 && mergeFiles.every(item => item.file !== null)
+  const canSubmitMerge = uploadMode === 'lighting_merge' && mergeFiles.length > 0 && mergeFiles.some(item => item.file !== null)
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fadeIn">
@@ -334,12 +336,12 @@ export function Upload() {
               照明综合报告
             </CardTitle>
             <CardDescription>
-              {tenantName && `${tenantName} - `}请分别上传积分球和光分布
+              {tenantName && `${tenantName} - `}可上传积分球或光分布（或两者）
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Badge variant="outline" className="text-accent-400 border-accent-400">
-              合并模式 - 需上传 2 份文档
+              合并模式 - 可上传 1-2 份文档
             </Badge>
           </CardContent>
         </Card>
