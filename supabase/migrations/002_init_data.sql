@@ -73,6 +73,12 @@ SET review_enforced = TRUE,
 WHERE template_id = 'b0000000-0000-0000-0000-000000000001'
   AND field_key = 'inspection_conclusion';
 
+-- 检测报告：检验结论提取提示
+UPDATE template_fields
+SET extraction_hint = '将检测结论表述都转为合格或者不合格，不确定就为无法确定'
+WHERE template_id = 'b0000000-0000-0000-0000-000000000001'
+  AND field_key = 'inspection_conclusion';
+
 -- 3.2 快递单字段（6个）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order) VALUES
     ('b0000000-0000-0000-0000-000000000002', 'tracking_number', '快递单号', '快递单号', 'text', TRUE, 1),
@@ -142,6 +148,17 @@ INSERT INTO template_fields (template_id, field_key, field_label, feishu_column,
     ('b0000000-0000-0000-0000-000000000010', 'rg', 'Rg', 'Rg', 'text', FALSE, 14, '积分球')
 ON CONFLICT (template_id, field_key) DO NOTHING;
 
+-- 积分球测试：提取提示
+UPDATE template_fields
+SET extraction_hint = '仅数值，不带单位'
+WHERE template_id = 'b0000000-0000-0000-0000-000000000010'
+  AND field_key IN ('cct', 'luminous_efficacy_sphere', 'luminous_flux_sphere', 'power_sphere', 'sdcm');
+
+UPDATE template_fields
+SET extraction_hint = '将duv字段提取结果科学记数法转换为小数'
+WHERE template_id = 'b0000000-0000-0000-0000-000000000010'
+  AND field_key = 'duv';
+
 -- 5.2 光分布测试字段（6个）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order, source_doc_type) VALUES
     ('b0000000-0000-0000-0000-000000000011', 'lamp_specification', '灯具规格', '灯具规格', 'text', FALSE, 1, '光分布'),
@@ -151,6 +168,12 @@ INSERT INTO template_fields (template_id, field_key, field_label, feishu_column,
     ('b0000000-0000-0000-0000-000000000011', 'peak_intensity', '峰值光强', '峰值光强', 'text', FALSE, 5, '光分布'),
     ('b0000000-0000-0000-0000-000000000011', 'beam_angle', '光束角', '光束角', 'text', FALSE, 6, '光分布')
 ON CONFLICT (template_id, field_key) DO NOTHING;
+
+-- 光分布测试：提取提示
+UPDATE template_fields
+SET extraction_hint = '仅数值，不带单位'
+WHERE template_id = 'b0000000-0000-0000-0000-000000000011'
+  AND field_key IN ('beam_angle', 'luminous_efficacy', 'luminous_flux', 'power');
 
 -- 5.3 照明综合报告字段（合并所有字段，共20个）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order, source_doc_type) VALUES
@@ -177,6 +200,21 @@ INSERT INTO template_fields (template_id, field_key, field_label, feishu_column,
     ('b0000000-0000-0000-0000-000000000012', 'peak_intensity', '峰值光强', '峰值光强', 'text', FALSE, 19, '光分布'),
     ('b0000000-0000-0000-0000-000000000012', 'beam_angle', '光束角', '光束角', 'text', FALSE, 20, '光分布')
 ON CONFLICT (template_id, field_key) DO NOTHING;
+
+-- 照明综合报告：提取提示
+UPDATE template_fields
+SET extraction_hint = '仅数值，不带单位'
+WHERE template_id = 'b0000000-0000-0000-0000-000000000012'
+  AND field_key IN (
+      'cct',
+      'luminous_efficacy',
+      'luminous_efficacy_sphere',
+      'luminous_flux',
+      'luminous_flux_sphere',
+      'peak_intensity',
+      'power_sphere',
+      'sdcm'
+  );
 
 
 -- ############################################################

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS template_fields (
     review_enforced BOOLEAN DEFAULT FALSE, -- 审核强制校验
     review_allowed_values JSONB,           -- 审核允许值列表（jsonb数组）
     default_value TEXT,                   -- 默认值
+    extraction_hint TEXT,                 -- 字段级提取提示
     source_doc_type VARCHAR(50),          -- merge模式：来自哪种文档类型
     sort_order INT DEFAULT 0,             -- 排序
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
