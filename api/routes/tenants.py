@@ -110,8 +110,20 @@ async def update_my_profile(
     
     注意：普通用户只能在首次设置时选择租户，之后不能更改
     """
-    # 如果用户已有租户，不允许更改（除非是超级管理员）
+    # 如果用户已有租户，不允许更改（除非是超级管理员或设置相同的租户）
     if request.tenant_id and user.tenant_id and not user.is_super_admin():
+        # 如果设置的是相同的租户，视为幂等操作，直接返回成功
+        if request.tenant_id == user.tenant_id:
+            logger.debug(f"用户 {user.user_id} 尝试设置相同的租户，幂等返回")
+            return {
+                "success": True,
+                "message": "部门设置未变更",
+                "profile": {
+                    "user_id": user.user_id,
+                    "tenant_id": user.tenant_id,
+                    "display_name": user.display_name
+                }
+            }
         raise HTTPException(
             status_code=403, 
             detail="已有所属部门，不能更改。如需更改请联系管理员"

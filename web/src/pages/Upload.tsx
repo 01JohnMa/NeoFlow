@@ -212,13 +212,13 @@ export function Upload() {
     }
   }
 
-  // Upload and process (质量运营：单文件自动识别模式)
+  // Upload and process (质量管理中心：单文件自动识别模式)
   const handleUpload = async () => {
     if (!selectedFile) return
 
     try {
       setUploadError(null)
-      // 质量运营不传 templateId，后端自动识别文档类型
+      // 质量管理中心不传 templateId，后端自动识别文档类型
       const result = await uploadMutation.mutateAsync({
         file: selectedFile,
         templateId: undefined
@@ -383,7 +383,7 @@ export function Upload() {
         </Card>
       )}
 
-      {/* Upload Area - 质量运营：单文件自动识别模式 */}
+      {/* Upload Area - 质量管理中心：单文件自动识别模式 */}
       {!isCameraOpen && !selectedFile && uploadMode === 'quality_auto' && (
         <Card>
           <CardContent className="pt-6">
@@ -540,7 +540,7 @@ export function Upload() {
         </Card>
       )}
 
-      {/* Selected File Preview - 质量运营单文件模式 */}
+      {/* Selected File Preview - 质量管理中心单文件模式 */}
       {selectedFile && !isCameraOpen && uploadMode === 'quality_auto' && (
         <Card>
           <CardHeader>

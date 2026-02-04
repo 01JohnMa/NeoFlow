@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { getAuthErrorMessage } from '@/lib/authErrors'
 import { authService, Tenant } from '@/services/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,8 +68,7 @@ export function Register() {
         setSuccess(true)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '注册失败，请重试'
-      setError(message)
+      setError(getAuthErrorMessage(err, '注册失败，请重试'))
     }
   }
 

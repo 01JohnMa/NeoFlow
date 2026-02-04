@@ -36,14 +36,14 @@ const LIGHTING_DOC_TYPES = [
 ]
 ```
 
-2. **初始化 mergeFiles**
+1. **初始化 mergeFiles**
 
 初始化时用 `label` 作为界面展示、`value` 作为 `docType` 存储：
 
 - `docType` 存 `value`（发送给后端）
 - 新增 `displayName` 或直接在渲染时从常量映射
 
-3. **渲染与上传**
+1. **渲染与上传**
 
 - 上传区域、说明文字使用 `label`
 - `handleMergeUpload` 仍发送 `doc_type: item.docType`（现在是“积分球/光分布”）
@@ -51,8 +51,9 @@ const LIGHTING_DOC_TYPES = [
 ## 影响评估
 
 - 仅影响照明合并上传的 doc_type 传参
-- 质量运营上传流程不变
+- 质量管理中心上传流程不变
 
 ## 文件
 
 - [web/src/pages/Upload.tsx](web/src/pages/Upload.tsx)
+

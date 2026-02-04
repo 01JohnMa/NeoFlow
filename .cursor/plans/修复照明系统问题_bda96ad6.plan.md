@@ -1,6 +1,6 @@
 ---
-name: 解耦照明与质量运营上传逻辑
-overview: 重构 Upload.tsx，解耦照明系统和质量运营部的上传逻辑。照明系统始终显示两文件合并上传，质量运营使用单文件自动识别，两者逻辑独立互不影响。
+name: 解耦照明与质量管理中心上传逻辑
+overview: 重构 Upload.tsx，解耦照明系统和质量管理中心的上传逻辑。照明系统始终显示两文件合并上传，质量管理中心使用单文件自动识别，两者逻辑独立互不影响。
 todos:
   - id: refactor-upload-decouple
     content: 重构 Upload.tsx：根据 tenantCode 直接决定上传模式，移除复杂的级联判断
@@ -9,14 +9,14 @@ todos:
     content: 照明系统固定显示两文件上传界面（积分球 + 光分布），不依赖 templates/mergeRules 查询
     status: completed
   - id: quality-auto-mode
-    content: 质量运营保持单文件自动识别模式
+    content: 质量管理中心保持单文件自动识别模式
     status: completed
   - id: error-handling
     content: 添加 tenantCode 为空时的错误提示
     status: completed
 ---
 
-# 解耦照明系统与质量运营上传逻辑
+# 解耦照明系统与质量管理中心上传逻辑
 
 ## 问题分析
 
@@ -30,7 +30,7 @@ templates → selectedTemplate → isMergeMode → 显示哪种上传界面
 mergeRules → mergeFiles → merge 模式的文档类型
 ```
 
-**问题**：当任何一环数据获取失败，整个界面就会错乱。照明系统和质量运营的逻辑混在一起，互相影响。
+**问题**：当任何一环数据获取失败，整个界面就会错乱。照明系统和质量管理中心的逻辑混在一起，互相影响。
 
 ## 解耦方案
 
@@ -72,7 +72,7 @@ const uploadMode: UploadMode = useMemo(() => {
 - 文档1：积分球报告
 - 文档2：光分布报告
 
-**4. 质量运营：保持现有逻辑**
+**4. 质量管理中心：保持现有逻辑**
 
 单文件上传 + 后端自动识别文档类型
 
@@ -144,7 +144,7 @@ useEffect(() => {
 
 ## 优势
 
-1. **独立性**：照明和质量运营的逻辑完全分离
+1. **独立性**：照明和质量管理中心的逻辑完全分离
 2. **稳定性**：照明系统不依赖 templates/mergeRules 查询，即使查询失败也能正常显示
 3. **可维护性**：新增租户只需添加一个 case，不影响现有逻辑
 4. **可读性**：一目了然的模式判断，替代复杂的条件嵌套

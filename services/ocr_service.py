@@ -42,6 +42,10 @@ class OCRService:
     async def initialize(self) -> bool:
         """异步初始化OCR引擎"""
         try:
+            if not settings.OCR_ENABLED:
+                logger.warning("OCR 已禁用，跳过初始化")
+                return False
+
             # 验证模型路径
             model_paths = {
                 "检测模型": settings.OCR_DET_MODEL_PATH,
@@ -78,7 +82,9 @@ class OCRService:
             doc_orientation_classify_model_dir=settings.OCR_DOC_MODEL_PATH,
             use_doc_orientation_classify=True,
             use_doc_unwarping=False,
-            det_limit_side_len=640,
+            ir_optim=settings.OCR_IR_OPTIM,
+            enable_mkldnn=settings.OCR_USE_MKLDNN,
+            det_limit_side_len=800,
             det_limit_type='max'
         )
     
@@ -96,6 +102,9 @@ class OCRService:
                 "total_lines": int     # 总行数
             }
         """
+        if not settings.OCR_ENABLED:
+            raise OCRValidationError("OCR 已禁用，无法处理文档")
+
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         
@@ -113,6 +122,9 @@ class OCRService:
     
     def _process_sync(self, file_path: str) -> Dict[str, Any]:
         """同步执行OCR - 使用 PaddleOCR 的 ocr() 方法"""
+        if not self.ocr_engine:
+            raise OCRValidationError("OCR 引擎未初始化")
+
         # PaddleOCR 使用 ocr() 方法，不是 predict()
         result = self.ocr_engine.ocr(file_path, cls=True)
         
@@ -210,6 +222,9 @@ class OCRService:
         Returns:
             提取的文本行列表
         """
+        if not settings.OCR_ENABLED:
+            raise OCRValidationError("OCR 已禁用，无法处理文档")
+
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         
@@ -257,6 +272,9 @@ class OCRService:
                 ...
             ]
         """
+        if not settings.OCR_ENABLED:
+            raise OCRValidationError("OCR 已禁用，无法处理文档")
+
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         
@@ -274,6 +292,9 @@ class OCRService:
     
     def _process_per_page_sync(self, file_path: str) -> List[Dict[str, Any]]:
         """同步执行逐页 OCR"""
+        if not self.ocr_engine:
+            raise OCRValidationError("OCR 引擎未初始化")
+
         # PaddleOCR ocr() 返回格式: [[页1内容], [页2内容], ...] 每页一个列表
         ocr_result = self.ocr_engine.ocr(file_path, cls=True)
         

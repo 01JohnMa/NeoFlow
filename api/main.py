@@ -39,11 +39,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"✓ 上传目录: {settings.UPLOAD_FOLDER}")
     
     # 初始化OCR服务
-    try:
-        await ocr_service.initialize()
-        logger.info("✓ OCR服务初始化成功")
-    except Exception as e:
-        logger.warning(f"⚠ OCR服务初始化失败（可稍后重试）: {e}")
+    if settings.OCR_ENABLED:
+        try:
+            await ocr_service.initialize()
+            logger.info("✓ OCR服务初始化成功")
+        except Exception as e:
+            logger.warning(f"⚠ OCR服务初始化失败（可稍后重试）: {e}")
+    else:
+        logger.warning("⚠ OCR服务已禁用（OCR_ENABLED=false）")
     
     # 初始化Supabase服务
     try:

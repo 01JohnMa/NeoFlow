@@ -81,6 +81,8 @@ services:
             - anon
 
   ## REST API (PostgREST)
+  ## 【重要】hide_credentials 必须为 false，否则 Authorization header 会被移除
+  ## 导致 PostgREST 无法解析 JWT claims，auth.uid() 返回 NULL，RLS 策略失效
   - name: rest-v1
     url: http://rest:3000/
     routes:
@@ -92,7 +94,7 @@ services:
       - name: cors
       - name: key-auth
         config:
-          hide_credentials: true
+          hide_credentials: false
       - name: acl
         config:
           hide_groups_header: true

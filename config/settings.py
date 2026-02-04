@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     OCR_REC_MODEL_PATH: str = "./model/PP-OCRv5_server_rec_infer"
     OCR_ORI_MODEL_PATH: str = "./model/PP-LCNet_x1_0_textline_ori_infer"
     OCR_DOC_MODEL_PATH: str = "./model/PP-LCNet_x1_0_doc_ori_infer"
+    OCR_ENABLED: bool = True
+    OCR_IR_OPTIM: bool = False
+    OCR_USE_MKLDNN: bool = False
     
     # ============ 文件存储 ============
     UPLOAD_FOLDER: str = "./uploads"

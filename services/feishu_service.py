@@ -333,7 +333,7 @@ class FeishuService:
         # 转换字段格式
         fields = self._convert_by_field_mapping(data, self.LIGHTING_REPORT_FIELD_MAPPING)
         if file_name:
-            fields["文件名称"] = file_name
+            fields["文件名"] = file_name
         
         logger.info(f"准备推送照明报告到飞书: {len(fields)} 个字段")
         

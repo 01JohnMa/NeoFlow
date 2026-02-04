@@ -8,7 +8,7 @@ from loguru import logger
 import os
 
 from services.supabase_service import supabase_service
-from api.dependencies.auth import get_current_user, get_user_client, CurrentUser
+from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AuthenticationError
 
 router = APIRouter()
@@ -29,15 +29,31 @@ async def get_document_status(
     """
     获取文档处理状态（需要登录）
     
-    RLS 策略确保用户只能访问自己的文档
+    使用 service_role 查询，手动验证用户权限：
+    - 普通用户只能访问自己的文档
+    - 租户管理员可以访问本租户所有文档
+    - 超级管理员可以访问所有文档
     """
     try:
-        user_client = get_user_client(user)
-        
-        result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询（绕过 RLS）
+        result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = result.data[0] if result.data else None
         
         if not document:
+            raise DocumentNotFoundError(document_id)
+        
+        # 手动验证权限
+        doc_user_id = document.get("user_id")
+        doc_tenant_id = document.get("tenant_id")
+        
+        # 超级管理员可以访问所有文档
+        if user.is_super_admin():
+            pass  # 允许访问
+        # 租户管理员可以访问本租户的文档
+        elif user.is_tenant_admin() and doc_tenant_id == user.tenant_id:
+            pass  # 允许访问
+        # 普通用户只能访问自己的文档
+        elif doc_user_id != user.user_id:
             raise DocumentNotFoundError(document_id)
         
         return {
@@ -61,6 +77,28 @@ async def get_document_status(
         raise ProcessingError(f"获取状态失败: {str(e)}")
 
 
+def _check_document_access(document: dict, user: CurrentUser, document_id: str):
+    """
+    验证用户是否有权访问文档
+    
+    权限规则：
+    - 超级管理员可以访问所有文档
+    - 租户管理员可以访问本租户的文档
+    - 普通用户只能访问自己的文档
+    """
+    doc_user_id = document.get("user_id")
+    doc_tenant_id = document.get("tenant_id")
+    
+    if user.is_super_admin():
+        return  # 超级管理员可以访问所有文档
+    if user.is_tenant_admin() and doc_tenant_id == user.tenant_id:
+        return  # 租户管理员可以访问本租户的文档
+    if doc_user_id == user.user_id:
+        return  # 普通用户可以访问自己的文档
+    
+    raise DocumentNotFoundError(document_id)
+
+
 @router.get("/{document_id}/result")
 async def get_extraction_result(
     document_id: str,
@@ -75,13 +113,15 @@ async def get_extraction_result(
     - 404: 文档不存在或无权访问
     """
     try:
-        user_client = get_user_client(user)
-        
-        doc_result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询（绕过 RLS），手动验证权限
+        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
             raise DocumentNotFoundError(document_id)
+        
+        # 验证用户权限
+        _check_document_access(document, user, document_id)
         
         document_type = document.get("document_type")
         doc_status = document.get("status")
@@ -108,7 +148,7 @@ async def get_extraction_result(
                 inferred_type = None
                 for type_name, tbl_name in [("检测报告", "inspection_reports"), ("快递单", "expresses"), ("抽样单", "sampling_forms")]:
                     try:
-                        query_result = user_client.table(tbl_name).select("*").eq("document_id", document_id).execute()
+                        query_result = supabase_service.client.table(tbl_name).select("*").eq("document_id", document_id).execute()
                         if query_result.data:
                             result = query_result.data[0]
                             inferred_type = type_name
@@ -144,7 +184,7 @@ async def get_extraction_result(
         if result is None:
             table_name = supabase_service.get_table_name(document_type)
             if table_name:
-                result_query = user_client.table(table_name).select("*").eq("document_id", document_id).execute()
+                result_query = supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
                 result = result_query.data[0] if result_query.data else None
         
         if not result:
@@ -191,13 +231,15 @@ async def download_document(
     下载原始文档（需要登录）
     """
     try:
-        user_client = get_user_client(user)
-        
-        result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询，手动验证权限
+        result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = result.data[0] if result.data else None
         
         if not document:
             raise DocumentNotFoundError(document_id)
+        
+        # 验证用户权限
+        _check_document_access(document, user, document_id)
         
         file_path = document.get("file_path")
         if not os.path.exists(file_path):
@@ -229,12 +271,22 @@ async def list_documents(
     """
     列出文档（需要登录）
     
-    RLS 策略自动过滤：用户只能看到自己的文档
+    权限过滤：
+    - 超级管理员可以看到所有文档
+    - 租户管理员可以看到本租户的文档
+    - 普通用户只能看到自己的文档
     """
     try:
-        user_client = get_user_client(user)
+        # 使用 service_role 查询，手动添加权限过滤
+        query = supabase_service.client.table("documents").select("*")
         
-        query = user_client.table("documents").select("*")
+        # 根据用户角色添加过滤条件
+        if user.is_super_admin():
+            pass  # 超级管理员可以看到所有文档
+        elif user.is_tenant_admin() and user.tenant_id:
+            query = query.eq("tenant_id", user.tenant_id)
+        else:
+            query = query.eq("user_id", user.user_id)
         
         if status:
             query = query.eq("status", status)
@@ -244,8 +296,17 @@ async def list_documents(
         offset = (page - 1) * limit
         result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
         
-        # 统计总数
-        count_query = user_client.table("documents").select("id", count="exact")
+        # 统计总数（使用相同的权限过滤）
+        count_query = supabase_service.client.table("documents").select("id", count="exact")
+        
+        # 根据用户角色添加过滤条件（与上面保持一致）
+        if user.is_super_admin():
+            pass
+        elif user.is_tenant_admin() and user.tenant_id:
+            count_query = count_query.eq("tenant_id", user.tenant_id)
+        else:
+            count_query = count_query.eq("user_id", user.user_id)
+        
         if status:
             count_query = count_query.eq("status", status)
         if document_type:
@@ -279,13 +340,15 @@ async def delete_document(
     删除文档（需要登录）
     """
     try:
-        user_client = get_user_client(user)
-        
-        result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询，手动验证权限
+        result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = result.data[0] if result.data else None
         
         if not document:
             raise DocumentNotFoundError(document_id)
+        
+        # 验证用户权限（只有文档所有者或管理员可以删除）
+        _check_document_access(document, user, document_id)
         
         # 删除文件
         file_path = document.get("file_path")
@@ -293,7 +356,7 @@ async def delete_document(
             os.remove(file_path)
         
         # 删除数据库记录
-        user_client.table("documents").delete().eq("id", document_id).execute()
+        supabase_service.client.table("documents").delete().eq("id", document_id).execute()
         
         return {
             "document_id": document_id,

@@ -10,7 +10,7 @@ import json
 from services.supabase_service import supabase_service
 from services.feishu_service import feishu_service
 from services.template_service import template_service
-from api.dependencies.auth import get_current_user, get_user_client, CurrentUser
+from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import (
     DocumentNotFoundError, 
     DocumentTypeError, 
@@ -82,14 +82,22 @@ async def validate_document(
     - **validation_notes**: 审核备注（可选）
     """
     try:
-        user_client = get_user_client(user)
-        
-        # 检查文档是否存在
-        doc_result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询，手动验证权限
+        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
             raise DocumentNotFoundError(document_id)
+        
+        # 验证用户权限（只有文档所有者或管理员可以审核）
+        doc_user_id = document.get("user_id")
+        doc_tenant_id = document.get("tenant_id")
+        if not user.is_super_admin():
+            if user.is_tenant_admin():
+                if doc_tenant_id != user.tenant_id:
+                    raise DocumentNotFoundError(document_id)
+            elif doc_user_id != user.user_id:
+                raise DocumentNotFoundError(document_id)
         
         # 校验强制审核条件（如果配置了字段规则）
         template_id = document.get("template_id")
@@ -116,13 +124,13 @@ async def validate_document(
         if not table_name:
             raise DocumentTypeError(request.document_type)
         
-        result = user_client.table(table_name).update(update_data).eq("document_id", document_id).execute()
+        result = supabase_service.client.table(table_name).update(update_data).eq("document_id", document_id).execute()
         
         if not result.data:
             raise ProcessingError("更新失败")
         
         # 审核通过后，更新文档主表状态为 completed
-        user_client.table("documents").update({
+        supabase_service.client.table("documents").update({
             "status": "completed"
         }).eq("id", document_id).execute()
         
@@ -135,25 +143,69 @@ async def validate_document(
         )
 
         # 审核保存后推送到飞书多维表格
-        if request.document_type in ("检测报告", "inspection_report"):
-            try:
-                await feishu_service.push_inspection_report(
-                    result.data[0],
-                    attachment_path=document.get("file_path"),
-                    file_name=file_name_for_push
+        # 优先使用模板配置，如果没有配置则回退到默认配置
+        try:
+            # 检查模板是否有飞书配置
+            use_template_config = (
+                template and 
+                template.get("feishu_bitable_token") and 
+                template.get("feishu_table_id")
+            )
+            
+            if use_template_config:
+                # 使用模板配置推送
+                field_mapping = template_service.build_field_mapping(template)
+                bitable_token = template.get("feishu_bitable_token")
+                table_id = template.get("feishu_table_id")
+                
+                logger.info(f"使用模板配置推送飞书: template_id={template.get('id')}, bitable_token={bitable_token}, table_id={table_id}")
+                
+                # 准备推送数据
+                push_data = {**result.data[0]}
+                if file_name_for_push:
+                    # 查找是否有"文件名"字段的映射
+                    file_name_field = None
+                    for field_key, feishu_col in field_mapping.items():
+                        if feishu_col == "文件名":
+                            file_name_field = field_key
+                            break
+                    if file_name_field:
+                        push_data[file_name_field] = file_name_for_push
+                    elif "file_name" not in push_data:
+                        # 如果没有映射，添加 file_name 字段
+                        push_data["file_name"] = file_name_for_push
+                        field_mapping["file_name"] = "文件名"
+                
+                # 推送
+                success = await feishu_service.push_by_template(
+                    push_data,
+                    field_mapping,
+                    bitable_token,
+                    table_id
                 )
-                logger.info(f"检测报告飞书推送成功: {document_id}")
-            except Exception as feishu_error:
-                logger.warning(f"检测报告飞书推送失败（不影响审核结果）: {feishu_error}")
-        elif request.document_type in ("照明综合报告", "lighting_combined", "lighting_report"):
-            try:
-                await feishu_service.push_lighting_report(
-                    result.data[0],
-                    file_name=file_name_for_push
-                )
-                logger.info(f"照明报告飞书推送成功: {document_id}")
-            except Exception as feishu_error:
-                logger.warning(f"照明报告飞书推送失败（不影响审核结果）: {feishu_error}")
+                
+                if success:
+                    logger.info(f"使用模板配置推送飞书成功: {document_id}")
+                else:
+                    logger.warning(f"使用模板配置推送飞书失败: {document_id}")
+            else:
+                # 回退到默认配置（向后兼容）
+                logger.info(f"模板未配置飞书，使用默认配置推送: {document_id}")
+                if request.document_type in ("检测报告", "inspection_report"):
+                    await feishu_service.push_inspection_report(
+                        result.data[0],
+                        attachment_path=document.get("file_path"),
+                        file_name=file_name_for_push
+                    )
+                    logger.info(f"检测报告飞书推送成功（使用默认配置）: {document_id}")
+                elif request.document_type in ("照明综合报告", "lighting_combined", "lighting_report"):
+                    await feishu_service.push_lighting_report(
+                        result.data[0],
+                        file_name=file_name_for_push
+                    )
+                    logger.info(f"照明报告飞书推送成功（使用默认配置）: {document_id}")
+        except Exception as feishu_error:
+            logger.warning(f"飞书推送失败（不影响审核结果）: {feishu_error}")
         
         return {
             "success": True,
@@ -188,17 +240,25 @@ async def rename_document(
         if len(request.display_name) > 255:
             raise ValidationError("显示名称不能超过255个字符")
         
-        user_client = get_user_client(user)
-        
-        # 检查文档是否存在
-        doc_result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询，手动验证权限
+        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
             raise DocumentNotFoundError(document_id)
         
+        # 验证用户权限（只有文档所有者或管理员可以重命名）
+        doc_user_id = document.get("user_id")
+        doc_tenant_id = document.get("tenant_id")
+        if not user.is_super_admin():
+            if user.is_tenant_admin():
+                if doc_tenant_id != user.tenant_id:
+                    raise DocumentNotFoundError(document_id)
+            elif doc_user_id != user.user_id:
+                raise DocumentNotFoundError(document_id)
+        
         # 更新显示名称
-        user_client.table("documents").update({
+        supabase_service.client.table("documents").update({
             "display_name": request.display_name.strip()
         }).eq("id", document_id).execute()
         
@@ -231,17 +291,25 @@ async def reject_document(
     - **reason**: 打回原因
     """
     try:
-        user_client = get_user_client(user)
-        
-        # 检查文档是否存在
-        doc_result = user_client.table("documents").select("*").eq("id", document_id).execute()
+        # 使用 service_role 查询，手动验证权限
+        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
             raise DocumentNotFoundError(document_id)
         
+        # 验证用户权限（只有文档所有者或管理员可以打回）
+        doc_user_id = document.get("user_id")
+        doc_tenant_id = document.get("tenant_id")
+        if not user.is_super_admin():
+            if user.is_tenant_admin():
+                if doc_tenant_id != user.tenant_id:
+                    raise DocumentNotFoundError(document_id)
+            elif doc_user_id != user.user_id:
+                raise DocumentNotFoundError(document_id)
+        
         # 更新文档状态为失败
-        user_client.table("documents").update({
+        supabase_service.client.table("documents").update({
             "status": "failed",
             "error_message": f"审核打回: {request.reason}"
         }).eq("id", document_id).execute()

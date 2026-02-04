@@ -75,7 +75,12 @@ async def upload_document(
             await supabase_service.create_document(document_data)
             logger.info(f"文档已保存到数据库: {document_id}, 用户: {user.user_id}")
         except Exception as e:
-            logger.warning(f"数据库保存失败（文件已保存）: {e}")
+            # 数据库保存失败时，清理已上传的文件并抛出错误
+            logger.error(f"数据库保存失败: {e}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"已清理上传文件: {file_path}")
+            raise ProcessingError(f"文档保存失败，请重试: {str(e)}")
         
         return {
             "document_id": document_id,

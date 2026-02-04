@@ -1,7 +1,7 @@
 -- ============================================================
 -- 多租户配置化系统 - 数据库迁移脚本
 -- ============================================================
--- 功能：支持多部门（质量运营、照明事业部等）使用同一系统
+-- 功能：支持多部门（质量管理中心、照明事业部等）使用同一系统
 -- 包含：租户表、文档模板表、模板字段表、模板示例表、合并规则表
 -- ============================================================
 
@@ -34,7 +34,7 @@ END $$;
 -- 存储部门基础信息，飞书应用凭证共用（保留在 settings.py）
 CREATE TABLE IF NOT EXISTS tenants (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,           -- 租户名称，如"质量运营部"
+    name VARCHAR(100) NOT NULL,           -- 租户名称，如"质量管理中心"
     code VARCHAR(50) UNIQUE NOT NULL,     -- 租户代码，如"quality"
     description TEXT,                     -- 描述
     is_active BOOLEAN DEFAULT TRUE,       -- 是否启用

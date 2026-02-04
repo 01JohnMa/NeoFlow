@@ -1,0 +1,14 @@
+.git
+.gitignore
+.cursor
+.shared
+supabase/volumes
+supabase/volumes/**
+web/node_modules
+web/dist
+web/.vite
+__pycache__
+**/__pycache__
+**/*.pyc
+uploads
+logs

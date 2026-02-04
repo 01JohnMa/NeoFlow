@@ -37,6 +37,7 @@ env/
 .env
 .env.local
 .env.production
+.env.prod
 
 # 日志
 logs/

@@ -36,6 +36,24 @@ docker exec supabase-db psql -U postgres -d postgres -f /tmp/storage_base_tables
 docker restart supabase-storage
 ```
 
+### 生产部署（单机一体化）
+
+> 说明：以下方式把 web + 后端 + 统一入口（Nginx）与 Supabase 组合部署，外部只暴露 80 端口。
+
+**环境变量**：在仓库根目录放 `.env`，变量名与 `supabase/.env` 一致（如 `ANON_KEY`、`SERVICE_ROLE_KEY`、`POSTGRES_PASSWORD`、`JWT_SECRET`）。可复制 `env.example.txt` 为 `.env` 后按需修改。
+
+```bash
+# 在仓库根目录执行
+copy env.example.txt .env
+# 编辑 .env 后启动
+docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+默认路由：
+- `/` → 前端页面
+- `/api` → 后端 API
+- `/supabase` → Supabase Kong 网关
+
 ### 2. 启动后端
 
 ```bash
@@ -62,10 +80,10 @@ npm run dev
 
 | 服务 | 地址 | 说明 |
 |------|------|------|
-| 前端 | http://localhost:5173 | Vite 开发服务器 |
-| API | http://localhost:8080 | FastAPI 接口 |
-| API 文档 | http://localhost:8080/docs | Swagger UI |
-| Supabase | http://localhost:8000 | Kong 网关 |
+| 统一入口 | http://localhost | Nginx 入口 |
+| API | http://localhost/api | FastAPI 接口 |
+| API 文档 | http://localhost/docs | Swagger UI |
+| Supabase | http://localhost/supabase | Kong 网关 |
 | Studio | http://localhost:3001 | 数据库管理 |
 
 ## 项目结构

@@ -105,11 +105,15 @@ async def get_current_user(
                 user_data.tenant_code = tenant.get("code")
                 user_data.tenant_name = tenant.get("name")
             
-            logger.debug(f"用户信息: tenant_id={user_data.tenant_id}, role={user_data.role}")
+            # Log detailed info for debugging tenant issues
+            if user_data.tenant_id:
+                logger.debug(f"用户信息: user_id={user_id}, tenant_id={user_data.tenant_id}, tenant_code={user_data.tenant_code}, role={user_data.role}")
+            else:
+                logger.warning(f"用户 {user_id} 的 profile 存在但 tenant_id 为空，可能是注册时触发器未正确写入或前端未补写")
         else:
-            logger.warning(f"用户 {user_id} 没有 profile 记录")
+            logger.warning(f"用户 {user_id} 没有 profile 记录，可能是 handle_new_user 触发器未执行")
     except Exception as e:
-        logger.warning(f"获取用户 profile 失败: {e}")
+        logger.error(f"获取用户 profile 失败: user_id={user_id}, error={e}")
     
     return user_data
 

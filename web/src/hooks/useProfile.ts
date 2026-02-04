@@ -1,23 +1,57 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import { useProfileStore, UserProfile, Template, MergeRule } from '@/store/useStore'
 import { useAuthStore } from '@/store/useStore'
 import { api } from '@/services/api'
+import { getPendingProfile, clearPendingProfile } from '@/services/auth'
 
 export function useProfile() {
   const { profile, templates, mergeRules, isLoading, setProfile, setTemplates, setMergeRules, setLoading, reset } = useProfileStore()
   const { session } = useAuthStore()
+  // Track if we've already attempted to sync pending profile (avoid infinite loops)
+  const pendingSyncAttempted = useRef(false)
 
   // 获取用户 profile
   const fetchProfile = useCallback(async () => {
     if (!session) {
       reset()
+      pendingSyncAttempted.current = false
       return
     }
 
     setLoading(true)
     try {
       const { data } = await api.get<UserProfile>('/tenants/me/profile')
-      setProfile(data)
+      
+      // Check if profile is missing tenant_id and we have pending data from registration
+      if (data && !data.tenant_id && !pendingSyncAttempted.current) {
+        const pending = getPendingProfile()
+        if (pending.tenantId) {
+          console.log('检测到缓存的 tenant_id，尝试更新 profile...')
+          pendingSyncAttempted.current = true
+          try {
+            await api.put('/tenants/me/profile', {
+              tenant_id: pending.tenantId,
+              display_name: pending.displayName || data.display_name
+            })
+            clearPendingProfile()
+            // Re-fetch to get updated profile
+            const { data: updatedData } = await api.get<UserProfile>('/tenants/me/profile')
+            setProfile(updatedData)
+            console.log('Profile 已成功补充 tenant_id')
+          } catch (updateError) {
+            console.error('补充 tenant_id 失败:', updateError)
+            setProfile(data)
+          }
+        } else {
+          setProfile(data)
+        }
+      } else {
+        setProfile(data)
+        // Clear any stale pending data if profile already has tenant_id
+        if (data?.tenant_id) {
+          clearPendingProfile()
+        }
+      }
     } catch (error) {
       console.error('获取用户信息失败:', error)
       setProfile(null)

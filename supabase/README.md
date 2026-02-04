@@ -25,12 +25,17 @@ supabase/
 docker-compose up -d
 ```
 
+说明：
+- 首次初始化由 `000_init.sql` 自动执行。
+- 增量迁移由 `migrations` 迁移执行器自动处理（见 `migrations/run_migrations.sh`）。
+
 `000_init.sql` 会在数据库容器首次启动时自动执行，包含：
 - 角色和 Schema 初始化
-- Storage 基础表和 RLS 策略
 - OCR 应用表和索引
 - 用户数据隔离 RLS 策略
 - 管理员权限策略
+
+**注意**：Storage 表（buckets、objects）由 `supabase-storage` 服务自动创建和管理，不在 `000_init.sql` 中定义。
 
 ### 2. 重建数据库（测试环境）
 
@@ -63,9 +68,10 @@ docker exec -i supabase-db psql -U postgres -d postgres -f /docker-entrypoint-in
 **原因**: Schema 创建顺序错误  
 **解决**: 已在 `000_init.sql` 中修复，确保先 `CREATE SCHEMA` 再 `GRANT`
 
-### Q2: storage 容器不断重启 "relation storage.objects does not exist"
-**原因**: storage-api 需要预先存在的基础表  
-**解决**: 已在 `000_init.sql` 中包含 Storage 表创建
+### Q2: storage 容器不断重启 "relation storage.objects does not exist" 或 "column already exists"
+**原因**: 旧版本 `000_init.sql` 手动定义了 storage 表，与 storage 服务内置迁移冲突  
+**解决**: 已在代码中修复。`000_init.sql` 不再定义 storage 表，由 storage 服务自动管理。  
+**全新部署无需任何手动操作。**
 
 ### Q3: 创建扩展报错 "permission denied for function pg_read_file"
 **原因**: Supabase postgres 镜像对 `CREATE EXTENSION` 有特殊触发器  
@@ -87,9 +93,11 @@ docker exec -i supabase-db psql -U postgres -d postgres -c "GRANT ALL ON ALL TAB
 
 | 文件 | 作用 | 执行方式 |
 |------|------|----------|
-| 000_init.sql | 完整初始化（角色、表、RLS） | ✅ 容器启动时自动执行 |
-| upgrade_001_add_display_name.sql | 添加 display_name 字段 | ❌ 仅旧版本升级时手动执行 |
-| upgrade_002_remove_triggers.sql | 移除旧状态触发器 | ❌ 仅旧版本升级时手动执行 |
+| 000_init.sql | 完整初始化（角色、表、RLS） | ✅ 首次初始化时自动执行 |
+| 001_multi_tenant.sql | 多租户基础表与策略 | ✅ 迁移执行器自动执行 |
+| 002_init_data.sql | 多租户初始化数据 | ✅ 迁移执行器自动执行 |
+| 003_post_auth_setup.sql | auth.users 触发器 | ✅ 迁移执行器等待 auth 就绪后执行 |
+| run_migrations.sh | 迁移执行器脚本 | ✅ 容器启动时自动运行 |
 
 ## 服务端口
 

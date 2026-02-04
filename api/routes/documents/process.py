@@ -130,7 +130,7 @@ async def process_document(
     - **sync**: 是否同步处理（默认异步后台处理）
     
     如果文档关联了 template_id，将使用模板化处理流程；
-    否则使用原有的自动分类处理流程（质量运营）。
+    否则使用原有的自动分类处理流程（质量管理中心）。
     """
     try:
         # 检查用户是否已关联租户
@@ -173,7 +173,7 @@ async def process_document(
                     tenant_id=tenant_id
                 )
             else:
-                # 原有流程（质量运营分类）
+                # 原有流程（质量管理中心分类）
                 result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
             
             # 保存结果到数据库

@@ -30,6 +30,30 @@ services:
     networks:
       - supabase-network
 
+  # ============ 迁移执行器（增量迁移自动化） ============
+  migrations:
+    image: postgres:15-alpine
+    container_name: supabase-migrations
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_started
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-your-super-secret-password}
+      MIGRATIONS_DIR: /migrations
+      AUTH_WAIT_SECONDS: 300
+    volumes:
+      - ./migrations:/migrations
+    entrypoint: ["sh", "/migrations/run_migrations.sh"]
+    restart: "no"
+    networks:
+      - supabase-network
+
   # ============ Supabase Auth (GoTrue) ============
   auth:
     image: supabase/gotrue:v2.143.0
@@ -76,7 +100,7 @@ services:
       PGRST_DB_SCHEMAS: public,storage,graphql_public
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_DB_USE_LEGACY_GUCS: "true"
     ports:
       - "3002:3000"  # 改为 3002 避免与前端 Vite (3000) 端口冲突
     restart: unless-stopped

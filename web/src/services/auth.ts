@@ -22,6 +22,34 @@ export interface Tenant {
   description?: string
 }
 
+// localStorage keys for pending profile data (used when email confirmation is required)
+const PENDING_TENANT_KEY = 'neoflow_pending_tenant_id'
+const PENDING_DISPLAY_NAME_KEY = 'neoflow_pending_display_name'
+
+// Cache pending profile data for first login
+export function cachePendingProfile(tenantId?: string, displayName?: string) {
+  if (tenantId) {
+    localStorage.setItem(PENDING_TENANT_KEY, tenantId)
+  }
+  if (displayName) {
+    localStorage.setItem(PENDING_DISPLAY_NAME_KEY, displayName)
+  }
+}
+
+// Get cached pending profile data
+export function getPendingProfile(): { tenantId?: string; displayName?: string } {
+  return {
+    tenantId: localStorage.getItem(PENDING_TENANT_KEY) || undefined,
+    displayName: localStorage.getItem(PENDING_DISPLAY_NAME_KEY) || undefined,
+  }
+}
+
+// Clear cached pending profile data
+export function clearPendingProfile() {
+  localStorage.removeItem(PENDING_TENANT_KEY)
+  localStorage.removeItem(PENDING_DISPLAY_NAME_KEY)
+}
+
 export const authService = {
   // Get available tenants for registration
   async getTenants(): Promise<Tenant[]> {
@@ -49,15 +77,24 @@ export const authService = {
       }
     })
     
-    // If signup successful and we have tenant_id, update profile
+    // If signup successful and we have tenant_id
     if (!error && data.user && tenantId) {
-      try {
-        await api.put('/tenants/me/profile', {
-          tenant_id: tenantId,
-          display_name: displayName || email
-        })
-      } catch (profileError) {
-        console.warn('更新用户 profile 失败:', profileError)
+      if (data.session) {
+        // Session available (email confirmation disabled), update profile immediately
+        try {
+          await api.put('/tenants/me/profile', {
+            tenant_id: tenantId,
+            display_name: displayName || email
+          })
+        } catch (profileError) {
+          console.warn('更新用户 profile 失败:', profileError)
+          // Cache for fallback on first login
+          cachePendingProfile(tenantId, displayName || email)
+        }
+      } else {
+        // No session (email confirmation required), cache for first login
+        console.log('缓存待更新的 profile 数据（等待邮箱确认后首次登录时更新）')
+        cachePendingProfile(tenantId, displayName || email)
       }
     }
     
@@ -74,6 +111,7 @@ export const authService = {
       email,
       password,
     })
+    console.log('Supabase signIn result:', { data, error })
     return {
       user: data.user,
       session: data.session,

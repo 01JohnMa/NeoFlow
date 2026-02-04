@@ -152,81 +152,43 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage
 SELECT 'PART 1-2: 角色和权限初始化完成！' as message;
 
 -- ############################################################
--- PART 3: Storage 基础表和 RLS 策略
+-- PART 2-5: Auth 辅助函数（确保 RLS 依赖可用）
 -- ############################################################
+-- 有些环境初始化时 auth schema/function 尚未创建，先兜底定义。
+CREATE SCHEMA IF NOT EXISTS auth;
 
--- 3.1 创建 buckets 表
-CREATE TABLE IF NOT EXISTS storage.buckets (
-    id text NOT NULL PRIMARY KEY,
-    name text NOT NULL UNIQUE,
-    owner uuid,
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now(),
-    public boolean DEFAULT false,
-    avif_autodetection boolean DEFAULT false,
-    file_size_limit bigint,
-    allowed_mime_types text[]
-);
+CREATE OR REPLACE FUNCTION auth.role()
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(current_setting('request.jwt.claim.role', true), '');
+$$;
+ALTER FUNCTION auth.role() OWNER TO supabase_auth_admin;
 
--- 3.2 创建 objects 表
-CREATE TABLE IF NOT EXISTS storage.objects (
-    id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-    bucket_id text REFERENCES storage.buckets(id),
-    name text,
-    owner uuid,
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now(),
-    last_accessed_at timestamptz DEFAULT now(),
-    metadata jsonb,
-    path_tokens text[] GENERATED ALWAYS AS (string_to_array(name, '/')) STORED,
-    version text,
-    UNIQUE (bucket_id, name)
-);
+CREATE OR REPLACE FUNCTION auth.uid()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+$$;
+ALTER FUNCTION auth.uid() OWNER TO supabase_auth_admin;
 
--- 3.3 创建索引
-CREATE INDEX IF NOT EXISTS bname ON storage.buckets USING btree (name);
-CREATE INDEX IF NOT EXISTS bucketid_objname ON storage.objects USING btree (bucket_id, name);
-CREATE INDEX IF NOT EXISTS name_prefix_search ON storage.objects USING btree (name text_pattern_ops);
+CREATE OR REPLACE FUNCTION auth.jwt()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(NULLIF(current_setting('request.jwt.claims', true), ''), '{}')::jsonb;
+$$;
+ALTER FUNCTION auth.jwt() OWNER TO supabase_auth_admin;
 
--- 3.4 设置 RLS
-ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-
--- 3.5 转移所有权
-ALTER TABLE storage.buckets OWNER TO supabase_storage_admin;
-ALTER TABLE storage.objects OWNER TO supabase_storage_admin;
-
--- 3.6 授权
-GRANT ALL ON storage.buckets TO authenticated, service_role;
-GRANT ALL ON storage.objects TO authenticated, service_role;
-GRANT SELECT ON storage.buckets TO anon;
-GRANT SELECT ON storage.objects TO anon;
-
--- 3.7 Storage RLS 策略
--- 允许 service_role 完全访问
-DROP POLICY IF EXISTS "Service role full access to buckets" ON storage.buckets;
-CREATE POLICY "Service role full access to buckets" ON storage.buckets
-    FOR ALL USING (auth.role() = 'service_role');
-
-DROP POLICY IF EXISTS "Service role full access to objects" ON storage.objects;
-CREATE POLICY "Service role full access to objects" ON storage.objects
-    FOR ALL USING (auth.role() = 'service_role');
-
--- 允许用户访问公开 bucket
-DROP POLICY IF EXISTS "Public buckets are visible to all" ON storage.buckets;
-CREATE POLICY "Public buckets are visible to all" ON storage.buckets
-    FOR SELECT USING (public = true);
-
-DROP POLICY IF EXISTS "Public objects are visible to all" ON storage.objects;
-CREATE POLICY "Public objects are visible to all" ON storage.objects
-    FOR SELECT USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
-
--- 允许认证用户访问自己的文件
-DROP POLICY IF EXISTS "Users can manage own objects" ON storage.objects;
-CREATE POLICY "Users can manage own objects" ON storage.objects
-    FOR ALL USING (auth.uid() = owner);
-
-SELECT 'PART 3: Storage 基础表和 RLS 策略创建完成！' as message;
+-- ############################################################
+-- NOTE: Storage tables (buckets, objects) are managed by
+-- supabase-storage service. Do NOT define them here to avoid
+-- migration conflicts.
+-- ############################################################
 
 -- ############################################################
 -- PART 4: OCR 应用表（无外键约束，通过 RLS 保证数据隔离）

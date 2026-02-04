@@ -1,18 +1,17 @@
 import { Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { PageLoader } from '@/components/ui/spinner'
 import Logo from '@/assets/neoflow-logo.png'
 
 export function AuthLayout() {
-  const { session, isLoading } = useAuth()
+  const { session } = useAuth()
 
-  if (isLoading) {
-    return <PageLoader />
-  }
-
+  // 已登录则跳转首页
   if (session) {
     return <Navigate to="/" replace />
   }
+
+  // 仅在初始加载时显示 PageLoader，不影响登录/注册表单
+  // 注意：不能因为 isLoading 卸载子组件，否则会丢失表单状态
 
   return (
     <div className="min-h-screen flex">
@@ -28,9 +27,6 @@ export function AuthLayout() {
             <img src={Logo} alt="NeoFlow Logo" className="h-20 w-20 rounded-2xl shadow-2xl shadow-primary-500/30 animate-pulse-glow" />
           </div>
           <h1 className="text-4xl font-bold gradient-text mb-4">NeoFlow 智能文档处理平台</h1>
-          <p className="text-lg text-text-secondary max-w-md">
-            基于 LangGraph 的智能文档识别平台
-          </p>
 
           {/* Features */}
           <div className="mt-12 grid grid-cols-2 gap-6 text-left">
