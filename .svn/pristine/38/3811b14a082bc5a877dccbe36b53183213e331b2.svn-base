@@ -1,0 +1,62 @@
+type AuthErrorMapping = {
+  matchers: Array<(message: string) => boolean>;
+  message: string;
+};
+
+const AUTH_ERROR_MAPPINGS: AuthErrorMapping[] = [
+  {
+    matchers: [
+      (message) => message.includes('invalid login credentials'),
+      (message) => message.includes('invalid credentials'),
+      (message) => message.includes('invalid email or password'),
+      (message) => message.includes('incorrect email or password'),
+      (message) => message.includes('wrong password'),
+      (message) => message.includes('wrong email'),
+    ],
+    message: '邮箱或密码错误，请重试',
+  },
+  {
+    matchers: [
+      (message) => message.includes('email not confirmed'),
+    ],
+    message: '请先到邮箱中完成验证',
+  },
+  {
+    matchers: [
+      (message) => message.includes('already registered'),
+      (message) => message.includes('already exists'),
+      (message) => message.includes('duplicate'),
+    ],
+    message: '该邮箱已被注册，请直接登录或使用其他邮箱',
+  },
+  {
+    matchers: [
+      (message) => message.includes('invalid password'),
+      (message) => message.includes('signup requires a valid password'),
+    ],
+    message: '请设置符合要求的密码',
+  },
+];
+
+function getMessageFromError(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const msg = (error as { message?: unknown }).message;
+    if (typeof msg === 'string') return msg;
+  }
+  return null;
+}
+
+export function getAuthErrorMessage(error: unknown, fallbackMessage: string): string {
+  const message = getMessageFromError(error);
+  console.log('getAuthErrorMessage - 提取的消息:', message)
+  if (!message) return fallbackMessage;
+
+  const normalizedMessage = message.toLowerCase();
+  const mapping = AUTH_ERROR_MAPPINGS.find((entry) =>
+    entry.matchers.some((matcher) => matcher(normalizedMessage))
+  );
+  console.log('getAuthErrorMessage - 匹配结果:', mapping?.message || '未匹配')
+  return mapping ? mapping.message : fallbackMessage;
+}

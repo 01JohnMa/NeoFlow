@@ -1,0 +1,21 @@
+[
+  "test/test_batch_upload.py::TestConcurrencyControl::test_batch_processing_order",
+  "test/test_batch_upload.py::TestConcurrencyControl::test_semaphore_limits_concurrent_processing",
+  "test/test_batch_upload.py::TestDataConsistency::test_partial_document_save",
+  "test/test_batch_upload.py::TestDataConsistency::test_rollback_on_upload_failure",
+  "test/test_batch_upload.py::TestErrorHandling::test_batch_recovery_on_restart",
+  "test/test_batch_upload.py::TestErrorHandling::test_file_size_limit",
+  "test/test_batch_upload.py::TestErrorHandling::test_invalid_file_format_rejection",
+  "test/test_batch_upload.py::TestErrorHandling::test_single_document_failure_continues_batch",
+  "test/test_batch_upload.py::TestMergeMode::test_merge_batch_groups_construction",
+  "test/test_batch_upload.py::TestMergeMode::test_merge_group_validation",
+  "test/test_batch_upload.py::TestPermissionValidation::test_different_tenant_cannot_access_batch",
+  "test/test_batch_upload.py::TestPermissionValidation::test_owner_can_access_batch",
+  "test/test_batch_upload.py::TestPermissionValidation::test_same_tenant_can_access_batch",
+  "test/test_batch_upload.py::TestProgressTracking::test_batch_status_transitions",
+  "test/test_batch_upload.py::TestProgressTracking::test_partial_failure_status",
+  "test/test_batch_upload.py::TestProgressTracking::test_progress_updates_correctly",
+  "test/test_batch_upload.py::TestSupabaseBatchMethods::test_create_batch",
+  "test/test_batch_upload.py::TestSupabaseBatchMethods::test_get_batches_by_status",
+  "test/test_batch_upload.py::TestSupabaseBatchMethods::test_update_batch_progress"
+]

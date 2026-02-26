@@ -1,0 +1,8 @@
+feat: update project terminology and enhance deployment instructions
+
+- Changed references from "质量运营部" to "质量管理中心" throughout documentation and code for consistency.
+- Added new environment variable `.env.prod` to the `.gitignore` file.
+- Enhanced README with detailed production deployment instructions, including environment variable setup and default routing.
+- Updated PaddlePaddle version in `requirements.txt` to 3.0.0 for improved performance.
+- Refactored upload logic to decouple processes for quality management center and lighting system, ensuring independent workflows.
+- Improved error handling and logging in various API routes for better debugging and user experience.

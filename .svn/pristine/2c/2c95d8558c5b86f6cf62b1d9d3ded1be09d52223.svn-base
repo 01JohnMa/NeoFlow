@@ -1,0 +1,24 @@
+# ============================================================
+# 仓库根目录 .env 示例（生产/单机一体化部署用）
+# ============================================================
+# 使用方式：复制为 .env 后按需修改
+# 单机部署命令：docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+# 变量会同时被 supabase 与 docker-compose.prod.yml 使用，请与 supabase/.env 保持一致或从 supabase/.env 复制过来
+# ============================================================
+
+############
+# Supabase（与 supabase/.env 一致）
+############
+POSTGRES_PASSWORD=your-super-secret-password
+JWT_SECRET=super-secret-jwt-token-with-at-least-32-characters-long
+ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+
+############
+# 后端 API（可选，不设则用 config/settings 默认值）
+############
+# LLM_API_KEY=
+# LLM_BASE_URL=https://api.openai.com/v1
+# FEISHU_APP_ID=
+# FEISHU_APP_SECRET=
+# FEISHU_PUSH_ENABLED=false

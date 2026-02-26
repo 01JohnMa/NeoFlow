@@ -1,0 +1,5 @@
+fix: allow single-file lighting merge upload
+
+Allow lighting merge mode to submit with one file and update UI hints accordingly.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>

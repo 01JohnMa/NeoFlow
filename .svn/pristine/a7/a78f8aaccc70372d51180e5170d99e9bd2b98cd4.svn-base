@@ -1,0 +1,77 @@
+import { type ClassValue, clsx } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+export function formatDate(dateString: string): string {
+  const date = new Date(dateString)
+  return date.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+export function getStatusColor(status: string): string {
+  const colors: Record<string, string> = {
+    pending: 'text-yellow-400 bg-yellow-400/10',
+    uploaded: 'text-blue-400 bg-blue-400/10',
+    processing: 'text-cyan-400 bg-cyan-400/10',
+    pending_review: 'text-orange-400 bg-orange-400/10',
+    completed: 'text-green-400 bg-green-400/10',
+    failed: 'text-red-400 bg-red-400/10',
+  }
+  return colors[status] || 'text-gray-400 bg-gray-400/10'
+}
+
+export function getStatusText(status: string): string {
+  const texts: Record<string, string> = {
+    pending: '待处理',
+    uploaded: '已上传',
+    processing: '处理中',
+    pending_review: '待审核',
+    completed: '已完成',
+    failed: '失败',
+  }
+  return texts[status] || status
+}
+
+export function getDocumentTypeText(type: string): string {
+  const types: Record<string, string> = {
+    // 检测报告（统一显示名）
+    inspection_report: '检测报告',
+    '测试单': '检测报告',
+    '检验报告': '检测报告',
+    '检测报告': '检测报告',
+    
+    // 快递单
+    express: '快递单据',
+    '快递单': '快递单据',
+    
+    // 抽样单（注意模板 code 是 sampling）
+    sampling: '抽样表单',
+    sampling_form: '抽样表单',
+    '抽样单': '抽样表单',
+    
+    // 照明综合报告
+    lighting_combined: '照明综合报告',
+    '照明综合报告': '照明综合报告',
+    lighting_report: '照明综合报告',
+  }
+  return types[type] || type
+}
+
+
+

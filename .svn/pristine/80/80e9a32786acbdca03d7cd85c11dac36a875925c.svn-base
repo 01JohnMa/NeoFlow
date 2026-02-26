@@ -1,0 +1,19 @@
+0000000000000000000000000000000000000000 e6d0f66d4bdbba2c1b789f7678868a3595ab4504 lawrence <929938267@qq.com> 1769160138 +0800	branch: Created from HEAD
+e6d0f66d4bdbba2c1b789f7678868a3595ab4504 7df0ebf7a401d5dbfa299091f9a84cf866c3e2ec lawrence <929938267@qq.com> 1769161779 +0800	commit: feat: 添加照明综合报告表及文档关联字段
+7df0ebf7a401d5dbfa299091f9a84cf866c3e2ec 3d08e7f85b9e5012fb2c6e503bfefa863ab1ee3f lawrence <929938267@qq.com> 1769648997 +0800	commit: feat: 更新多租户支持和触发器逻辑
+3d08e7f85b9e5012fb2c6e503bfefa863ab1ee3f f88588a6a039ae3815a67d0a0349ebe3a33c9a23 lawrence <929938267@qq.com> 1769672585 +0800	commit: feat: 更新 README 文档和前端样式
+f88588a6a039ae3815a67d0a0349ebe3a33c9a23 1419a1dcb45580d0fed88810afa1690bf1ad7109 lawrence <929938267@qq.com> 1769674352 +0800	commit: refactor: add OCR result validation with _validate_ocr_result method
+1419a1dcb45580d0fed88810afa1690bf1ad7109 2d7844c14b5a0c69cbf635665216b1e4034fd7ac lawrence <929938267@qq.com> 1769674454 +0800	commit: refactor: unify workflow error response format with WorkflowErrorType enum
+2d7844c14b5a0c69cbf635665216b1e4034fd7ac 1e6ffa12f4d1558562d1f37b66b19114e0a78351 lawrence <929938267@qq.com> 1769674823 +0800	commit: refactor: add retry mechanism for LLM and Feishu API calls using tenacity
+1e6ffa12f4d1558562d1f37b66b19114e0a78351 448d0b58cc7d95ef0b3f8710b07fcd6ffa1c233e lawrence <929938267@qq.com> 1769674900 +0800	commit: refactor: extract _save_to_table and _get_from_table generic methods in SupabaseService
+448d0b58cc7d95ef0b3f8710b07fcd6ffa1c233e 0b359a5f8f370c0b111343532fdff8b933a0b799 lawrence <929938267@qq.com> 1769675012 +0800	commit: refactor: extract background task helper functions for processing success/failure/exception handling
+0b359a5f8f370c0b111343532fdff8b933a0b799 2b0ca92d5128ce8b37cabbf752626bb6433fe1f3 lawrence <929938267@qq.com> 1769675101 +0800	commit: refactor: extract document type constants to constants/document_types.py module
+2b0ca92d5128ce8b37cabbf752626bb6433fe1f3 b50357bfdbc40c4bbaec1947ab828cb781e0165a lawrence <929938267@qq.com> 1769739517 +0800	commit: test: add debug print statements to display generated prompts in TestPromptExtractionHint
+b50357bfdbc40c4bbaec1947ab828cb781e0165a 856c65052509804a3781f39147747dfe226cbace lawrence <929938267@qq.com> 1769821286 +0800	commit: feat: 支持多样品处理和审核规则校验
+856c65052509804a3781f39147747dfe226cbace 8b8eac8a8901112a54b2a06d4b182fd0d7d53970 lawrence <929938267@qq.com> 1769824918 +0800	commit: fix: reorder lighting document types for consistency in Upload component
+8b8eac8a8901112a54b2a06d4b182fd0d7d53970 856c65052509804a3781f39147747dfe226cbace lawrence <929938267@qq.com> 1769825406 +0800	reset: moving to 856c650
+856c65052509804a3781f39147747dfe226cbace e9eb50bcc6db8bccacfcd886fff608df000207cb lawrence <929938267@qq.com> 1769825511 +0800	commit: fix: reorder lighting document types for consistency
+e9eb50bcc6db8bccacfcd886fff608df000207cb 645283f51d325f9f9da5534b9b4c36b1973d2d18 lawrence <929938267@qq.com> 1769825629 +0800	pull --tags origin develop: Merge made by the 'ort' strategy.
+645283f51d325f9f9da5534b9b4c36b1973d2d18 faa05d3960ba61ccdb6ba919097f626615a88c8f lawrence <929938267@qq.com> 1770022209 +0800	merge main: Fast-forward
+faa05d3960ba61ccdb6ba919097f626615a88c8f e89677a4861e9eba38e71f4f0824309123808024 lawrence <929938267@qq.com> 1770088063 +0800	commit: feat: add extraction hints for template fields
+e89677a4861e9eba38e71f4f0824309123808024 2f4a934df936ee91a690a2ef59d4bcbbcc69ab44 lawrence <929938267@qq.com> 1770192431 +0800	commit: feat: update project terminology and enhance deployment instructions
