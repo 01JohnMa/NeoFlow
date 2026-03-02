@@ -35,7 +35,11 @@ def _is_retryable_feishu_error(exception: Exception) -> bool:
 
 
 class FeishuService:
-    """飞书 API 服务封装 - 支持多租户"""
+    """飞书 API 服务封装 - 支持多租户
+    
+    推送目标表格（bitable_token / table_id）统一从 document_templates
+    数据库配置读取，由调用方传入；
+    """
     
     _instance: Optional['FeishuService'] = None
     _tenant_access_token: Optional[str] = None
@@ -43,60 +47,6 @@ class FeishuService:
     
     # 飞书 API 基础 URL
     BASE_URL = "https://open.feishu.cn/open-apis"
-    
-    # 【向后兼容】inspection_reports 字段到飞书多维表格列名的默认映射
-    # 新模板请使用数据库配置的 template_fields.feishu_column
-    DEFAULT_FIELD_MAPPING = {
-        "sample_name": "样品名称",
-        "specification_model": "规格型号",
-        "production_date_batch": "生产日期批次",
-        "inspected_unit_name": "被检单位",
-        "inspected_unit_address": "被检单位地址",
-        "manufacturer_name": "生产商",
-        "manufacturer_address": "生产商地址",
-        "task_source": "任务来源",
-        "sampling_agency": "抽样机构",
-        "sampling_date": "抽样日期",
-        "inspection_conclusion": "检验结论",
-        "inspection_category": "检验类别",
-        "inspector": "检验员",
-        "reviewer": "审核人",
-        "approver": "批准人",
-        "notes": "备注",
-    }
-    
-    # 照明综合报告字段映射（20个字段）
-    LIGHTING_REPORT_FIELD_MAPPING = {
-        # 来自积分球（14个字段）
-        "sample_model": "样品型号",
-        "chromaticity_x": "色品坐标X",
-        "chromaticity_y": "色品坐标Y",
-        "duv": "Duv",
-        "cct": "色温CCT",
-        "ra": "Ra",
-        "r9": "R9",
-        "cqs": "CQS",
-        "sdcm": "色容差SDCM",
-        "power_sphere": "功率(积分球)",
-        "luminous_flux_sphere": "光通量(积分球)",
-        "luminous_efficacy_sphere": "光效(积分球)",
-        "rf": "Rf",
-        "rg": "Rg",
-        # 来自光分布（6个字段）
-        "lamp_specification": "灯具规格",
-        "power": "功率",
-        "luminous_flux": "光通量(光分布)",
-        "luminous_efficacy": "光效(光分布)",
-        "peak_intensity": "峰值光强",
-        "beam_angle": "光束角",
-    }
-    
-    # 照明综合报告飞书多维表格配置
-    LIGHTING_REPORT_BITABLE_TOKEN = "IIJMb0tQNaV5sHsfmX3ccEJLnDb"
-    LIGHTING_REPORT_TABLE_ID = "tblDpL7MIZjKX89H"
-    
-    # 向后兼容别名
-    FIELD_MAPPING = DEFAULT_FIELD_MAPPING
     
     def __new__(cls):
         if cls._instance is None:
@@ -108,14 +58,6 @@ class FeishuService:
         return bool(
             settings.FEISHU_APP_ID and
             settings.FEISHU_APP_SECRET
-        )
-    
-    def _is_default_table_configured(self) -> bool:
-        """检查默认表格配置是否完整（向后兼容）"""
-        return bool(
-            self._is_configured() and
-            settings.FEISHU_BITABLE_APP_TOKEN and
-            settings.FEISHU_BITABLE_TABLE_ID
         )
     
     async def _get_tenant_access_token(self) -> Optional[str]:
@@ -217,18 +159,6 @@ class FeishuService:
             logger.error(f"飞书附件上传异常: {e}")
             return None
     
-    def _convert_to_feishu_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        【向后兼容】将 inspection_reports 数据转换为飞书多维表格字段格式
-        
-        Args:
-            data: inspection_reports 表的数据
-            
-        Returns:
-            飞书多维表格字段格式的数据
-        """
-        return self._convert_by_field_mapping(data, self.DEFAULT_FIELD_MAPPING)
-    
     def _convert_by_field_mapping(
         self, 
         data: Dict[str, Any], 
@@ -252,97 +182,17 @@ class FeishuService:
             if value is None or value == "":
                 continue
             
-            # 所有字段统一转为字符串（兼容飞书文本类型列）
+            # list/dict 类型直接透传（用于附件等复杂飞书字段）
+            if isinstance(value, (list, dict)):
+                fields[feishu_field] = value
+                continue
+            
+            # 其他类型统一转为字符串（兼容飞书文本类型列）
             str_value = str(value).strip()
-            if str_value:  # 跳过空字符串
+            if str_value:
                 fields[feishu_field] = str_value
         
         return fields
-    
-    async def push_inspection_report(
-        self,
-        data: Dict[str, Any],
-        attachment_path: Optional[str] = None,
-        file_name: Optional[str] = None
-    ) -> bool:
-        """
-        【向后兼容】推送检验报告数据到飞书多维表格（使用默认配置）
-        
-        Args:
-            data: inspection_reports 表的记录数据
-            attachment_path: 可选附件文件路径（本地文件）
-            
-        Returns:
-            推送是否成功
-        """
-        # 检查是否启用推送
-        if not settings.FEISHU_PUSH_ENABLED:
-            logger.debug("飞书推送未启用，跳过")
-            return True
-        
-        # 检查默认表格配置是否完整
-        if not self._is_default_table_configured():
-            logger.warning("飞书默认表格配置不完整，跳过推送")
-            return False
-        
-        # 转换字段格式
-        fields = self._convert_to_feishu_fields(data)
-        if file_name:
-            fields["文件名称"] = file_name
-
-        # 可选附件上传
-        if attachment_path:
-            file_token = await self._upload_file_to_feishu(
-                attachment_path,
-                settings.FEISHU_BITABLE_APP_TOKEN
-            )
-            if file_token:
-                fields["附件"] = [{"file_token": file_token}]
-        
-        # 使用默认表格配置推送
-        return await self._push_to_table(
-            settings.FEISHU_BITABLE_APP_TOKEN,
-            settings.FEISHU_BITABLE_TABLE_ID,
-            fields
-        )
-    
-    async def push_lighting_report(
-        self,
-        data: Dict[str, Any],
-        file_name: Optional[str] = None
-    ) -> bool:
-        """
-        推送照明综合报告数据到飞书多维表格
-        
-        Args:
-            data: lighting_reports 表的记录数据
-            
-        Returns:
-            推送是否成功
-        """
-        # 检查是否启用推送
-        if not settings.FEISHU_PUSH_ENABLED:
-            logger.debug("飞书推送未启用，跳过")
-            return True
-        
-        # 检查基础配置
-        if not self._is_configured():
-            logger.warning("飞书应用配置不完整，跳过推送")
-            return False
-        
-        # 转换字段格式
-        fields = self._convert_by_field_mapping(data, self.LIGHTING_REPORT_FIELD_MAPPING)
-        if file_name:
-            fields["文件名"] = file_name
-        
-        logger.info(f"准备推送照明报告到飞书: {len(fields)} 个字段")
-        
-        # 推送到照明报告专用表格
-        return await self._push_to_table(
-            self.LIGHTING_REPORT_BITABLE_TOKEN,
-            self.LIGHTING_REPORT_TABLE_ID,
-            fields
-        )
     
     async def push_by_template(
         self, 

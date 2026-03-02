@@ -58,8 +58,10 @@ class Settings(BaseSettings):
     # ============ 飞书配置 ============
     FEISHU_APP_ID: str = ""
     FEISHU_APP_SECRET: str = ""
-    FEISHU_BITABLE_APP_TOKEN: str = ""  # 多维表格 app_token
-    FEISHU_BITABLE_TABLE_ID: str = ""   # 数据表 table_id
+    # 以下两项已废弃，运行时推送目标统一从 document_templates
+    # 的 feishu_bitable_token / feishu_table_id 字段读取，不再使用环境变量。
+    FEISHU_BITABLE_APP_TOKEN: str = ""  # 已废弃，保留供参考
+    FEISHU_BITABLE_TABLE_ID: str = ""   # 已废弃，保留供参考
     FEISHU_PUSH_ENABLED: bool = False   # 是否启用推送
     
     @property

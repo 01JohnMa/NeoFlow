@@ -552,14 +552,25 @@ async def process_merge_documents(
             )
             logger.info(f"样品{sample_index} 提取结果已保存: {doc_id}")
             
-            # 如果 auto_approve，直接推送飞书
+            # 如果 auto_approve，直接推送飞书（使用模板配置）
             if auto_approve:
                 try:
-                    await feishu_service.push_lighting_report(
-                        sample_data,
-                        file_name=display_name
-                    )
-                    logger.info(f"样品{sample_index} 飞书推送成功: {doc_id}")
+                    _bitable_token = template.get("feishu_bitable_token")
+                    _table_id = template.get("feishu_table_id")
+                    if _bitable_token and _table_id:
+                        _field_mapping = template_service.build_field_mapping(template)
+                        _push_data = {**sample_data, "file_name": display_name}
+                        if "file_name" not in _field_mapping:
+                            _field_mapping["file_name"] = "文件名"
+                        await feishu_service.push_by_template(
+                            _push_data,
+                            _field_mapping,
+                            _bitable_token,
+                            _table_id
+                        )
+                        logger.info(f"样品{sample_index} 飞书推送成功: {doc_id}")
+                    else:
+                        logger.info(f"样品{sample_index} 模板未配置飞书，跳过推送: {doc_id}")
                 except Exception as feishu_error:
                     logger.warning(f"样品{sample_index} 飞书推送失败（不影响结果）: {feishu_error}")
         

@@ -52,10 +52,11 @@ CREATE TABLE IF NOT EXISTS document_templates (
     description TEXT,                     -- 描述
     process_mode VARCHAR(20) DEFAULT 'single' CHECK (process_mode IN ('single', 'merge')),
     required_doc_count INT DEFAULT 1,     -- merge模式需要几份文档
-    auto_approve BOOLEAN DEFAULT FALSE,   -- 自动通过审核（跳过人工审核直接推送飞书）
+    auto_approve    BOOLEAN DEFAULT FALSE,  -- 自动通过审核（跳过人工审核直接推送飞书）
+    push_attachment BOOLEAN DEFAULT TRUE,  -- 审核推送时是否上传原文件到飞书附件列
     -- 飞书推送配置（每个模板可推送到不同的多维表格）
-    feishu_bitable_token VARCHAR(100),    -- 多维表格 app_token
-    feishu_table_id VARCHAR(100),         -- 数据表 table_id
+    feishu_bitable_token VARCHAR(100),     -- 多维表格 app_token
+    feishu_table_id VARCHAR(100),          -- 数据表 table_id
     is_active BOOLEAN DEFAULT TRUE,
     sort_order INT DEFAULT 0,             -- 排序
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

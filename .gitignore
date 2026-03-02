@@ -63,3 +63,4 @@ htmlcov/
 Thumbs.db
 *.bak
 
+supabase/docker-compose.yml

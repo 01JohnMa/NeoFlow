@@ -205,8 +205,16 @@ SUPABASE_SERVICE_KEY=your-service-key
 # 飞书配置 (可选)
 FEISHU_APP_ID=your-app-id
 FEISHU_APP_SECRET=your-app-secret
-FEISHU_TABLE_ID=your-table-id
+FEISHU_PUSH_ENABLED=true
+# 以下两项为检测报告多维表格地址，仅作迁移参考
+# 运行前请在 Supabase 中执行一次 UPDATE，见下方说明
+FEISHU_BITABLE_APP_TOKEN=your-inspection-report-app-token
+FEISHU_BITABLE_TABLE_ID=your-inspection-report-table-id
 ```
+
+> 各模板（检测报告、抽样单、照明综合报告）的飞书目标表格已统一在
+> `supabase/migrations/002_init_data.sql` 中配置，无需额外手动操作。
+> `FEISHU_BITABLE_APP_TOKEN` 和 `FEISHU_BITABLE_TABLE_ID` 环境变量已废弃，可忽略。
 
 ## UI/UX Pro Max
 
