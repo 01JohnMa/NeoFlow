@@ -30,8 +30,8 @@ INSERT INTO document_templates (id, tenant_id, name, code, description, process_
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 2.2 快递单模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', '快递单', 'express', '外部机构寄达文件快递单', 'single', 1, TRUE, 2)
+INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, push_attachment, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', '快递单', 'express', '外部机构寄达文件快递单', 'single', 1, FALSE, TRUE, 2)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 2.3 抽样单模板
@@ -121,8 +121,8 @@ INSERT INTO document_templates (id, tenant_id, name, code, description, process_
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 4.3 照明综合报告模板（合并模板，自动通过审核）
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, auto_approve, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000012', 'a0000000-0000-0000-0000-000000000002', '照明综合报告', 'lighting_combined', '积分球+光分布合并报告', 'merge', 2, TRUE, TRUE, 3)
+INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, auto_approve, push_attachment, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000012', 'a0000000-0000-0000-0000-000000000002', '照明综合报告', 'lighting_combined', '积分球+光分布合并报告', 'merge', 2, TRUE, FALSE, TRUE, 3)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 
@@ -287,13 +287,29 @@ ON CONFLICT (id) DO NOTHING;
 
 
 -- ############################################################
--- PART 9: 抽样单飞书推送配置
+-- PART 9: 飞书推送配置（统一使用模板配置）
 -- ############################################################
 
+-- 9.1 抽样单 → 质量管理中心多维表格
 UPDATE document_templates
 SET feishu_bitable_token = 'WNYMbxfiIaY7rasaO44caKxznxd',
     feishu_table_id = 'tblV1HgMnDRQH0eg'
 WHERE id = 'b0000000-0000-0000-0000-000000000003';
+
+-- 9.2 照明综合报告 → 照明事业部多维表格
+UPDATE document_templates
+SET feishu_bitable_token = 'IIJMb0tQNaV5sHsfmX3ccEJLnDb',
+    feishu_table_id = 'tblDpL7MIZjKX89H'
+WHERE id = 'b0000000-0000-0000-0000-000000000012';
+
+-- 9.3 检测报告 → 质量管理中心多维表格
+UPDATE document_templates
+SET feishu_bitable_token = 'WNYMbxfiIaY7rasaO44caKxznxd',
+    feishu_table_id = 'tblu4KCbSRBhlZr7'
+WHERE id = 'b0000000-0000-0000-0000-000000000001';
+
+-- 快递单（express）当前无飞书推送需求，feishu_bitable_token / feishu_table_id 保持 NULL。
+
 
 
 -- ############################################################
