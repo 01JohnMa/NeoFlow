@@ -185,10 +185,37 @@ $$;
 ALTER FUNCTION auth.jwt() OWNER TO supabase_auth_admin;
 
 -- ############################################################
--- NOTE: Storage tables (buckets, objects) are managed by
--- supabase-storage service. Do NOT define them here to avoid
--- migration conflicts.
+-- PART 3: Storage 基础表
 -- ############################################################
+-- storage-api 的 0001-initialmigration.sql 内容仅为 select 1（空操作），
+-- storage.buckets / storage.objects 必须由初始化脚本预先创建。
+-- 此处只建立 migration-2 之前的基础列；
+-- path_tokens / public / version / owner_id 等字段由 storage 服务的
+-- 内置迁移（0002~0017）在容器启动时自动添加，请勿在此预先定义。
+-- ############################################################
+
+CREATE TABLE IF NOT EXISTS storage.buckets (
+    id          text        NOT NULL PRIMARY KEY,
+    name        text        NOT NULL UNIQUE,
+    owner       uuid,
+    created_at  timestamptz DEFAULT now(),
+    updated_at  timestamptz DEFAULT now()
+);
+ALTER TABLE storage.buckets OWNER TO supabase_storage_admin;
+
+CREATE TABLE IF NOT EXISTS storage.objects (
+    id               uuid        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    bucket_id        text        REFERENCES storage.buckets(id),
+    name             text,
+    owner            uuid,
+    created_at       timestamptz DEFAULT now(),
+    updated_at       timestamptz DEFAULT now(),
+    last_accessed_at timestamptz DEFAULT now(),
+    metadata         jsonb
+);
+ALTER TABLE storage.objects OWNER TO supabase_storage_admin;
+
+SELECT 'PART 3: Storage 基础表创建完成！' as message;
 
 -- ############################################################
 -- PART 4: OCR 应用表（无外键约束，通过 RLS 保证数据隔离）
