@@ -58,6 +58,9 @@ model/
 .coverage
 htmlcov/
 
+# Cursor 计划文件
+.cursor/plans/
+
 # 其他
 .DS_Store
 Thumbs.db
