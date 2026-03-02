@@ -187,44 +187,33 @@ ALTER FUNCTION auth.jwt() OWNER TO supabase_auth_admin;
 -- ############################################################
 -- PART 3: Storage 基础表
 -- ############################################################
--- supabase-storage 的 initialmigration 假设这两张表已存在，
--- 不会自行创建。必须在此处提前建好，否则 storage 服务启动时
--- pathtoken-column 等迁移会因找不到 storage.objects 而崩溃。
+-- storage-api 的 0001-initialmigration.sql 内容仅为 select 1（空操作），
+-- storage.buckets / storage.objects 必须由初始化脚本预先创建。
+-- 此处只建立 migration-2 之前的基础列；
+-- path_tokens / public / version / owner_id 等字段由 storage 服务的
+-- 内置迁移（0002~0017）在容器启动时自动添加，请勿在此预先定义。
 -- ############################################################
 
 CREATE TABLE IF NOT EXISTS storage.buckets (
-    id text NOT NULL PRIMARY KEY,
-    name text NOT NULL,
-    owner uuid,
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now(),
-    public boolean DEFAULT false,
-    avif_autodetection boolean DEFAULT false,
-    file_size_limit bigint,
-    allowed_mime_types text[]
+    id          text        NOT NULL PRIMARY KEY,
+    name        text        NOT NULL UNIQUE,
+    owner       uuid,
+    created_at  timestamptz DEFAULT now(),
+    updated_at  timestamptz DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS bname ON storage.buckets USING btree (name);
+ALTER TABLE storage.buckets OWNER TO supabase_storage_admin;
 
 CREATE TABLE IF NOT EXISTS storage.objects (
-    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-    bucket_id text REFERENCES storage.buckets(id),
-    name text,
-    owner uuid,
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now(),
+    id               uuid        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    bucket_id        text        REFERENCES storage.buckets(id),
+    name             text,
+    owner            uuid,
+    created_at       timestamptz DEFAULT now(),
+    updated_at       timestamptz DEFAULT now(),
     last_accessed_at timestamptz DEFAULT now(),
-    metadata jsonb
+    metadata         jsonb
 );
-CREATE UNIQUE INDEX IF NOT EXISTS bucketid_objname ON storage.objects USING btree (bucket_id, name);
-CREATE INDEX IF NOT EXISTS name_prefix_search ON storage.objects USING btree (name text_pattern_ops);
-
-ALTER TABLE storage.buckets OWNER TO supabase_storage_admin;
 ALTER TABLE storage.objects OWNER TO supabase_storage_admin;
-
-GRANT ALL ON storage.buckets TO supabase_storage_admin, postgres, service_role;
-GRANT ALL ON storage.objects TO supabase_storage_admin, postgres, service_role;
-GRANT SELECT ON storage.buckets TO anon, authenticated;
-GRANT ALL ON storage.objects TO anon, authenticated;
 
 SELECT 'PART 3: Storage 基础表创建完成！' as message;
 
