@@ -25,6 +25,7 @@ import {
   SAMPLING_FORM_FIELDS,
   LIGHTING_REPORT_FIELDS,
   type FieldDefinition,
+  type ReviewHintField,
 } from '@/types'
 import {
   ArrowLeft,
@@ -51,6 +52,7 @@ export function DocumentDetail() {
   const [validationNotes, setValidationNotes] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [modalMessage, setModalMessage] = useState('')
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   
   // 重命名相关状态
   const [isRenaming, setIsRenaming] = useState(false)
@@ -92,9 +94,9 @@ export function DocumentDetail() {
     setEditedData((prev) => ({ ...prev, [key]: value }))
   }
 
-  // Save changes
+  // Actual save — called after confirmation (or directly when no hint fields)
   const handleSave = async () => {
-    // 优先使用 status.document_type，如果为空则使用 result.document_type
+    setShowSaveConfirm(false)
     const documentType = status?.document_type || result?.document_type
     if (!id || !documentType) return
 
@@ -107,7 +109,7 @@ export function DocumentDetail() {
       })
       setIsEditing(false)
       refetchResult()
-      refetchStatus()  // 刷新状态以更新 document_type
+      refetchStatus()
     } catch (err) {
       const error = err as { response?: { data?: { detail?: string } } }
       const detail = error?.response?.data?.detail
@@ -117,6 +119,16 @@ export function DocumentDetail() {
       setModalMessage(message)
       setIsModalOpen(true)
       console.error('Save failed:', err)
+    }
+  }
+
+  // Show confirmation modal when hint fields exist, otherwise save directly
+  const handleSaveClick = () => {
+    const hintFields: ReviewHintField[] = result?.review_hint_fields ?? []
+    if (hintFields.length > 0) {
+      setShowSaveConfirm(true)
+    } else {
+      handleSave()
     }
   }
 
@@ -370,7 +382,7 @@ export function DocumentDetail() {
               <div className="flex gap-2">
                 <Button
                   size="sm"
-                  onClick={handleSave}
+                  onClick={handleSaveClick}
                   loading={validateMutation.isPending}
                 >
                   <Save className="h-4 w-4 mr-2" />
@@ -502,6 +514,47 @@ export function DocumentDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Save confirmation modal — shows review_hint_fields before actual submit */}
+      <Modal
+        open={showSaveConfirm}
+        title="审核结果确认"
+        confirmText="确认保存"
+        onClose={() => setShowSaveConfirm(false)}
+        onConfirm={handleSave}
+      >
+        <p className="mt-3 text-sm text-text-secondary">
+          以下字段有审核规范要求，请确认当前填写值后再保存：
+        </p>
+        <ul className="mt-3 space-y-3">
+          {(result?.review_hint_fields ?? []).map((hint) => {
+            const currentVal = String(editedData[hint.field_key] ?? '').trim()
+            const isMatch = hint.allowed_values
+              .map((v) => v.trim().toLowerCase())
+              .includes(currentVal.toLowerCase())
+            return (
+              <li key={hint.field_key} className="rounded-lg border border-border-default p-3 text-sm">
+                <p className="font-medium text-text-primary">{hint.field_label}</p>
+                <p className="mt-1">
+                  <span className="text-text-muted">当前值：</span>
+                  <span className={cn(
+                    'font-semibold ml-1',
+                    isMatch ? 'text-success-500' : 'text-warning-500'
+                  )}>
+                    {currentVal || '（未填写）'}
+                  </span>
+                </p>
+                <p className="mt-0.5 text-text-muted">
+                  允许值：
+                  <span className="ml-1 text-text-secondary">
+                    {hint.allowed_values.join(' / ')}
+                  </span>
+                </p>
+              </li>
+            )
+          })}
+        </ul>
+      </Modal>
 
       <Modal
         open={isModalOpen}

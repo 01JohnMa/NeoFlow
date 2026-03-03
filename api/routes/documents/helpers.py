@@ -2,6 +2,7 @@
 """文档路由 - 辅助函数"""
 
 import os
+import json
 import aiofiles
 from fastapi import UploadFile
 
@@ -23,6 +24,31 @@ async def save_upload_file(file: UploadFile, destination: str) -> int:
         content = await file.read()
         await out_file.write(content)
         return len(content)
+
+
+def normalize_review_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().casefold()
+
+
+def parse_allowed_values(raw_values: object) -> list:
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, list):
+        return [str(item) for item in raw_values if item is not None]
+    if isinstance(raw_values, str):
+        text = raw_values.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except json.JSONDecodeError:
+            pass
+        return [text]
+    return [str(raw_values)]
 
 
 def validate_file_extension(filename: str) -> bool:

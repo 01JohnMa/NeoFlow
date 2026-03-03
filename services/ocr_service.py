@@ -36,7 +36,7 @@ class OCRService:
             self.ocr_engine: Optional[PaddleOCR] = None
             self.executor = ThreadPoolExecutor(max_workers=2)
             self._watermarks = ['no', 'noi', 'copy', '样本', '仅供参考']
-            self._threshold = 0.5
+            self._threshold = 0.35
             OCRService._initialized = True
     
     async def initialize(self) -> bool:

@@ -65,6 +65,7 @@ class OCRWorkflow:
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
             temperature=settings.LLM_TEMPERATURE,
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
         self.memory = MemorySaver()
         self.workflow = self._build_workflow()
