@@ -8,8 +8,10 @@ from loguru import logger
 import os
 
 from services.supabase_service import supabase_service
+from services.template_service import template_service
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AuthenticationError
+from .helpers import parse_allowed_values
 
 router = APIRouter()
 
@@ -202,7 +204,25 @@ async def get_extraction_result(
                 raise HTTPException(status_code=404, detail="提取结果不存在")
         
         ocr_text = document.get("ocr_text") or ""
-        
+
+        # 从模板字段中收集有 review_allowed_values 的字段，用于前端保存前提示
+        review_hint_fields = []
+        template_id = document.get("template_id")
+        if template_id:
+            try:
+                template = await template_service.get_template_with_details(template_id)
+                if template:
+                    for field in (template.get("template_fields") or []):
+                        allowed = parse_allowed_values(field.get("review_allowed_values"))
+                        if allowed:
+                            review_hint_fields.append({
+                                "field_key": field.get("field_key"),
+                                "field_label": field.get("field_label") or field.get("field_key"),
+                                "allowed_values": allowed,
+                            })
+            except Exception as hint_err:
+                logger.debug(f"获取 review_hint_fields 失败（不影响主流程）: {hint_err}")
+
         return {
             "document_id": document_id,
             "document_type": document_type,
@@ -210,7 +230,8 @@ async def get_extraction_result(
             "ocr_text": ocr_text[:1000] if ocr_text else "",
             "ocr_confidence": document.get("ocr_confidence"),
             "created_at": result.get("created_at"),
-            "is_validated": result.get("is_validated", False)
+            "is_validated": result.get("is_validated", False),
+            "review_hint_fields": review_hint_fields,
         }
         
     except (DocumentNotFoundError, HTTPException):

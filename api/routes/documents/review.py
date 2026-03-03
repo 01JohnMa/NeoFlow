@@ -5,8 +5,6 @@ from fastapi import APIRouter, Depends
 from datetime import datetime
 from loguru import logger
 
-import json
-
 from services.supabase_service import supabase_service
 from services.feishu_service import feishu_service
 from services.template_service import template_service
@@ -18,33 +16,9 @@ from api.exceptions import (
     ProcessingError
 )
 from .schemas import ValidateRequest, RejectRequest, RenameRequest
+from .helpers import normalize_review_value, parse_allowed_values
 
 router = APIRouter()
-
-
-def _normalize_review_value(value: object) -> str:
-    if value is None:
-        return ""
-    return str(value).strip().casefold()
-
-
-def _parse_allowed_values(raw_values: object) -> list:
-    if raw_values is None:
-        return []
-    if isinstance(raw_values, list):
-        return [str(item) for item in raw_values if item is not None]
-    if isinstance(raw_values, str):
-        text = raw_values.strip()
-        if not text:
-            return []
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                return [str(item) for item in parsed if item is not None]
-        except json.JSONDecodeError:
-            pass
-        return [text]
-    return [str(raw_values)]
 
 
 def _validate_review_rules(template: dict, data: dict) -> None:
@@ -55,12 +29,12 @@ def _validate_review_rules(template: dict, data: dict) -> None:
         field_key = field.get("field_key") or ""
         if not field_key:
             continue
-        allowed_values = _parse_allowed_values(field.get("review_allowed_values"))
+        allowed_values = parse_allowed_values(field.get("review_allowed_values"))
         if not allowed_values:
             continue
         current_value = data.get(field_key)
-        normalized_current = _normalize_review_value(current_value)
-        normalized_allowed = {_normalize_review_value(v) for v in allowed_values}
+        normalized_current = normalize_review_value(current_value)
+        normalized_allowed = {normalize_review_value(v) for v in allowed_values}
         if not normalized_current or normalized_current not in normalized_allowed:
             field_label = field.get("field_label") or field_key
             allowed_text = " / ".join(allowed_values)

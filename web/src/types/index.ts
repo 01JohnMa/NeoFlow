@@ -168,6 +168,12 @@ export interface DocumentListResponse {
   has_more: boolean
 }
 
+export interface ReviewHintField {
+  field_key: string
+  field_label: string
+  allowed_values: string[]
+}
+
 export interface ExtractionResultResponse {
   document_id: string
   document_type: string
@@ -176,6 +182,7 @@ export interface ExtractionResultResponse {
   ocr_confidence: number | null
   created_at: string
   is_validated: boolean
+  review_hint_fields?: ReviewHintField[]
 }
 
 // Field definitions for editing

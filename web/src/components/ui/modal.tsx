@@ -7,7 +7,9 @@ type ModalProps = {
   title?: string
   message?: string
   confirmText?: string
+  cancelText?: string
   onClose: () => void
+  onConfirm?: () => void
   children?: React.ReactNode
 }
 
@@ -16,7 +18,9 @@ export function Modal({
   title = '提示',
   message,
   confirmText = '知道了',
+  cancelText = '取消',
   onClose,
+  onConfirm,
   children,
 }: ModalProps) {
   React.useEffect(() => {
@@ -48,8 +52,11 @@ export function Modal({
         <h3 className="text-lg font-semibold">{title}</h3>
         {message && <p className="mt-3 text-sm text-text-secondary">{message}</p>}
         {children}
-        <div className="mt-6 flex justify-end">
-          <Button onClick={onClose}>{confirmText}</Button>
+        <div className="mt-6 flex justify-end gap-2">
+          {onConfirm && (
+            <Button variant="outline" onClick={onClose}>{cancelText}</Button>
+          )}
+          <Button onClick={onConfirm ?? onClose}>{confirmText}</Button>
         </div>
       </div>
     </div>
