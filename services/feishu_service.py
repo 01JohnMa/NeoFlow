@@ -280,6 +280,8 @@ class FeishuService:
                     logger.error("多维表格不存在或无权访问，请检查 app_token 和 table_id")
                 elif error_code == 1254060:
                     logger.error("文本字段转换失败！请检查飞书多维表格的列是否都设置为'文本'类型")
+                elif error_code == 1254045:
+                    logger.error("字段名不存在(FieldNameNotFound)：推送的列名与飞书多维表格中的列名不一致。请用 scripts/check_feishu_fields.py 拉取该表实际列名，或到飞书开放文档查看「多维表格 - 列出字段」，将模板的 feishu_column 改为与飞书表完全一致。")
                 
                 raise FeishuAPIError(error_code, error_msg)
             

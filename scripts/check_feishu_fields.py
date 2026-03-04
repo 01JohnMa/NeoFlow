@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""检查飞书表格字段列表"""
+"""检查飞书表格字段列表，对比「实际列名」与「当前推送的列名」是否一致。
+
+用法:
+  python scripts/check_feishu_fields.py
+  python scripts/check_feishu_fields.py <APP_TOKEN> <TABLE_ID>
+
+若未传 APP_TOKEN/TABLE_ID，则使用 .env 中的 FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID。
+检测报告模板使用的表可在 document_templates 表中查 feishu_bitable_token、feishu_table_id。
+"""
 
 import asyncio
 import httpx
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,6 +23,16 @@ FEISHU_BITABLE_APP_TOKEN = os.getenv("FEISHU_BITABLE_APP_TOKEN")
 FEISHU_BITABLE_TABLE_ID = os.getenv("FEISHU_BITABLE_TABLE_ID")
 
 BASE_URL = "https://open.feishu.cn/open-apis"
+
+# 检测报告模板当前推送的列名（与 002_init_data 中 feishu_column 及 文件名/附件 一致）
+PUSH_FIELDS_INSPECTION = [
+    "样品名称", "规格型号", "生产日期/批号",
+    "受检单位-名称", "受检单位-地址", "受检单位-电话",
+    "生产单位-名称", "生产单位-地址", "生产单位-电话",
+    "任务来源", "抽样机构", "抽样日期",
+    "检验结论", "检验类别", "备注", "主检", "审核", "批准",
+    "文件名", "附件",
+]
 
 
 async def get_tenant_access_token():
@@ -50,46 +69,49 @@ async def get_table_fields(token, bitable_token, table_id):
 
 
 async def main():
+    app_token = FEISHU_BITABLE_APP_TOKEN
+    table_id = FEISHU_BITABLE_TABLE_ID
+    if len(sys.argv) >= 3:
+        app_token, table_id = sys.argv[1], sys.argv[2]
+    if not app_token or not table_id:
+        print("请设置 .env 中的 FEISHU_BITABLE_APP_TOKEN、FEISHU_BITABLE_TABLE_ID，或传入: APP_TOKEN TABLE_ID")
+        return
+
     print("=== 飞书表格字段检查 ===\n")
-    print(f"APP_TOKEN: {FEISHU_BITABLE_APP_TOKEN}")
-    print(f"TABLE_ID: {FEISHU_BITABLE_TABLE_ID}\n")
-    
-    # 获取 token
+    print(f"APP_TOKEN: {app_token}")
+    print(f"TABLE_ID: {table_id}\n")
+
     print("1. 获取 tenant_access_token...")
     token = await get_tenant_access_token()
     if not token:
         print("❌ 无法获取 token")
         return
     print("✅ Token 获取成功\n")
-    
-    # 获取字段列表
+
     print("2. 获取表格字段列表...")
-    fields = await get_table_fields(token, FEISHU_BITABLE_APP_TOKEN, FEISHU_BITABLE_TABLE_ID)
+    fields = await get_table_fields(token, app_token, table_id)
     if not fields:
         print("❌ 无法获取字段列表")
         return
-    
-    print(f"✅ 找到 {len(fields)} 个字段:\n")
-    print("实际字段名列表:")
-    for i, field in enumerate(fields, 1):
-        field_name = field.get("field_name", "")
-        field_type = field.get("type", "")
-        print(f"  {i}. {field_name} ({field_type})")
-    
-    print("\n尝试推送的字段名:")
-    push_fields = ['样品名称', '规格型号', '被检单位', '生产商', '检验结论', '文件名称', '附件']
-    for i, field_name in enumerate(push_fields, 1):
-        exists = any(f.get("field_name") == field_name for f in fields)
-        status = "✅" if exists else "❌"
-        print(f"  {i}. {field_name} {status}")
-    
-    # 对比
-    actual_field_names = [f.get("field_name") for f in fields]
-    missing_fields = set(push_fields) - set(actual_field_names)
-    if missing_fields:
-        print(f"\n❌ 缺失的字段: {missing_fields}")
+
+    actual_names = [f.get("field_name", "") for f in fields]
+    print(f"✅ 飞书表中共 {len(actual_names)} 个列\n")
+    print("飞书表实际列名:")
+    for i, name in enumerate(actual_names, 1):
+        print(f"  {i}. {name}")
+
+    print("\n当前检测报告推送的列名 与 飞书表 对比:")
+    for name in PUSH_FIELDS_INSPECTION:
+        exists = name in actual_names
+        status = "✅" if exists else "❌ 不存在"
+        print(f"  {name} -> {status}")
+
+    missing = set(PUSH_FIELDS_INSPECTION) - set(actual_names)
+    if missing:
+        print(f"\n❌ 飞书表中缺失的列（会导致 FieldNameNotFound）: {missing}")
+        print("   处理方式：在飞书多维表格中新增同名列，或修改模板 feishu_column 为飞书表已有列名。")
     else:
-        print("\n✅ 所有字段都存在")
+        print("\n✅ 所有推送列在飞书表中均存在。")
 
 
 if __name__ == "__main__":

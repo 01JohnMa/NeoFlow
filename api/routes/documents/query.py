@@ -206,22 +206,29 @@ async def get_extraction_result(
         ocr_text = document.get("ocr_text") or ""
 
         # 从模板字段中收集有 review_allowed_values 的字段，用于前端保存前提示
+        # 支持两种来源：document.template_id（模板化处理）或 tenant_id+document_type（自动分类）
         review_hint_fields = []
         template_id = document.get("template_id")
-        if template_id:
-            try:
-                template = await template_service.get_template_with_details(template_id)
+        tenant_id = document.get("tenant_id")
+        try:
+            fields_list: list = []
+            if template_id:
+                # 直接查询字段表，避免 get_template_with_details 中复杂的 merge_rules 关联查询
+                fields_list = await template_service.get_template_fields(template_id)
+            elif tenant_id and document_type:
+                template = await template_service.get_template_by_code(tenant_id, document_type)
                 if template:
-                    for field in (template.get("template_fields") or []):
-                        allowed = parse_allowed_values(field.get("review_allowed_values"))
-                        if allowed:
-                            review_hint_fields.append({
-                                "field_key": field.get("field_key"),
-                                "field_label": field.get("field_label") or field.get("field_key"),
-                                "allowed_values": allowed,
-                            })
-            except Exception as hint_err:
-                logger.debug(f"获取 review_hint_fields 失败（不影响主流程）: {hint_err}")
+                    fields_list = template.get("template_fields") or []
+            for field in fields_list:
+                allowed = parse_allowed_values(field.get("review_allowed_values"))
+                if allowed:
+                    review_hint_fields.append({
+                        "field_key": field.get("field_key"),
+                        "field_label": field.get("field_label") or field.get("field_key"),
+                        "allowed_values": allowed,
+                    })
+        except Exception as hint_err:
+            logger.warning(f"获取 review_hint_fields 失败（不影响主流程）: {hint_err}")
 
         return {
             "document_id": document_id,
