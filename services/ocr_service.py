@@ -1,5 +1,5 @@
 # services/ocr_service.py
-"""OCR服务 - 基于MVP代码 text_pipline_ocr.py 重构"""
+"""OCR服务 - 基于PaddleOCR"""
 
 import os
 import asyncio
@@ -36,7 +36,7 @@ class OCRService:
             self.ocr_engine: Optional[PaddleOCR] = None
             self.executor = ThreadPoolExecutor(max_workers=2)
             self._watermarks = ['no', 'noi', 'copy', '样本', '仅供参考']
-            self._threshold = 0.5
+            self._threshold = 0.35
             OCRService._initialized = True
     
     async def initialize(self) -> bool:
@@ -85,7 +85,7 @@ class OCRService:
             ir_optim=settings.OCR_IR_OPTIM,
             enable_mkldnn=settings.OCR_USE_MKLDNN,
             det_limit_side_len=800,
-            det_limit_type='max'
+            det_limit_type='min'
         )
     
     async def process_document(self, file_path: str) -> Dict[str, Any]:
@@ -128,42 +128,23 @@ class OCRService:
         # PaddleOCR 使用 ocr() 方法，不是 predict()
         result = self.ocr_engine.ocr(file_path, cls=True)
         
-        lines = []
-        total_score = 0
+        all_text_pages: List[str] = []
+        lines: List[Dict] = []
+        total_score = 0.0
         valid_count = 0
-        
-        # PaddleOCR ocr() 返回格式: [[box, (text, score)], ...] 每页一个列表
-        if result:
-            for page_result in result:
-                if page_result is None:
-                    continue
-                for line_info in page_result:
-                    if line_info is None or len(line_info) < 2:
-                        continue
-                    # line_info 格式: [box_coords, (text, confidence)]
-                    text_info = line_info[1]
-                    if isinstance(text_info, tuple) and len(text_info) >= 2:
-                        text = str(text_info[0]).strip()
-                        score = float(text_info[1])
-                    else:
-                        continue
-                    
-                    # 过滤低置信度和水印 - 来自MVP逻辑
-                    if (score >= self._threshold 
-                        and text 
-                        and not any(wm in text.lower() for wm in self._watermarks)):
-                        lines.append({
-                            "text": text,
-                            "confidence": float(score)
-                        })
-                        total_score += score
-                        valid_count += 1
-        
-        # 计算平均置信度
+
+        for page_result in (result or []):
+            if not page_result:
+                continue
+            page_text, page_lines, page_conf = self._page_result_to_text(page_result)
+            if page_text:
+                all_text_pages.append(page_text)
+                lines.extend(page_lines)
+                total_score += page_conf * len(page_lines)
+                valid_count += len(page_lines)
+
         avg_confidence = total_score / valid_count if valid_count > 0 else 0.0
-        
-        # 合并文本
-        full_text = "\n".join([line["text"] for line in lines])
+        full_text = "\n\n".join(all_text_pages)
         
         result = {
             "text": full_text,
@@ -177,6 +158,99 @@ class OCRService:
         
         return result
     
+    def _compute_line_threshold(self, page_result: list, ratio: float = 0.4) -> float:
+        """从单页 OCR 结果动态计算行间距阈值。
+
+        取各文本框高度的中位数乘以 ratio，避免对不同分辨率/字号硬编码像素值。
+        """
+        heights = []
+        for line_info in page_result:
+            try:
+                box = line_info[0]
+                ys = [p[1] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+                if len(ys) >= 2:
+                    heights.append(max(ys) - min(ys))
+            except Exception:
+                continue
+        if not heights:
+            return 15.0
+        heights.sort()
+        return heights[len(heights) // 2] * ratio
+
+    def _page_result_to_text(
+        self, page_result: list
+    ) -> tuple:
+        """将单页原始 OCR 结果过滤、按阅读顺序排序后返回三元组。
+
+        过滤规则复用 self._threshold 和 self._watermarks；
+        使用当前行平均Y作为分组基准，比首/末元素基准更稳定。
+
+        Returns:
+            (ordered_text, lines_with_confidence, avg_confidence)
+            lines_with_confidence: List[{"text": str, "confidence": float}]，兼容下游结构
+        """
+        if not page_result:
+            return "", [], 0.0
+
+        threshold = self._compute_line_threshold(page_result)
+        items = []
+
+        for line_info in page_result:
+            try:
+                if not line_info or len(line_info) < 2:
+                    continue
+                box, text_info = line_info[0], line_info[1]
+                if not isinstance(box, (list, tuple)) or len(box) < 4:
+                    continue
+                if not isinstance(text_info, tuple) or len(text_info) < 2:
+                    continue
+                xs = [p[0] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+                ys = [p[1] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+                if not xs or not ys:
+                    continue
+                text = str(text_info[0]).strip()
+                score = float(text_info[1])
+                if not text or score < self._threshold:
+                    continue
+                if any(wm in text.lower() for wm in self._watermarks):
+                    continue
+                items.append({
+                    "text": text,
+                    "y": sum(ys) / len(ys),
+                    "x": min(xs),
+                    "confidence": score,
+                })
+            except Exception:
+                continue
+
+        if not items:
+            return "", [], 0.0
+
+        items.sort(key=lambda i: i["y"])
+
+        visual_lines: list = []
+        current_line = [items[0]]
+        current_avg_y = items[0]["y"]
+
+        for item in items[1:]:
+            if abs(item["y"] - current_avg_y) <= threshold:
+                current_line.append(item)
+                current_avg_y = sum(i["y"] for i in current_line) / len(current_line)
+            else:
+                current_line.sort(key=lambda i: i["x"])
+                visual_lines.append(current_line)
+                current_line, current_avg_y = [item], item["y"]
+
+        current_line.sort(key=lambda i: i["x"])
+        visual_lines.append(current_line)
+
+        ordered_items = [i for line in visual_lines for i in line]
+        avg_confidence = sum(i["confidence"] for i in ordered_items) / len(ordered_items)
+        lines_out = [{"text": i["text"], "confidence": i["confidence"]} for i in ordered_items]
+        full_text = "\n".join(" ".join(i["text"] for i in line) for line in visual_lines)
+
+        return full_text, lines_out, avg_confidence
+
     def _validate_ocr_result(self, result: Dict[str, Any]) -> None:
         """验证 OCR 结果的完整性和质量
         
@@ -234,27 +308,15 @@ class OCRService:
         # PaddleOCR 使用 ocr() 方法
         result = self.ocr_engine.ocr(file_path, cls=True)
         
-        filtered_results = []
-        if result:
-            for page_result in result:
-                if page_result is None:
-                    continue
-                for line_info in page_result:
-                    if line_info is None or len(line_info) < 2:
-                        continue
-                    text_info = line_info[1]
-                    if isinstance(text_info, tuple) and len(text_info) >= 2:
-                        text = str(text_info[0]).strip()
-                        score = float(text_info[1])
-                    else:
-                        continue
-                    
-                    if (score >= self._threshold 
-                        and text 
-                        and not any(wm in text.lower() for wm in self._watermarks)):
-                        filtered_results.append(text)
-        
-        return filtered_results
+        all_pages: List[str] = []
+        for page_result in (result or []):
+            if not page_result:
+                continue
+            page_text, _, _ = self._page_result_to_text(page_result)
+            if page_text:
+                all_pages.append(page_text)
+
+        return "\n\n".join(all_pages).split("\n") if all_pages else []
     
     async def process_document_per_page(self, file_path: str) -> List[Dict[str, Any]]:
         """逐页处理文档，返回每页独立的 OCR 结果
@@ -300,49 +362,18 @@ class OCRService:
         
         page_results = []
         
-        if ocr_result:
-            for page_idx, page_result in enumerate(ocr_result):
-                if page_result is None:
-                    continue
-                
-                lines = []
-                total_score = 0
-                valid_count = 0
-                
-                for line_info in page_result:
-                    if line_info is None or len(line_info) < 2:
-                        continue
-                    
-                    text_info = line_info[1]
-                    if isinstance(text_info, tuple) and len(text_info) >= 2:
-                        text = str(text_info[0]).strip()
-                        score = float(text_info[1])
-                    else:
-                        continue
-                    
-                    # 过滤低置信度和水印
-                    if (score >= self._threshold 
-                        and text 
-                        and not any(wm in text.lower() for wm in self._watermarks)):
-                        lines.append({
-                            "text": text,
-                            "confidence": float(score)
-                        })
-                        total_score += score
-                        valid_count += 1
-                
-                # 只有当页面有有效内容时才添加
-                if lines:
-                    avg_confidence = total_score / valid_count if valid_count > 0 else 0.0
-                    full_text = "\n".join([line["text"] for line in lines])
-                    
-                    page_results.append({
-                        "page": page_idx + 1,
-                        "text": full_text,
-                        "confidence": avg_confidence,
-                        "lines": lines,
-                        "total_lines": len(lines)
-                    })
+        for page_idx, page_result in enumerate(ocr_result or []):
+            if not page_result:
+                continue
+            page_text, page_lines, avg_conf = self._page_result_to_text(page_result)
+            if page_lines:
+                page_results.append({
+                    "page": page_idx + 1,
+                    "text": page_text,
+                    "confidence": avg_conf,
+                    "lines": page_lines,
+                    "total_lines": len(page_lines),
+                })
         
         # 如果没有识别到任何页面，抛出异常
         if not page_results:
