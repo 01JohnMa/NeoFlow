@@ -1,3 +1,77 @@
+// ============ Admin Config Types ============
+
+export interface TemplateField {
+  id: string
+  template_id: string
+  field_key: string
+  field_label: string
+  field_type: 'text' | 'date' | 'number'
+  extraction_hint: string | null
+  feishu_column: string | null
+  sort_order: number
+  review_enforced: boolean
+  review_allowed_values: string[] | null
+}
+
+export interface TemplateExample {
+  id: string
+  template_id: string
+  example_input: string
+  example_output: Record<string, unknown>
+  sort_order: number
+  is_active: boolean
+}
+
+export interface AdminTemplate {
+  id: string
+  tenant_id: string
+  name: string
+  code: string
+  description: string | null
+  process_mode: 'single' | 'merge'
+  required_doc_count: number
+  sort_order: number
+  is_active: boolean
+  auto_approve: boolean
+  feishu_bitable_token: string | null
+  feishu_table_id: string | null
+}
+
+export interface CreateFieldPayload {
+  field_key: string
+  field_label: string
+  field_type: 'text' | 'date' | 'number'
+  extraction_hint?: string
+  feishu_column?: string
+  sort_order?: number
+  review_enforced?: boolean
+  review_allowed_values?: string[] | null
+}
+
+export interface UpdateFieldPayload extends Partial<CreateFieldPayload> {}
+
+export interface CreateExamplePayload {
+  example_input: string
+  example_output: Record<string, unknown>
+  sort_order?: number
+  is_active?: boolean
+}
+
+export interface UpdateExamplePayload extends Partial<CreateExamplePayload> {}
+
+export interface UpdateTemplateConfigPayload {
+  feishu_bitable_token?: string
+  feishu_table_id?: string
+  auto_approve?: boolean
+}
+
+export interface ReorderItem {
+  id: string
+  sort_order: number
+}
+
+// ============ Document types ============
+
 // Document types
 export interface Document {
   id: string

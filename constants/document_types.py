@@ -31,10 +31,13 @@ DOC_TYPE_TABLE_MAP = {
     "sampling_form": DocumentTypeTable.SAMPLING_FORM,
     "抽样单": DocumentTypeTable.SAMPLING_FORM,
     
-    # 照明综合报告
+    # 照明综合报告（保留旧别名兼容历史数据）
     "lighting_combined": DocumentTypeTable.LIGHTING_REPORT,
     "照明综合报告": DocumentTypeTable.LIGHTING_REPORT,
     "照明综合": DocumentTypeTable.LIGHTING_REPORT,
+    # 积分球测试（合并主模板，新结构）
+    "integrating_sphere": DocumentTypeTable.LIGHTING_REPORT,
+    "积分球测试": DocumentTypeTable.LIGHTING_REPORT,
 }
 
 

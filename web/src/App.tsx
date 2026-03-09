@@ -12,6 +12,7 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Upload } from '@/pages/Upload'
 import { Documents } from '@/pages/Documents'
 import { DocumentDetail } from '@/pages/DocumentDetail'
+import { AdminConfig } from '@/pages/AdminConfig'
 
 // Create React Query client
 const queryClient = new QueryClient({
@@ -41,6 +42,7 @@ function App() {
             <Route path="/upload" element={<Upload />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/documents/:id" element={<DocumentDetail />} />
+            <Route path="/admin" element={<AdminConfig />} />
           </Route>
 
           {/* Fallback */}

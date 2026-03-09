@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { useUIStore, useAuthStore } from '@/store/useStore'
+import { useUIStore, useAuthStore, useProfileStore } from '@/store/useStore'
 import {
   LayoutDashboard,
   Upload,
@@ -8,6 +8,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Settings,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/useAuth'
@@ -23,7 +24,9 @@ export function Sidebar() {
   const location = useLocation()
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore()
   const { user } = useAuthStore()
+  const { profile } = useProfileStore()
   const { signOut } = useAuth()
+  const isAdmin = profile?.role === 'tenant_admin' || profile?.role === 'super_admin'
 
   // 移动端点击导航后关闭侧边栏
   const handleNavClick = () => {
@@ -93,6 +96,26 @@ export function Sidebar() {
             </Link>
           )
         })}
+
+        {/* 管理员入口 */}
+        {isAdmin && (() => {
+          const isActive = location.pathname === '/admin'
+          return (
+            <Link
+              to="/admin"
+              onClick={handleNavClick}
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 mt-1',
+                isActive
+                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
+                  : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+              )}
+            >
+              <Settings className={cn('h-5 w-5 flex-shrink-0', isActive && 'text-primary-400')} />
+              {sidebarOpen && <span>系统配置</span>}
+            </Link>
+          )
+        })()}
       </nav>
 
       {/* User Info & Logout */}

@@ -32,8 +32,8 @@ type UploadMode = 'lighting_merge' | 'quality_auto' | 'unknown'
 // 照明系统固定的文档类型配置（不依赖 API 查询）
 const LIGHTING_DOC_TYPES = ['光分布', '积分球']
 
-// 照明系统的模板 ID（用于后端处理）
-const LIGHTING_TEMPLATE_ID = 'lighting_combined'
+// 照明系统的模板 ID（积分球测试为合并主模板）
+const LIGHTING_TEMPLATE_ID = 'integrating_sphere'
 
 // Merge 模式文件信息
 interface MergeFileItem {

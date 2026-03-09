@@ -8,6 +8,7 @@ const pageTitles: Record<string, string> = {
   '/': '仪表盘',
   '/upload': '上传文档',
   '/documents': '文档列表',
+  '/admin': '系统配置',
 }
 
 export function Header() {

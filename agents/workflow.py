@@ -421,13 +421,32 @@ class OCRWorkflow:
 
                 if doc_type == merge_rule.get("doc_type_a") and sub_template_a:
                     # doc_type_a（积分球）：逐页处理，支持多样品
+                    # 当 sub_template_a 与主模板自引用时（积分球升格为主模板场景），
+                    # 仅保留 source_doc_type == doc_type_a 的字段构建提取 prompt，
+                    # 避免将光分布字段混入积分球提取指令
+                    doc_type_a_label = merge_rule.get("doc_type_a", "")
+                    if sub_template_a.get("id") == template.get("id") and doc_type_a_label:
+                        extraction_template_a = {
+                            **sub_template_a,
+                            "fields": [
+                                f for f in sub_template_a.get("fields", [])
+                                if f.get("source_doc_type") == doc_type_a_label
+                            ],
+                        }
+                        logger.info(
+                            f"sub_template_a 自引用，按 source_doc_type='{doc_type_a_label}' "
+                            f"过滤后字段数: {len(extraction_template_a['fields'])}"
+                        )
+                    else:
+                        extraction_template_a = sub_template_a
+
                     logger.info(f"逐页OCR处理文档A: {file_path} (类型: {doc_type})")
                     page_results = await ocr_service.process_document_per_page(file_path)
 
                     for page in page_results:
                         extracted = parse_llm_json(
                             await self._llm_invoke_with_retry(
-                                template_service.build_extraction_prompt(sub_template_a, page["text"])
+                                template_service.build_extraction_prompt(extraction_template_a, page["text"])
                             )
                         )
                         results_a.append(extracted)

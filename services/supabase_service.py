@@ -633,8 +633,8 @@ class SupabaseService:
                         return f"抽样_{product}_{location}"
                     return f"抽样_{product}"
             
-            elif document_type in ["照明综合报告", "lighting_combined"]:
-                # 照明综合报告: 照明_{样品型号}_{色温}
+            elif document_type in ["照明综合报告", "lighting_combined", "integrating_sphere", "积分球测试"]:
+                # 照明报告: 照明_{样品型号}_{色温}
                 sample_model = clean_name(extraction_data.get("sample_model"))
                 cct = clean_name(extraction_data.get("cct"), max_len=10)
                 if sample_model:
@@ -654,6 +654,8 @@ class SupabaseService:
                 "sampling": "抽样",
                 "照明综合报告": "照明",
                 "lighting_combined": "照明",
+                "integrating_sphere": "照明",
+                "积分球测试": "照明",
             }.get(document_type, "文档")
             
             return f"{type_prefix}_{timestamp}"
