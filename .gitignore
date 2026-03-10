@@ -61,6 +61,9 @@ htmlcov/
 # Cursor 计划文件
 .cursor/plans/
 
+# SVN 工作副本（与 Git 共存时勿提交）
+.svn/
+
 # 其他
 .DS_Store
 Thumbs.db
