@@ -2,6 +2,7 @@
 """模板服务 - 文档模板管理和动态 Prompt 构建"""
 
 import json
+import re
 from typing import Optional, Dict, Any, List
 from loguru import logger
 
@@ -80,16 +81,24 @@ class TemplateService:
             logger.error(f"获取租户模板列表失败: {e}")
             return []
     
+    _UUID_RE = re.compile(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        re.IGNORECASE,
+    )
+
     async def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取模板详情
+        获取模板详情（按 UUID 查询）
         
         Args:
-            template_id: 模板ID
+            template_id: 模板ID（必须是合法 UUID，否则直接返回 None）
             
         Returns:
-            模板信息
+            模板信息，template_id 非法 UUID 时返回 None
         """
+        if not self._UUID_RE.match(template_id):
+            logger.debug(f"get_template: 非 UUID 格式，跳过查询: {template_id!r}")
+            return None
         try:
             result = self._get_client().table("document_templates").select("*").eq("id", template_id).execute()
             return result.data[0] if result.data else None

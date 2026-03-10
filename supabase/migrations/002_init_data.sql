@@ -111,14 +111,21 @@ ON CONFLICT (template_id, field_key) DO NOTHING;
 -- ############################################################
 
 -- 4.1 积分球测试模板（合并主模板：负责逐页提取积分球多样品 + 合并光分布数据 + 推送飞书）
+-- 使用 ON CONFLICT (id) DO UPDATE 确保已存在记录也能被正确更新（process_mode/is_active 等关键字段）
 INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
     ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 'merge', 2, TRUE, 1)
-ON CONFLICT (tenant_id, code) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+    process_mode       = EXCLUDED.process_mode,
+    required_doc_count = EXCLUDED.required_doc_count,
+    is_active          = EXCLUDED.is_active,
+    sort_order         = EXCLUDED.sort_order;
 
 -- 4.2 光分布测试模板（子模板：负责光分布字段提取，结果合并到积分球主模板记录中）
 INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
     ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 'single', 1, TRUE, 2)
-ON CONFLICT (tenant_id, code) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+    is_active  = EXCLUDED.is_active,
+    sort_order = EXCLUDED.sort_order;
 
 
 -- ############################################################
@@ -186,7 +193,11 @@ WHERE template_id = 'b0000000-0000-0000-0000-000000000011'
 
 INSERT INTO template_merge_rules (template_id, doc_type_a, doc_type_b, sub_template_a_id, sub_template_b_id) VALUES
     ('b0000000-0000-0000-0000-000000000010', '积分球', '光分布', 'b0000000-0000-0000-0000-000000000010', 'b0000000-0000-0000-0000-000000000011')
-ON CONFLICT (template_id) DO NOTHING;
+ON CONFLICT (template_id) DO UPDATE SET
+    doc_type_a        = EXCLUDED.doc_type_a,
+    doc_type_b        = EXCLUDED.doc_type_b,
+    sub_template_a_id = EXCLUDED.sub_template_a_id,
+    sub_template_b_id = EXCLUDED.sub_template_b_id;
 
 
 -- ############################################################
