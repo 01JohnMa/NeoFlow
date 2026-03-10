@@ -218,9 +218,11 @@ export function useUploadMultiple() {
     mutationFn: async ({
       files,
       templateId,
+      onProgress,
     }: {
       files: Array<{ file: File; docType: string }>
       templateId?: string
+      onProgress?: (progress: number) => void
     }) => {
       const tempId = `upload-merge-${Date.now()}`
       setUploadProgress(tempId, 0)
@@ -232,6 +234,7 @@ export function useUploadMultiple() {
             // 计算总进度
             const totalProgress = Math.round(((fileIndex + progress / 100) / files.length) * 100)
             setUploadProgress(tempId, totalProgress)
+            onProgress?.(totalProgress)
           },
         })
         removeUploadProgress(tempId)

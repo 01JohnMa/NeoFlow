@@ -164,7 +164,7 @@ export const documentsService = {
     const response = await api.post<ProcessResponse>('/documents/process-merge', {
       template_id: templateId,
       files,
-    })
+    }, { timeout: 300000 })
     return response.data
   },
 

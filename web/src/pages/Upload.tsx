@@ -91,6 +91,19 @@ export function Upload() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)
 
+  // ============ 照明合并进度 ============
+  type MergePhase = 'idle' | 'uploading' | 'processing'
+  const [mergePhase, setMergePhase] = useState<MergePhase>('idle')
+  const [mergeProgress, setMergeProgress] = useState(0)
+  const mergeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopMergeTimer = () => {
+    if (mergeTimerRef.current) {
+      clearInterval(mergeTimerRef.current)
+      mergeTimerRef.current = null
+    }
+  }
+
   // ============ 照明系统：直接初始化固定的两文件列表（不依赖 API）============
   useEffect(() => {
     if (uploadMode === 'lighting_merge' && mergeFiles.length === 0) {
@@ -103,6 +116,11 @@ export function Upload() {
       setMergeFiles(initialFiles)
     }
   }, [uploadMode, mergeFiles.length])
+
+  // 组件卸载时清理定时器
+  useEffect(() => {
+    return () => { stopMergeTimer() }
+  }, [])
 
   const {
     isOpen: isCameraOpen,
@@ -254,10 +272,13 @@ export function Upload() {
       return
     }
 
-    try {
-      setUploadError(null)
+    setUploadError(null)
+    setMergePhase('uploading')
+    setMergeProgress(0)
+    stopMergeTimer()
 
-      // 1. 上传所有文件（不传 templateId，因为数据库字段是 UUID 类型）
+    try {
+      // 1. 上传所有文件，实时反映上传进度（占总进度 0–20%）
       const filesToUpload = mergeFiles
         .filter(item => item.file !== null)
         .map(item => ({
@@ -267,10 +288,22 @@ export function Upload() {
 
       const uploadResults = await uploadMultipleMutation.mutateAsync({
         files: filesToUpload,
-        // 注意：不传 templateId，避免数据库 UUID 类型错误
+        onProgress: (p) => setMergeProgress(Math.round(p * 0.2)),
       })
 
-      // 2. 调用合并处理（传模板 code，后端会查找真实的 template UUID）
+      // 2. 进入识别阶段（占 20–95%），用定时器模拟进度
+      setMergePhase('processing')
+      setMergeProgress(20)
+      mergeTimerRef.current = setInterval(() => {
+        setMergeProgress(prev => {
+          if (prev >= 95) {
+            stopMergeTimer()
+            return 95
+          }
+          return prev + 4
+        })
+      }, 2500)
+
       const mergeResult = await processMergeMutation.mutateAsync({
         templateId: lightingMergeTemplateId,
         files: uploadResults.map(r => ({
@@ -279,14 +312,20 @@ export function Upload() {
         })),
       })
 
-      // 3. 跳转到结果页面
+      // 3. 完成：进度到 100%，短暂停留后跳转
+      stopMergeTimer()
+      setMergeProgress(100)
+      await new Promise(resolve => setTimeout(resolve, 800))
+
       if (mergeResult.document_id) {
         navigate(`/documents/${mergeResult.document_id}`)
       } else {
-        // 如果没有返回 document_id，跳转到文档列表
         navigate('/documents')
       }
     } catch (err) {
+      stopMergeTimer()
+      setMergePhase('idle')
+      setMergeProgress(0)
       const message = err instanceof Error ? err.message : '上传失败'
       setUploadError(message)
     }
@@ -299,6 +338,9 @@ export function Upload() {
     setUploadError(null)
     setUploadedDocId(null)
     setMergeFiles([])
+    stopMergeTimer()
+    setMergePhase('idle')
+    setMergeProgress(0)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -525,12 +567,12 @@ export function Upload() {
               <Button
                 className="flex-1"
                 onClick={handleMergeUpload}
-                disabled={isUploading || !canSubmitMerge}
+                disabled={isUploading || !canSubmitMerge || mergePhase !== 'idle'}
               >
-                {isUploading ? (
+                {mergePhase !== 'idle' ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    处理中...
+                    {mergePhase === 'uploading' ? '上传中...' : '识别处理中...'}
                   </>
                 ) : (
                   <>
@@ -539,12 +581,32 @@ export function Upload() {
                   </>
                 )}
               </Button>
-              {!isUploading && (
+              {mergePhase === 'idle' && !isUploading && (
                 <Button variant="outline" onClick={clearSelection}>
                   重新选择
                 </Button>
               )}
             </div>
+
+            {/* 合并进度条 */}
+            {mergePhase !== 'idle' && (
+              <div className="pt-3 space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-text-secondary">
+                    {mergePhase === 'uploading'
+                      ? '正在上传文件...'
+                      : '正在识别提取，预计 1–2 分钟，请勿关闭页面...'}
+                  </span>
+                  <span className="text-text-muted tabular-nums">{mergeProgress}%</span>
+                </div>
+                <div className="w-full h-2 bg-bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary-500 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${mergeProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
