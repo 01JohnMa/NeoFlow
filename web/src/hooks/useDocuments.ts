@@ -218,9 +218,11 @@ export function useUploadMultiple() {
     mutationFn: async ({
       files,
       templateId,
+      onProgress,
     }: {
       files: Array<{ file: File; docType: string }>
       templateId?: string
+      onProgress?: (progress: number) => void
     }) => {
       const tempId = `upload-merge-${Date.now()}`
       setUploadProgress(tempId, 0)
@@ -232,6 +234,7 @@ export function useUploadMultiple() {
             // 计算总进度
             const totalProgress = Math.round(((fileIndex + progress / 100) / files.length) * 100)
             setUploadProgress(tempId, totalProgress)
+            onProgress?.(totalProgress)
           },
         })
         removeUploadProgress(tempId)
@@ -247,35 +250,5 @@ export function useUploadMultiple() {
   })
 }
 
-// Process merge mutation (合并模式处理)
-export function useProcessMerge() {
-  const queryClient = useQueryClient()
-  const { addProcessingDocument, removeProcessingDocument } = useUploadStore()
-
-  return useMutation({
-    mutationFn: async ({
-      templateId,
-      files,
-    }: {
-      templateId: string
-      files: Array<{ file_path: string; doc_type: string }>
-    }) => {
-      const tempId = `merge-${Date.now()}`
-      addProcessingDocument(tempId)
-
-      try {
-        const result = await documentsService.processMerge(templateId, files)
-        removeProcessingDocument(tempId)
-        return result
-      } catch (error) {
-        removeProcessingDocument(tempId)
-        throw error
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
 
 

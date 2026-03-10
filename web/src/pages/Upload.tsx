@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useUploadDocument, useProcessDocument, useUploadMultiple, useProcessMerge } from '@/hooks/useDocuments'
+import { useUploadDocument, useProcessDocument, useUploadMultiple } from '@/hooks/useDocuments'
+import documentsService from '@/services/documents'
 import { useCamera } from '@/hooks/useCamera'
 import { useProfile } from '@/hooks/useProfile'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -29,11 +30,14 @@ import {
 // 上传模式类型
 type UploadMode = 'lighting_merge' | 'quality_auto' | 'unknown'
 
+// 照明合并进度阶段
+type MergePhase = 'idle' | 'uploading' | 'processing'
+
 // 照明系统固定的文档类型配置（不依赖 API 查询）
 const LIGHTING_DOC_TYPES = ['光分布', '积分球']
 
-// 照明系统的模板 ID（用于后端处理）
-const LIGHTING_TEMPLATE_ID = 'lighting_combined'
+// 照明系统的模板 ID（积分球测试为合并主模板）
+const LIGHTING_TEMPLATE_ID = 'integrating_sphere'
 
 // Merge 模式文件信息
 interface MergeFileItem {
@@ -60,8 +64,7 @@ export function Upload() {
   const uploadMutation = useUploadDocument()
   const processMutation = useProcessDocument()
   const uploadMultipleMutation = useUploadMultiple()
-  const processMergeMutation = useProcessMerge()
-  const { tenantName, tenantCode, isLoading: profileLoading } = useProfile()
+  const { tenantName, tenantCode, mergeRules, templates, isLoading: profileLoading } = useProfile()
 
   // ============ 解耦：直接根据 tenantCode 决定上传模式 ============
   const uploadMode: UploadMode = useMemo(() => {
@@ -69,6 +72,15 @@ export function Upload() {
     if (tenantCode === 'quality') return 'quality_auto'
     return 'unknown'
   }, [tenantCode])
+
+  // 优先使用后端返回的 merge 模板 ID，避免前端硬编码导致配置不生效
+  const lightingMergeTemplateId = useMemo(() => {
+    const mergeTemplateIds = new Set(mergeRules.map((rule) => rule.template_id))
+    const firstMergeTemplate = templates.find(
+      (template) => template.process_mode === 'merge' && mergeTemplateIds.has(template.id)
+    )
+    return firstMergeTemplate?.id || mergeRules[0]?.template_id || LIGHTING_TEMPLATE_ID
+  }, [mergeRules, templates])
   const isMobile = useMemo(() => {
     if (typeof window === 'undefined') return false
     return window.matchMedia('(pointer: coarse)').matches
@@ -82,6 +94,18 @@ export function Upload() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)
 
+  // ============ 照明合并进度 ============
+  const [mergePhase, setMergePhase] = useState<MergePhase>('idle')
+  const [mergeProgress, setMergeProgress] = useState(0)
+  const mergeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopMergeTimer = useCallback(() => {
+    if (mergeTimerRef.current) {
+      clearInterval(mergeTimerRef.current)
+      mergeTimerRef.current = null
+    }
+  }, [])
+
   // ============ 照明系统：直接初始化固定的两文件列表（不依赖 API）============
   useEffect(() => {
     if (uploadMode === 'lighting_merge' && mergeFiles.length === 0) {
@@ -94,6 +118,11 @@ export function Upload() {
       setMergeFiles(initialFiles)
     }
   }, [uploadMode, mergeFiles.length])
+
+  // 组件卸载时清理定时器
+  useEffect(() => {
+    return () => { stopMergeTimer() }
+  }, [])
 
   const {
     isOpen: isCameraOpen,
@@ -245,10 +274,13 @@ export function Upload() {
       return
     }
 
-    try {
-      setUploadError(null)
+    setUploadError(null)
+    setMergePhase('uploading')
+    setMergeProgress(0)
+    stopMergeTimer()
 
-      // 1. 上传所有文件（不传 templateId，因为数据库字段是 UUID 类型）
+    try {
+      // 1. 上传所有文件，实时反映上传进度（占总进度 0–20%）
       const filesToUpload = mergeFiles
         .filter(item => item.file !== null)
         .map(item => ({
@@ -258,26 +290,49 @@ export function Upload() {
 
       const uploadResults = await uploadMultipleMutation.mutateAsync({
         files: filesToUpload,
-        // 注意：不传 templateId，避免数据库 UUID 类型错误
+        onProgress: (p) => setMergeProgress(Math.round(p * 0.2)),
       })
 
-      // 2. 调用合并处理（传模板 code，后端会查找真实的 template UUID）
-      const mergeResult = await processMergeMutation.mutateAsync({
-        templateId: LIGHTING_TEMPLATE_ID,
-        files: uploadResults.map(r => ({
-          file_path: r.file_path,
-          doc_type: r.doc_type,
-        })),
-      })
+      // 2. 提交合并任务（立即返回 job_id，后台处理）
+      setMergePhase('processing')
+      setMergeProgress(20)
+      const { job_id } = await documentsService.submitMergeJob(
+        lightingMergeTemplateId,
+        uploadResults.map(r => ({ file_path: r.file_path, doc_type: r.doc_type })),
+      )
 
-      // 3. 跳转到结果页面
-      if (mergeResult.document_id) {
-        navigate(`/documents/${mergeResult.document_id}`)
-      } else {
-        // 如果没有返回 document_id，跳转到文档列表
-        navigate('/documents')
-      }
+      // 3. 轮询任务状态，根据后端真实阶段更新进度条
+      await new Promise<void>((resolve, reject) => {
+        mergeTimerRef.current = setInterval(async () => {
+          try {
+            const jobStatus = await documentsService.getJobStatus(job_id)
+            // 进度：后端值在 20~100 区间内展示
+            setMergeProgress(Math.max(20, jobStatus.progress))
+
+            if (jobStatus.status === 'completed') {
+              stopMergeTimer()
+              setMergeProgress(100)
+              await new Promise(r => setTimeout(r, 600))
+              const firstDocId = jobStatus.document_ids?.[0]
+              if (firstDocId) {
+                navigate(`/documents/${firstDocId}`)
+              } else {
+                navigate('/documents')
+              }
+              resolve()
+            } else if (jobStatus.status === 'failed') {
+              stopMergeTimer()
+              reject(new Error(jobStatus.error || '处理失败'))
+            }
+          } catch {
+            // 单次轮询失败不中断，继续等待
+          }
+        }, 3000)
+      })
     } catch (err) {
+      stopMergeTimer()
+      setMergePhase('idle')
+      setMergeProgress(0)
       const message = err instanceof Error ? err.message : '上传失败'
       setUploadError(message)
     }
@@ -290,13 +345,16 @@ export function Upload() {
     setUploadError(null)
     setUploadedDocId(null)
     setMergeFiles([])
+    stopMergeTimer()
+    setMergePhase('idle')
+    setMergeProgress(0)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }
 
-  const isUploading = uploadMutation.isPending || processMutation.isPending || 
-                      uploadMultipleMutation.isPending || processMergeMutation.isPending
+  const isUploading = uploadMutation.isPending || processMutation.isPending ||
+                      uploadMultipleMutation.isPending
   
   // 检查照明系统合并模式是否可以提交
   const canSubmitMerge = uploadMode === 'lighting_merge' && mergeFiles.length > 0 && mergeFiles.some(item => item.file !== null)
@@ -516,12 +574,12 @@ export function Upload() {
               <Button
                 className="flex-1"
                 onClick={handleMergeUpload}
-                disabled={isUploading || !canSubmitMerge}
+                disabled={isUploading || !canSubmitMerge || mergePhase !== 'idle'}
               >
-                {isUploading ? (
+                {mergePhase !== 'idle' ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    处理中...
+                    {mergePhase === 'uploading' ? '上传中...' : '识别处理中...'}
                   </>
                 ) : (
                   <>
@@ -530,12 +588,32 @@ export function Upload() {
                   </>
                 )}
               </Button>
-              {!isUploading && (
+              {mergePhase === 'idle' && !isUploading && (
                 <Button variant="outline" onClick={clearSelection}>
                   重新选择
                 </Button>
               )}
             </div>
+
+            {/* 合并进度条 */}
+            {mergePhase !== 'idle' && (
+              <div className="pt-3 space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-text-secondary">
+                    {mergePhase === 'uploading'
+                      ? '正在上传文件...'
+                      : '正在识别提取，预计 1–2 分钟，请勿关闭页面...'}
+                  </span>
+                  <span className="text-text-muted tabular-nums">{mergeProgress}%</span>
+                </div>
+                <div className="w-full h-2 bg-bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary-500 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${mergeProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

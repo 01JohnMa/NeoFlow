@@ -1,9 +1,10 @@
 # services/ocr_service.py
-"""OCR服务 - 基于PaddleOCR"""
+"""OCR服务 - 基于PaddleOCR，引擎池模式支持并发"""
 
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from queue import Queue, Empty
 from typing import List, Dict, Any, Optional
 from paddleocr import PaddleOCR
 from loguru import logger
@@ -17,63 +18,87 @@ class OCRValidationError(Exception):
 
 
 class OCRService:
-    """PaddleOCR 服务封装"""
-    
+    """PaddleOCR 服务封装 - 引擎池模式，支持并发调用
+
+    每个引擎实例独立持有 Paddle Predictor，彼此隔离，线程安全。
+    并发请求数超过池大小时自动排队等待，不会崩溃。
+    """
+
     _instance: Optional['OCRService'] = None
     _initialized: bool = False
-    
+
     # OCR 结果验证配置
     MIN_CONFIDENCE_THRESHOLD = 0.3  # 最低可接受置信度
     MIN_TEXT_LENGTH = 10            # 最短文本长度（字符）
-    
+
+    # 引擎池大小：每个引擎约占 1-2 GB 内存，根据服务器配置调整
+    ENGINE_POOL_SIZE = 2
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
         if not OCRService._initialized:
-            self.ocr_engine: Optional[PaddleOCR] = None
-            self.executor = ThreadPoolExecutor(max_workers=2)
+            self._engine_pool: Queue = Queue(maxsize=self.ENGINE_POOL_SIZE)
+            self._pool_initialized: bool = False
+            # max_workers 与池大小一致，保证每个引擎都有对应线程
+            self.executor = ThreadPoolExecutor(max_workers=self.ENGINE_POOL_SIZE)
             self._watermarks = ['no', 'noi', 'copy', '样本', '仅供参考']
             self._threshold = 0.35
             OCRService._initialized = True
-    
+
+    # ── 向后兼容属性 ──────────────────────────────────────────────────────
+    @property
+    def ocr_engine(self) -> Optional[PaddleOCR]:
+        """向后兼容：窥探池中第一个引擎（只读，不应直接调用其 ocr() 方法）"""
+        try:
+            engine = self._engine_pool.get_nowait()
+            self._engine_pool.put(engine)
+            return engine
+        except Empty:
+            return None
+
+    # ── 初始化 ────────────────────────────────────────────────────────────
     async def initialize(self) -> bool:
-        """异步初始化OCR引擎"""
+        """异步初始化 OCR 引擎池（幂等）"""
+        if self._pool_initialized and not self._engine_pool.empty():
+            return True
+
         try:
             if not settings.OCR_ENABLED:
                 logger.warning("OCR 已禁用，跳过初始化")
                 return False
 
-            # 验证模型路径
             model_paths = {
                 "检测模型": settings.OCR_DET_MODEL_PATH,
                 "识别模型": settings.OCR_REC_MODEL_PATH,
                 "方向模型": settings.OCR_ORI_MODEL_PATH,
-                "文档模型": settings.OCR_DOC_MODEL_PATH
+                "文档模型": settings.OCR_DOC_MODEL_PATH,
             }
-            
             for name, path in model_paths.items():
                 if not os.path.exists(path):
                     raise FileNotFoundError(f"{name}路径不存在: {path}")
                 logger.info(f"✓ {name}: {path}")
-            
-            # 异步初始化
+
             loop = asyncio.get_event_loop()
-            self.ocr_engine = await loop.run_in_executor(
-                self.executor, self._init_ocr_sync
-            )
-            
-            logger.info("✓ OCR引擎初始化成功")
+            for i in range(self.ENGINE_POOL_SIZE):
+                engine = await loop.run_in_executor(self.executor, self._init_ocr_sync)
+                self._engine_pool.put(engine)
+                logger.info(f"✓ OCR引擎 [{i + 1}/{self.ENGINE_POOL_SIZE}] 初始化成功")
+
+            self._pool_initialized = True
+            logger.info(f"✓ OCR引擎池就绪，共 {self.ENGINE_POOL_SIZE} 个引擎，"
+                        f"支持 {self.ENGINE_POOL_SIZE} 并发任务")
             return True
-            
+
         except Exception as e:
-            logger.error(f"✗ OCR引擎初始化失败: {e}")
+            logger.error(f"✗ OCR引擎池初始化失败: {e}")
             raise
-    
+
     def _init_ocr_sync(self) -> PaddleOCR:
-        """同步初始化PaddleOCR - 完全按照MVP代码 text_pipline_ocr.py"""
+        """同步创建一个 PaddleOCR 引擎实例"""
         return PaddleOCR(
             lang='ch',
             det_model_dir=settings.OCR_DET_MODEL_PATH,
@@ -85,15 +110,23 @@ class OCRService:
             ir_optim=settings.OCR_IR_OPTIM,
             enable_mkldnn=settings.OCR_USE_MKLDNN,
             det_limit_side_len=800,
-            det_limit_type='min'
+            det_limit_type='min',
         )
-    
+
+    # ── 引擎池借还 ────────────────────────────────────────────────────────
+    def _acquire_engine(self) -> PaddleOCR:
+        """从池中取出一个引擎（池满时阻塞等待直到有引擎归还）"""
+        engine = self._engine_pool.get()
+        return engine
+
+    def _release_engine(self, engine: PaddleOCR) -> None:
+        """将引擎归还到池中"""
+        self._engine_pool.put(engine)
+
+    # ── 公共异步接口 ──────────────────────────────────────────────────────
     async def process_document(self, file_path: str) -> Dict[str, Any]:
         """处理单个文档
-        
-        Args:
-            file_path: 文件路径
-            
+
         Returns:
             {
                 "text": str,           # 提取的文本
@@ -104,60 +137,140 @@ class OCRService:
         """
         if not settings.OCR_ENABLED:
             raise OCRValidationError("OCR 已禁用，无法处理文档")
-
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
-        
-        if not self.ocr_engine:
+        if not self._pool_initialized:
             await self.initialize()
-        
+
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            self.executor, 
-            self._process_sync, 
-            file_path
-        )
-        
-        return result
-    
+        return await loop.run_in_executor(self.executor, self._process_sync, file_path)
+
+    async def process_document_per_page(self, file_path: str) -> List[Dict[str, Any]]:
+        """逐页处理文档，返回每页独立的 OCR 结果
+
+        用于需要按页分别提取的场景（如照明积分球多样品）
+
+        Returns:
+            每页的 OCR 结果列表:
+            [
+                {"page": 1, "text": "页1文本", "confidence": 0.95, "lines": [...], "total_lines": 10},
+                {"page": 2, "text": "页2文本", "confidence": 0.92, "lines": [...], "total_lines": 8},
+                ...
+            ]
+        """
+        if not settings.OCR_ENABLED:
+            raise OCRValidationError("OCR 已禁用，无法处理文档")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+        if not self._pool_initialized:
+            await self.initialize()
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, self._process_per_page_sync, file_path)
+
+    # ── 同步处理（在线程池中执行，通过引擎池隔离）────────────────────────
     def _process_sync(self, file_path: str) -> Dict[str, Any]:
-        """同步执行OCR - 使用 PaddleOCR 的 ocr() 方法"""
-        if not self.ocr_engine:
-            raise OCRValidationError("OCR 引擎未初始化")
+        """同步执行 OCR（从引擎池借用一个引擎，用后归还）"""
+        engine = self._acquire_engine()
+        try:
+            raw = engine.ocr(file_path, cls=True)
 
-        # PaddleOCR 使用 ocr() 方法，不是 predict()
-        result = self.ocr_engine.ocr(file_path, cls=True)
-        
-        all_text_pages: List[str] = []
-        lines: List[Dict] = []
-        total_score = 0.0
-        valid_count = 0
+            all_text_pages: List[str] = []
+            lines: List[Dict] = []
+            total_score = 0.0
+            valid_count = 0
 
-        for page_result in (result or []):
-            if not page_result:
-                continue
-            page_text, page_lines, page_conf = self._page_result_to_text(page_result)
-            if page_text:
-                all_text_pages.append(page_text)
-                lines.extend(page_lines)
-                total_score += page_conf * len(page_lines)
-                valid_count += len(page_lines)
+            for page_result in (raw or []):
+                if not page_result:
+                    continue
+                page_text, page_lines, page_conf = self._page_result_to_text(page_result)
+                if page_text:
+                    all_text_pages.append(page_text)
+                    lines.extend(page_lines)
+                    total_score += page_conf * len(page_lines)
+                    valid_count += len(page_lines)
 
-        avg_confidence = total_score / valid_count if valid_count > 0 else 0.0
-        full_text = "\n\n".join(all_text_pages)
-        
-        result = {
-            "text": full_text,
-            "confidence": avg_confidence,
-            "lines": lines,
-            "total_lines": len(lines)
-        }
-        
-        # 验证 OCR 结果
-        self._validate_ocr_result(result)
-        
-        return result
-    
+            avg_confidence = total_score / valid_count if valid_count > 0 else 0.0
+            result = {
+                "text": "\n\n".join(all_text_pages),
+                "confidence": avg_confidence,
+                "lines": lines,
+                "total_lines": len(lines),
+            }
+            self._validate_ocr_result(result)
+            return result
+        finally:
+            self._release_engine(engine)
+
+    def _process_per_page_sync(self, file_path: str) -> List[Dict[str, Any]]:
+        """同步执行逐页 OCR（从引擎池借用一个引擎，用后归还）"""
+        engine = self._acquire_engine()
+        try:
+            ocr_result = engine.ocr(file_path, cls=True)
+
+            page_results = []
+            for page_idx, page_result in enumerate(ocr_result or []):
+                if not page_result:
+                    continue
+                page_text, page_lines, avg_conf = self._page_result_to_text(page_result)
+                if page_lines:
+                    page_results.append({
+                        "page": page_idx + 1,
+                        "text": page_text,
+                        "confidence": avg_conf,
+                        "lines": page_lines,
+                        "total_lines": len(page_lines),
+                    })
+
+            if not page_results:
+                raise OCRValidationError("OCR 未能识别到任何文本")
+
+            logger.info(f"逐页OCR完成: {file_path}, 共{len(page_results)}页有效内容")
+            return page_results
+        finally:
+            self._release_engine(engine)
+
+    def process_document_sync(self, file_path: str) -> List[str]:
+        """同步处理文档 - 兼容旧接口（从引擎池借用引擎）
+
+        Returns:
+            提取的文本行列表
+        """
+        if not settings.OCR_ENABLED:
+            raise OCRValidationError("OCR 已禁用，无法处理文档")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+        if not self._pool_initialized:
+            raise OCRValidationError("OCR 引擎池未初始化，请先调用 initialize()")
+
+        engine = self._acquire_engine()
+        try:
+            result = engine.ocr(file_path, cls=True)
+            all_pages: List[str] = []
+            for page_result in (result or []):
+                if not page_result:
+                    continue
+                page_text, _, _ = self._page_result_to_text(page_result)
+                if page_text:
+                    all_pages.append(page_text)
+            return "\n\n".join(all_pages).split("\n") if all_pages else []
+        finally:
+            self._release_engine(engine)
+
+    async def process_batch(self, file_paths: List[str]) -> Dict[str, Any]:
+        """批量处理文档（并发数受引擎池大小限制，自动排队）"""
+        tasks = [self.process_document(path) for path in file_paths]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        output = {}
+        for path, result in zip(file_paths, results):
+            if isinstance(result, Exception):
+                output[path] = {"error": str(result)}
+            else:
+                output[path] = result
+        return output
+
+    # ── 文本后处理工具 ────────────────────────────────────────────────────
     def _compute_line_threshold(self, page_result: list, ratio: float = 0.4) -> float:
         """从单页 OCR 结果动态计算行间距阈值。
 
@@ -177,9 +290,7 @@ class OCRService:
         heights.sort()
         return heights[len(heights) // 2] * ratio
 
-    def _page_result_to_text(
-        self, page_result: list
-    ) -> tuple:
+    def _page_result_to_text(self, page_result: list) -> tuple:
         """将单页原始 OCR 结果过滤、按阅读顺序排序后返回三元组。
 
         过滤规则复用 self._threshold 和 self._watermarks；
@@ -252,163 +363,45 @@ class OCRService:
         return full_text, lines_out, avg_confidence
 
     def _validate_ocr_result(self, result: Dict[str, Any]) -> None:
-        """验证 OCR 结果的完整性和质量
-        
-        Args:
-            result: OCR 处理结果
-            
-        Raises:
-            OCRValidationError: 验证失败时抛出
-        """
-        # 1. 验证必要字段存在
+        """验证 OCR 结果的完整性和质量"""
         required_fields = ["text", "confidence", "lines", "total_lines"]
         for field in required_fields:
             if field not in result:
                 raise OCRValidationError(f"OCR 结果缺少必要字段: {field}")
-        
-        # 2. 验证文本不为空（允许短文本，但记录警告）
+
         text = result.get("text", "")
         if not text or not text.strip():
             raise OCRValidationError("OCR 未能识别到任何文本")
-        
+
         if len(text.strip()) < self.MIN_TEXT_LENGTH:
             logger.warning(f"OCR 识别文本过短: {len(text.strip())} 字符 (最小推荐: {self.MIN_TEXT_LENGTH})")
-        
-        # 3. 验证置信度
+
         confidence = result.get("confidence", 0)
         if confidence < self.MIN_CONFIDENCE_THRESHOLD:
             logger.warning(
                 f"OCR 置信度较低: {confidence:.2f} (阈值: {self.MIN_CONFIDENCE_THRESHOLD})"
             )
-        
-        # 4. 验证行数据一致性
+
         lines = result.get("lines", [])
         total_lines = result.get("total_lines", 0)
         if len(lines) != total_lines:
             logger.warning(f"行数不一致: lines={len(lines)}, total_lines={total_lines}")
-    
-    def process_document_sync(self, file_path: str) -> List[str]:
-        """同步处理文档 - 兼容MVP代码接口
-        
-        Args:
-            file_path: 文件路径
-            
-        Returns:
-            提取的文本行列表
-        """
-        if not settings.OCR_ENABLED:
-            raise OCRValidationError("OCR 已禁用，无法处理文档")
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"文件不存在: {file_path}")
-        
-        if not self.ocr_engine:
-            self.ocr_engine = self._init_ocr_sync()
-        
-        # PaddleOCR 使用 ocr() 方法
-        result = self.ocr_engine.ocr(file_path, cls=True)
-        
-        all_pages: List[str] = []
-        for page_result in (result or []):
-            if not page_result:
-                continue
-            page_text, _, _ = self._page_result_to_text(page_result)
-            if page_text:
-                all_pages.append(page_text)
-
-        return "\n\n".join(all_pages).split("\n") if all_pages else []
-    
-    async def process_document_per_page(self, file_path: str) -> List[Dict[str, Any]]:
-        """逐页处理文档，返回每页独立的 OCR 结果
-        
-        用于需要按页分别提取的场景（如照明积分球多样品）
-        
-        Args:
-            file_path: 文件路径
-            
-        Returns:
-            每页的 OCR 结果列表:
-            [
-                {"page": 1, "text": "页1文本", "confidence": 0.95, "lines": [...], "total_lines": 10},
-                {"page": 2, "text": "页2文本", "confidence": 0.92, "lines": [...], "total_lines": 8},
-                ...
-            ]
-        """
-        if not settings.OCR_ENABLED:
-            raise OCRValidationError("OCR 已禁用，无法处理文档")
-
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"文件不存在: {file_path}")
-        
-        if not self.ocr_engine:
-            await self.initialize()
-        
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            self.executor, 
-            self._process_per_page_sync, 
-            file_path
-        )
-        
-        return result
-    
-    def _process_per_page_sync(self, file_path: str) -> List[Dict[str, Any]]:
-        """同步执行逐页 OCR"""
-        if not self.ocr_engine:
-            raise OCRValidationError("OCR 引擎未初始化")
-
-        # PaddleOCR ocr() 返回格式: [[页1内容], [页2内容], ...] 每页一个列表
-        ocr_result = self.ocr_engine.ocr(file_path, cls=True)
-        
-        page_results = []
-        
-        for page_idx, page_result in enumerate(ocr_result or []):
-            if not page_result:
-                continue
-            page_text, page_lines, avg_conf = self._page_result_to_text(page_result)
-            if page_lines:
-                page_results.append({
-                    "page": page_idx + 1,
-                    "text": page_text,
-                    "confidence": avg_conf,
-                    "lines": page_lines,
-                    "total_lines": len(page_lines),
-                })
-        
-        # 如果没有识别到任何页面，抛出异常
-        if not page_results:
-            raise OCRValidationError("OCR 未能识别到任何文本")
-        
-        logger.info(f"逐页OCR完成: {file_path}, 共{len(page_results)}页有效内容")
-        return page_results
-    
-    async def process_batch(self, file_paths: List[str]) -> Dict[str, Any]:
-        """批量处理文档"""
-        tasks = [self.process_document(path) for path in file_paths]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        output = {}
-        for path, result in zip(file_paths, results):
-            if isinstance(result, Exception):
-                output[path] = {"error": str(result)}
-            else:
-                output[path] = result
-        
-        return output
-    
     def get_supported_formats(self) -> List[str]:
         """获取支持的文件格式"""
         return ['pdf', 'png', 'jpg', 'jpeg', 'tiff', 'bmp']
-    
+
     async def close(self):
-        """关闭服务"""
+        """关闭服务，回收引擎池和线程池"""
+        try:
+            while not self._engine_pool.empty():
+                self._engine_pool.get_nowait()
+        except Empty:
+            pass
         if self.executor:
             self.executor.shutdown(wait=True)
-            logger.info("OCR服务已关闭")
+        logger.info("OCR服务已关闭")
 
 
 # 单例实例
 ocr_service = OCRService()
-
-
-

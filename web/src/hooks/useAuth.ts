@@ -3,6 +3,49 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/useStore'
 import { authService } from '@/services/auth'
 import { supabase } from '@/lib/supabase'
+import type { Session } from '@supabase/supabase-js'
+
+let authInitialized = false
+let authInitPromise: Promise<void> | null = null
+let authSubscription: { unsubscribe: () => void } | null = null
+let authConsumerCount = 0
+
+function applySessionToStore(session: Session | null) {
+  const { setSession, setUser, setLoading } = useAuthStore.getState()
+  setSession(session)
+  setUser(session?.user ?? null)
+  setLoading(false)
+}
+
+async function ensureAuthInitialized() {
+  if (authInitialized) return
+  if (authInitPromise) {
+    await authInitPromise
+    return
+  }
+
+  authInitPromise = (async () => {
+    try {
+      const { session } = await authService.getSession()
+      applySessionToStore(session)
+    } catch (error) {
+      console.error('Auth init error:', error)
+      const { setLoading } = useAuthStore.getState()
+      setLoading(false)
+    }
+
+    if (!authSubscription) {
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        applySessionToStore(session)
+      })
+      authSubscription = data.subscription
+    }
+
+    authInitialized = true
+  })()
+
+  await authInitPromise
+}
 
 export function useAuth() {
   const { user, session, isLoading, setUser, setSession, setLoading, reset } = useAuthStore()
@@ -10,40 +53,21 @@ export function useAuth() {
 
   // Initialize auth state
   useEffect(() => {
-    let mounted = true
-
-    const initAuth = async () => {
-      try {
-        const { session } = await authService.getSession()
-        if (mounted) {
-          setSession(session)
-          setUser(session?.user ?? null)
-        }
-      } catch (error) {
-        console.error('Auth init error:', error)
-      } finally {
-        if (mounted) {
-          setLoading(false)
-        }
-      }
-    }
-
-    initAuth()
-
-    // Listen to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        setSession(session)
-        setUser(session?.user ?? null)
-        setLoading(false)
-      }
-    })
-
+    authConsumerCount += 1
+    ensureAuthInitialized()
     return () => {
-      mounted = false
-      subscription.unsubscribe()
+      authConsumerCount -= 1
+      if (authConsumerCount <= 0) {
+        if (authSubscription) {
+          authSubscription.unsubscribe()
+          authSubscription = null
+        }
+        authInitialized = false
+        authInitPromise = null
+        authConsumerCount = 0
+      }
     }
-  }, [setUser, setSession, setLoading])
+  }, [])
 
   // Sign in
   const signIn = useCallback(async (email: string, password: string) => {

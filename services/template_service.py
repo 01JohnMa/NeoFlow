@@ -2,6 +2,7 @@
 """模板服务 - 文档模板管理和动态 Prompt 构建"""
 
 import json
+import re
 from typing import Optional, Dict, Any, List
 from loguru import logger
 
@@ -80,16 +81,24 @@ class TemplateService:
             logger.error(f"获取租户模板列表失败: {e}")
             return []
     
+    _UUID_RE = re.compile(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        re.IGNORECASE,
+    )
+
     async def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取模板详情
+        获取模板详情（按 UUID 查询）
         
         Args:
-            template_id: 模板ID
+            template_id: 模板ID（必须是合法 UUID，否则直接返回 None）
             
         Returns:
-            模板信息
+            模板信息，template_id 非法 UUID 时返回 None
         """
+        if not self._UUID_RE.match(template_id):
+            logger.debug(f"get_template: 非 UUID 格式，跳过查询: {template_id!r}")
+            return None
         try:
             result = self._get_client().table("document_templates").select("*").eq("id", template_id).execute()
             return result.data[0] if result.data else None
@@ -380,6 +389,177 @@ class TemplateService:
         """
         fields = template.get("template_fields", [])
         return [f.get("field_key") for f in fields if f.get("field_key")]
+
+    # ============ 管理员 CRUD：字段操作 ============
+
+    async def create_field(self, template_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """新增模板字段"""
+        try:
+            payload = {
+                "template_id": template_id,
+                "field_key": data["field_key"],
+                "field_label": data["field_label"],
+                "field_type": data.get("field_type", "text"),
+                "extraction_hint": data.get("extraction_hint", ""),
+                "feishu_column": data.get("feishu_column", ""),
+                "sort_order": data.get("sort_order", 0),
+                "review_enforced": data.get("review_enforced", False),
+                "review_allowed_values": data.get("review_allowed_values", None),
+            }
+            result = self._get_client().table("template_fields").insert(payload).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"新增模板字段失败: {e}")
+            raise
+
+    async def update_field(self, field_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """更新模板字段"""
+        try:
+            allowed_keys = {
+                "field_key", "field_label", "field_type", "extraction_hint",
+                "feishu_column", "sort_order", "review_enforced", "review_allowed_values",
+            }
+            payload = {k: v for k, v in data.items() if k in allowed_keys}
+            result = self._get_client().table("template_fields").update(payload).eq("id", field_id).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"更新模板字段失败: {e}")
+            raise
+
+    async def delete_field(self, field_id: str) -> bool:
+        """删除模板字段"""
+        try:
+            self._get_client().table("template_fields").delete().eq("id", field_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"删除模板字段失败: {e}")
+            raise
+
+    async def reorder_fields(self, template_id: str, order_list: List[Dict[str, Any]]) -> bool:
+        """
+        批量更新字段排序
+        
+        Args:
+            template_id: 模板ID（用于校验）
+            order_list: [{"id": field_id, "sort_order": int}, ...]
+        """
+        try:
+            for item in order_list:
+                self._get_client().table("template_fields").update(
+                    {"sort_order": item["sort_order"]}
+                ).eq("id", item["id"]).eq("template_id", template_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"批量排序字段失败: {e}")
+            raise
+
+    async def get_field_by_id(self, field_id: str) -> Optional[Dict[str, Any]]:
+        """根据 ID 获取单个字段（含 template_id，供权限校验用）"""
+        try:
+            result = self._get_client().table("template_fields").select("*").eq("id", field_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"获取字段失败: {e}")
+            return None
+
+    # ============ 管理员 CRUD：示例操作 ============
+
+    async def create_example(self, template_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """新增 few-shot 示例"""
+        try:
+            payload = {
+                "template_id": template_id,
+                "example_input": data.get("example_input", ""),
+                "example_output": data.get("example_output", {}),
+                "sort_order": data.get("sort_order", 0),
+                "is_active": data.get("is_active", True),
+            }
+            result = self._get_client().table("template_examples").insert(payload).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"新增示例失败: {e}")
+            raise
+
+    async def update_example(self, example_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """更新 few-shot 示例"""
+        try:
+            allowed_keys = {"example_input", "example_output", "sort_order", "is_active"}
+            payload = {k: v for k, v in data.items() if k in allowed_keys}
+            result = self._get_client().table("template_examples").update(payload).eq("id", example_id).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"更新示例失败: {e}")
+            raise
+
+    async def delete_example(self, example_id: str) -> bool:
+        """删除 few-shot 示例"""
+        try:
+            self._get_client().table("template_examples").delete().eq("id", example_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"删除示例失败: {e}")
+            raise
+
+    async def get_example_by_id(self, example_id: str) -> Optional[Dict[str, Any]]:
+        """根据 ID 获取单个示例（含 template_id，供权限校验用）"""
+        try:
+            result = self._get_client().table("template_examples").select("*").eq("id", example_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"获取示例失败: {e}")
+            return None
+
+    # ============ 管理员 CRUD：模板基本信息操作 ============
+
+    async def get_admin_templates(
+        self,
+        tenant_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取可管理的模板列表（含字段和示例数量）
+        
+        Args:
+            tenant_id: 指定租户ID（super_admin 按此过滤，None 则返回全部）
+        """
+        try:
+            query = self._get_client().table("document_templates").select(
+                "id, tenant_id, name, code, description, process_mode, "
+                "required_doc_count, sort_order, is_active, auto_approve, "
+                "feishu_bitable_token, feishu_table_id"
+            )
+            if tenant_id:
+                query = query.eq("tenant_id", tenant_id)
+            query = query.order("sort_order").order("name")
+            result = query.execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"获取管理模板列表失败: {e}")
+            return []
+
+    async def update_template_config(self, template_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        更新模板的飞书配置和自动审批开关
+        
+        Args:
+            template_id: 模板ID
+            data: 包含 feishu_bitable_token, feishu_table_id, auto_approve 的字典
+        """
+        try:
+            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve"}
+            payload = {k: v for k, v in data.items() if k in allowed_keys}
+            if not payload:
+                return {}
+
+            # 先更新，再显式回读，避免 PostgREST 返回最小化响应导致前端拿到空对象
+            self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
+            fresh = self._get_client().table("document_templates").select(
+                "id, tenant_id, name, code, description, process_mode, required_doc_count, "
+                "sort_order, is_active, auto_approve, feishu_bitable_token, feishu_table_id"
+            ).eq("id", template_id).execute()
+            return fresh.data[0] if fresh.data else {}
+        except Exception as e:
+            logger.error(f"更新模板配置失败: {e}")
+            raise
     
     # ============ Merge 模式支持 ============
     
