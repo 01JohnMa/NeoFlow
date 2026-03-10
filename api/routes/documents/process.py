@@ -2,10 +2,12 @@
 """文档路由 - 处理相关端点"""
 
 from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel
 from loguru import logger
+import asyncio
 import uuid
 import os
 
@@ -16,6 +18,7 @@ from services.feishu_service import feishu_service
 from agents.workflow import ocr_workflow
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
 from api.dependencies.auth import get_current_user, CurrentUser
+from api.jobs import create_job, update_job, get_job
 
 
 # ============ 请求模型 ============
@@ -508,107 +511,137 @@ async def process_merge_documents(
     user: CurrentUser = Depends(get_current_user)
 ):
     """
-    合并模式处理：多份文档分别提取后合并
-    
-    用于照明事业部场景：上传积分球+光分布文档，分别提取后合并结果
-    支持多样品：积分球 PDF 多页时，每页一个样品，生成多条记录
-    
+    合并模式处理（异步）：立即返回 job_id，后台执行 OCR + LLM + 保存
+
+    前端拿到 job_id 后轮询 GET /documents/jobs/{job_id} 获取进度。
+
     - **template_id**: 合并模板ID（process_mode='merge'）
     - **files**: 文件列表，每项包含 file_path 和 doc_type
     """
-    created_doc_ids = []  # 记录所有创建的文档ID，用于异常时清理
+    if not user.tenant_id:
+        raise HTTPException(status_code=400, detail="请先选择所属部门")
+
+    if not request.files:
+        raise HTTPException(status_code=400, detail="请提供至少一个文件")
+
+    # 前置校验（快速失败，不进入后台任务）
+    template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
+    if not template:
+        try:
+            template = await template_service.get_template_with_details(request.template_id)
+        except Exception:
+            template = None
+    if not template:
+        raise HTTPException(status_code=404, detail="模板不存在")
+
+    if template.get("process_mode") != "merge":
+        raise HTTPException(status_code=400, detail="此模板不支持合并模式")
+
+    if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
+        raise HTTPException(status_code=403, detail="无权使用此模板")
+
+    # 验证文件存在并收集原始文档 ID
+    files = []
+    source_doc_ids = []
+    for file_info in request.files:
+        if not os.path.exists(file_info.file_path):
+            raise HTTPException(status_code=404, detail=f"文件不存在: {file_info.file_path}")
+        files.append({"file_path": file_info.file_path, "doc_type": file_info.doc_type})
+        source_doc = await supabase_service.get_document_by_file_path(file_info.file_path)
+        if source_doc:
+            source_doc_ids.append(source_doc["id"])
+
+    # 创建 Job 并在后台运行
+    job_id = create_job()
+    asyncio.create_task(
+        _run_merge_job(job_id, files, source_doc_ids, template, user)
+    )
+    logger.info(f"合并任务已提交: job_id={job_id}, 文件数={len(files)}")
+
+    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "pending"})
+
+
+@router.get("/jobs/{job_id}")
+async def get_merge_job_status(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user)
+):
+    """查询合并任务状态（前端轮询用）
+
+    Returns:
+        {
+            "job_id": "...",
+            "status": "pending|processing|completed|failed",
+            "stage": "pending|ocr|llm|saving|completed|failed",
+            "progress": 0~100,
+            "document_ids": [...],   # completed 时填入
+            "error": "..."           # failed 时填入
+        }
+    """
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return job
+
+
+async def _run_merge_job(
+    job_id: str,
+    files: list,
+    source_doc_ids: list,
+    template: dict,
+    user: CurrentUser,
+):
+    """后台合并任务：OCR → LLM → 保存 → 推送飞书"""
+    created_doc_ids: list = []
     try:
-        if not user.tenant_id:
-            raise HTTPException(status_code=400, detail="请先选择所属部门")
-        
-        if not request.files:
-            raise HTTPException(status_code=400, detail="请提供至少一个文件")
-        
-        # 获取模板（支持 UUID 或 code，必须含 template_fields 用于字段映射和推送）
-        template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
-        if not template:
-            try:
-                template = await template_service.get_template_with_details(request.template_id)
-            except Exception:
-                template = None
-        if not template:
-            raise HTTPException(status_code=404, detail="模板不存在")
-        
-        if template.get("process_mode") != "merge":
-            raise HTTPException(status_code=400, detail="此模板不支持合并模式")
-        
-        if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
-            raise HTTPException(status_code=403, detail="无权使用此模板")
-        
-        # 验证文件存在并收集原始文档ID
-        files = []
-        source_doc_ids = []
-        for file_info in request.files:
-            if not os.path.exists(file_info.file_path):
-                raise FileNotFoundError(file_info.file_path)
-            files.append({
-                "file_path": file_info.file_path,
-                "doc_type": file_info.doc_type
-            })
-            source_doc = await supabase_service.get_document_by_file_path(file_info.file_path)
-            if source_doc:
-                source_doc_ids.append(source_doc["id"])
-        
         template_uuid = template.get("id")
         template_name = template.get("name", "照明综合报告")
         auto_approve = template.get("auto_approve", False)
-        
-        # 执行合并处理（支持多样品）
+
+        # 阶段1：OCR + LLM 提取（耗时主体）
+        update_job(job_id, "ocr")
         result = await ocr_workflow.process_merge(
-            document_id=str(uuid.uuid4()),  # 临时ID，实际会为每个样品创建独立ID
+            document_id=str(uuid.uuid4()),
             files=files,
             template_id=template_uuid,
-            tenant_id=user.tenant_id
+            tenant_id=user.tenant_id,
         )
-        
+
         if not result.get("success"):
             error_msg = result.get("error", "合并处理失败")
-            logger.error(f"合并处理失败: {error_msg}")
-            raise AppException(code="MERGE_FAILED", detail=error_msg, status_code=500)
-        
-        # 获取多样品结果
+            logger.error(f"[job={job_id}] 合并处理失败: {error_msg}")
+            update_job(job_id, "failed", error=error_msg)
+            return
+
         extraction_results = result.get("extraction_results", [])
         if not extraction_results:
-            raise AppException(
-                code="MERGE_EMPTY_RESULT",
-                detail="未提取到有效字段，请检查模板与文档类型",
-                status_code=500
-            )
-        
+            update_job(job_id, "failed", error="未提取到有效字段，请检查模板与文档类型")
+            return
+
         sample_count = len(extraction_results)
-        logger.info(f"合并处理完成，共 {sample_count} 个样品，auto_approve={auto_approve}")
-        
-        # 为每个样品创建独立的文档记录
+        logger.info(f"[job={job_id}] 提取完成，共 {sample_count} 个样品")
+
+        # 阶段2：保存结果
+        update_job(job_id, "saving")
+
         for sample_result in extraction_results:
             sample_index = sample_result.get("sample_index", 1)
             sample_data = sample_result.get("data", {})
-            
             if not sample_data:
                 continue
-            
-            # 生成文档ID
+
             doc_id = str(uuid.uuid4())
             created_doc_ids.append(doc_id)
-            
-            # 生成显示名称（多样品时加后缀）
+
             base_display_name = supabase_service.generate_display_name(
                 document_type=template_name,
-                extraction_data=sample_data
+                extraction_data=sample_data,
             )
-            if sample_count > 1:
-                display_name = f"{base_display_name}_样品{sample_index}"
-            else:
-                display_name = base_display_name
-            
-            # 确定文档状态（auto_approve 时直接完成，跳过审核）
+            display_name = (
+                f"{base_display_name}_样品{sample_index}" if sample_count > 1 else base_display_name
+            )
             doc_status = "completed" if auto_approve else "pending_review"
-            
-            # 创建文档记录
+
             doc_data = {
                 "id": doc_id,
                 "user_id": user.user_id,
@@ -625,17 +658,13 @@ async def process_merge_documents(
                 "processed_at": datetime.now().isoformat(),
             }
             await supabase_service.create_document(doc_data)
-            logger.info(f"样品{sample_index} 文档记录已创建: {doc_id}, 状态: {doc_status}")
-            
-            # 保存提取结果
             await supabase_service.save_extraction_result(
                 document_id=doc_id,
                 document_type=template_name,
-                extraction_data=sample_data
+                extraction_data=sample_data,
             )
-            logger.info(f"样品{sample_index} 提取结果已保存: {doc_id}")
-            
-            # 如果 auto_approve，直接推送飞书（使用模板配置）
+            logger.info(f"[job={job_id}] 样品{sample_index} 已保存: {doc_id}")
+
             if auto_approve:
                 try:
                     _bitable_token = template.get("feishu_bitable_token")
@@ -646,39 +675,27 @@ async def process_merge_documents(
                         if "file_name" not in _field_mapping:
                             _field_mapping["file_name"] = "文件名"
                         await feishu_service.push_by_template(
-                            _push_data,
-                            _field_mapping,
-                            _bitable_token,
-                            _table_id
+                            _push_data, _field_mapping, _bitable_token, _table_id
                         )
-                        logger.info(f"样品{sample_index} 飞书推送成功: {doc_id}")
+                        logger.info(f"[job={job_id}] 样品{sample_index} 飞书推送成功")
                     else:
-                        logger.info(f"样品{sample_index} 模板未配置飞书，跳过推送: {doc_id}")
+                        logger.info(f"[job={job_id}] 样品{sample_index} 模板未配置飞书，跳过")
                 except Exception as feishu_error:
-                    logger.warning(f"样品{sample_index} 飞书推送失败（不影响结果）: {feishu_error}")
-        
-        # 返回结果
-        return {
-            "success": True,
-            "sample_count": sample_count,
-            "document_ids": created_doc_ids,
-            "auto_approved": auto_approve,
-            "extraction_results": extraction_results,
-            "template_name": template_name,
-            "processing_time": result.get("processing_time")
-        }
-        
-    except (FileNotFoundError, HTTPException):
-        raise
+                    logger.warning(f"[job={job_id}] 飞书推送失败（不影响结果）: {feishu_error}")
+
+        # 完成
+        update_job(job_id, "completed", document_ids=created_doc_ids)
+        logger.info(f"[job={job_id}] 任务完成，document_ids={created_doc_ids}")
+
     except Exception as e:
-        logger.error(f"合并处理失败: {e}")
+        logger.error(f"[job={job_id}] 后台任务异常: {e}")
         # 清理已创建的文档记录
         for doc_id in created_doc_ids:
             try:
                 await supabase_service.update_document_status(doc_id, "failed", str(e))
             except Exception:
                 pass
-        raise ProcessingError(f"处理失败: {str(e)}")
+        update_job(job_id, "failed", error=str(e))
 
 
 async def _save_template_extraction_result(

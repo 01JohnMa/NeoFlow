@@ -156,15 +156,28 @@ export const documentsService = {
     return response.data
   },
 
-  // Process merge (合并模式处理 - 照明事业部等场景)
-  async processMerge(
+  // Submit merge job (异步提交，立即返回 job_id)
+  async submitMergeJob(
     templateId: string,
     files: Array<{ file_path: string; doc_type: string }>
-  ): Promise<ProcessResponse> {
-    const response = await api.post<ProcessResponse>('/documents/process-merge', {
-      template_id: templateId,
-      files,
-    }, { timeout: 300000 })
+  ): Promise<{ job_id: string; status: string }> {
+    const response = await api.post<{ job_id: string; status: string }>(
+      '/documents/process-merge',
+      { template_id: templateId, files }
+    )
+    return response.data
+  },
+
+  // Get merge job status (轮询用)
+  async getJobStatus(jobId: string): Promise<{
+    job_id: string
+    status: 'pending' | 'processing' | 'completed' | 'failed'
+    stage: string
+    progress: number
+    document_ids: string[]
+    error: string | null
+  }> {
+    const response = await api.get(`/documents/jobs/${jobId}`)
     return response.data
   },
 

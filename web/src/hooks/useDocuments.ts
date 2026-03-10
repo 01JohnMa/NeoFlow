@@ -250,35 +250,5 @@ export function useUploadMultiple() {
   })
 }
 
-// Process merge mutation (合并模式处理)
-export function useProcessMerge() {
-  const queryClient = useQueryClient()
-  const { addProcessingDocument, removeProcessingDocument } = useUploadStore()
-
-  return useMutation({
-    mutationFn: async ({
-      templateId,
-      files,
-    }: {
-      templateId: string
-      files: Array<{ file_path: string; doc_type: string }>
-    }) => {
-      const tempId = `merge-${Date.now()}`
-      addProcessingDocument(tempId)
-
-      try {
-        const result = await documentsService.processMerge(templateId, files)
-        removeProcessingDocument(tempId)
-        return result
-      } catch (error) {
-        removeProcessingDocument(tempId)
-        throw error
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
 
 
