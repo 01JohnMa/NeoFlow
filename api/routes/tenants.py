@@ -8,7 +8,7 @@ from loguru import logger
 
 from services.tenant_service import tenant_service
 from services.template_service import template_service
-from api.dependencies.auth import get_current_user, get_optional_user, CurrentUser
+from api.dependencies.auth import get_current_user, get_optional_user, CurrentUser, invalidate_profile_cache
 
 router = APIRouter(prefix="/tenants", tags=["租户管理"])
 
@@ -135,6 +135,7 @@ async def update_my_profile(
             tenant_id=request.tenant_id,
             display_name=request.display_name
         )
+        invalidate_profile_cache(user.user_id)
         
         return {
             "success": True,

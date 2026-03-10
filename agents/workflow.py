@@ -428,14 +428,14 @@ class OCRWorkflow:
                     if sub_template_a.get("id") == template.get("id") and doc_type_a_label:
                         extraction_template_a = {
                             **sub_template_a,
-                            "fields": [
-                                f for f in sub_template_a.get("fields", [])
+                            "template_fields": [
+                                f for f in sub_template_a.get("template_fields", [])
                                 if f.get("source_doc_type") == doc_type_a_label
                             ],
                         }
                         logger.info(
                             f"sub_template_a 自引用，按 source_doc_type='{doc_type_a_label}' "
-                            f"过滤后字段数: {len(extraction_template_a['fields'])}"
+                            f"过滤后字段数: {len(extraction_template_a['template_fields'])}"
                         )
                     else:
                         extraction_template_a = sub_template_a

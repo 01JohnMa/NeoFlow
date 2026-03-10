@@ -547,8 +547,16 @@ class TemplateService:
         try:
             allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve"}
             payload = {k: v for k, v in data.items() if k in allowed_keys}
-            result = self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
-            return result.data[0] if result.data else {}
+            if not payload:
+                return {}
+
+            # 先更新，再显式回读，避免 PostgREST 返回最小化响应导致前端拿到空对象
+            self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
+            fresh = self._get_client().table("document_templates").select(
+                "id, tenant_id, name, code, description, process_mode, required_doc_count, "
+                "sort_order, is_active, auto_approve, feishu_bitable_token, feishu_table_id"
+            ).eq("id", template_id).execute()
+            return fresh.data[0] if fresh.data else {}
         except Exception as e:
             logger.error(f"更新模板配置失败: {e}")
             raise

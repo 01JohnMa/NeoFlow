@@ -112,7 +112,8 @@ function FeishuConfigTab({
         feishu_table_id: tableId,
         auto_approve: autoApprove,
       })
-      onSaved(updated)
+      // 后端若返回不完整对象时，保留当前模板字段避免 UI 被空对象覆盖
+      onSaved({ ...template, ...updated })
       setSuccess(true)
       setTimeout(() => setSuccess(false), 2000)
     } catch (e) {
@@ -1031,7 +1032,10 @@ export function AdminConfig() {
             {activeTab === 'feishu' && (
               <FeishuConfigTab
                 template={selectedTemplate}
-                onSaved={(updated) => setSelectedTemplate(updated)}
+                onSaved={(updated) => {
+                  setSelectedTemplate(updated)
+                  setTemplates((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
+                }}
               />
             )}
             {activeTab === 'fields' && <FieldsTab templateId={selectedTemplate.id} />}

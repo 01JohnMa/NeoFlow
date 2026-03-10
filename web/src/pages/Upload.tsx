@@ -61,7 +61,7 @@ export function Upload() {
   const processMutation = useProcessDocument()
   const uploadMultipleMutation = useUploadMultiple()
   const processMergeMutation = useProcessMerge()
-  const { tenantName, tenantCode, isLoading: profileLoading } = useProfile()
+  const { tenantName, tenantCode, mergeRules, templates, isLoading: profileLoading } = useProfile()
 
   // ============ 解耦：直接根据 tenantCode 决定上传模式 ============
   const uploadMode: UploadMode = useMemo(() => {
@@ -69,6 +69,15 @@ export function Upload() {
     if (tenantCode === 'quality') return 'quality_auto'
     return 'unknown'
   }, [tenantCode])
+
+  // 优先使用后端返回的 merge 模板 ID，避免前端硬编码导致配置不生效
+  const lightingMergeTemplateId = useMemo(() => {
+    const mergeTemplateIds = new Set(mergeRules.map((rule) => rule.template_id))
+    const firstMergeTemplate = templates.find(
+      (template) => template.process_mode === 'merge' && mergeTemplateIds.has(template.id)
+    )
+    return firstMergeTemplate?.id || mergeRules[0]?.template_id || LIGHTING_TEMPLATE_ID
+  }, [mergeRules, templates])
   const isMobile = useMemo(() => {
     if (typeof window === 'undefined') return false
     return window.matchMedia('(pointer: coarse)').matches
@@ -263,7 +272,7 @@ export function Upload() {
 
       // 2. 调用合并处理（传模板 code，后端会查找真实的 template UUID）
       const mergeResult = await processMergeMutation.mutateAsync({
-        templateId: LIGHTING_TEMPLATE_ID,
+        templateId: lightingMergeTemplateId,
         files: uploadResults.map(r => ({
           file_path: r.file_path,
           doc_type: r.doc_type,

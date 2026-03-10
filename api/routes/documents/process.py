@@ -47,7 +47,9 @@ async def _handle_processing_success(
     result: dict,
     template_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
-    generate_display_name: bool = True
+    generate_display_name: bool = True,
+    auto_approve: bool = False,
+    source_file_path: Optional[str] = None,
 ) -> None:
     """处理成功时的统一逻辑
     
@@ -74,9 +76,11 @@ async def _handle_processing_success(
             extraction_data=result["extraction_data"]
         )
     
-    # 3. 更新文档状态为 pending_review（待人工审核）
+    # 3. 更新文档状态
+    # auto_approve=True 时直接标记完成，跳过人工审核
+    doc_status = "completed" if auto_approve else "pending_review"
     update_data = {
-        "status": "pending_review",
+        "status": doc_status,
         "document_type": result.get("document_type") or result.get("template_name"),
         "template_id": template_id,
         "tenant_id": tenant_id,
@@ -89,7 +93,63 @@ async def _handle_processing_success(
         update_data["display_name"] = display_name
     
     await supabase_service.update_document(document_id, update_data)
-    logger.info(f"后台处理完成: {document_id}" + (f", 显示名称: {display_name}" if display_name else ""))
+    logger.info(
+        f"后台处理完成: {document_id}, 状态: {doc_status}"
+        + (f", 显示名称: {display_name}" if display_name else "")
+    )
+
+    # 4. auto_approve 时自动推送飞书（单模板流程）
+    if auto_approve:
+        try:
+            template = None
+            # 优先按模板ID查询（模板化处理）
+            if template_id:
+                template = await template_service.get_template_with_details(template_id)
+            # 自动分类流程：按租户 + 文档类型(code/name)回查模板
+            elif tenant_id and (result.get("document_type") or result.get("template_name")):
+                template = await template_service.get_template_by_code(
+                    tenant_id,
+                    result.get("document_type") or result.get("template_name")
+                )
+
+            bitable_token = template.get("feishu_bitable_token") if template else None
+            table_id = template.get("feishu_table_id") if template else None
+
+            if template and bitable_token and table_id:
+                field_mapping = template_service.build_field_mapping(template)
+                push_data = {**result.get("extraction_data", {})}
+
+                file_name_for_push = (
+                    (display_name or "").strip()
+                    or str(result.get("document_type") or result.get("template_name") or "").strip()
+                    or document_id
+                )
+                if file_name_for_push:
+                    if "file_name" not in field_mapping:
+                        field_mapping["file_name"] = "文件名"
+                    push_data["file_name"] = file_name_for_push
+
+                # 模板开启附件推送且存在源文件时，上传附件到飞书
+                if template.get("push_attachment", True) and source_file_path and os.path.exists(source_file_path):
+                    file_token = await feishu_service._upload_file_to_feishu(source_file_path, bitable_token)
+                    if file_token:
+                        push_data["attachment"] = [{"file_token": file_token}]
+                        field_mapping["attachment"] = "附件"
+
+                success = await feishu_service.push_by_template(
+                    push_data,
+                    field_mapping,
+                    bitable_token,
+                    table_id
+                )
+                if success:
+                    logger.info(f"auto_approve 单模板飞书推送成功: {document_id}")
+                else:
+                    logger.warning(f"auto_approve 单模板飞书推送失败: {document_id}")
+            else:
+                logger.info(f"auto_approve 单模板模板未配置飞书，跳过推送: {document_id}")
+        except Exception as feishu_error:
+            logger.warning(f"auto_approve 单模板飞书推送失败（不影响结果）: {feishu_error}")
 
 
 async def _handle_processing_failure(
@@ -179,23 +239,24 @@ async def process_document(
             # 保存结果到数据库
             if result["success"] and result.get("extraction_data"):
                 try:
-                    await supabase_service.save_extraction_result(
+                    auto_approve = False
+                    template = None
+                    if template_id:
+                        template = await template_service.get_template(template_id)
+                    elif tenant_id and result.get("document_type"):
+                        template = await template_service.get_template_by_code(tenant_id, result.get("document_type"))
+                    if template:
+                        auto_approve = bool(template.get("auto_approve", False))
+
+                    await _handle_processing_success(
                         document_id=document_id,
-                        document_type=result["document_type"],
-                        extraction_data=result["extraction_data"]
+                        result=result,
+                        template_id=template_id or (template.get("id") if template else None),
+                        tenant_id=tenant_id,
+                        generate_display_name=True,
+                        auto_approve=auto_approve,
+                        source_file_path=file_path
                     )
-                    # 生成规范化显示名称
-                    display_name = supabase_service.generate_display_name(
-                        document_type=result["document_type"],
-                        extraction_data=result["extraction_data"]
-                    )
-                    await supabase_service.update_document(document_id, {
-                        "status": "pending_review",
-                        "display_name": display_name,
-                        "template_id": template_id,
-                        "tenant_id": tenant_id,
-                        "error_message": None
-                    })
                 except Exception as e:
                     logger.warning(f"保存结果到数据库失败: {e}")
             
@@ -260,12 +321,23 @@ async def process_document_task(
             result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
         
         if result["success"] and result.get("extraction_data"):
+            auto_approve = False
+            template = None
+            if template_id:
+                template = await template_service.get_template(template_id)
+            elif tenant_id and result.get("document_type"):
+                template = await template_service.get_template_by_code(tenant_id, result.get("document_type"))
+            if template:
+                auto_approve = bool(template.get("auto_approve", False))
+
             await _handle_processing_success(
                 document_id=document_id,
                 result=result,
-                template_id=template_id,
+                template_id=template_id or (template.get("id") if template else None),
                 tenant_id=tenant_id,
-                generate_display_name=True
+                generate_display_name=True,
+                auto_approve=auto_approve,
+                source_file_path=file_path
             )
         else:
             await _handle_processing_failure(
@@ -342,6 +414,8 @@ async def process_document_with_template(
         if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
             raise HTTPException(status_code=403, detail="无权使用此模板")
         
+        auto_approve = bool(template.get("auto_approve", False))
+
         if request.sync:
             # 同步处理
             result = await ocr_workflow.process_with_template(
@@ -357,7 +431,9 @@ async def process_document_with_template(
                     document_id=document_id,
                     template=template,
                     result=result,
-                    user=user
+                    user=user,
+                    file_path=file_path,
+                    auto_approve=auto_approve
                 )
             
             return result
@@ -368,7 +444,8 @@ async def process_document_with_template(
                 document_id=document_id,
                 file_path=file_path,
                 template_id=request.template_id,
-                tenant_id=user.tenant_id
+                tenant_id=user.tenant_id,
+                auto_approve=auto_approve
             )
             
             await supabase_service.update_document_status(document_id, "processing")
@@ -391,7 +468,8 @@ async def process_document_with_template_task(
     document_id: str, 
     file_path: str,
     template_id: str,
-    tenant_id: str
+    tenant_id: str,
+    auto_approve: bool = False
 ):
     """模板化处理后台任务"""
     try:
@@ -410,7 +488,9 @@ async def process_document_with_template_task(
                 result=result,
                 template_id=template_id,
                 tenant_id=tenant_id,
-                generate_display_name=False  # 模板化处理不生成显示名称
+                generate_display_name=False,  # 模板化处理不生成显示名称
+                auto_approve=auto_approve,
+                source_file_path=file_path
             )
         else:
             await _handle_processing_failure(
@@ -444,10 +524,13 @@ async def process_merge_documents(
         if not request.files:
             raise HTTPException(status_code=400, detail="请提供至少一个文件")
         
-        # 获取模板（支持 UUID 或 code）
+        # 获取模板（支持 UUID 或 code，必须含 template_fields 用于字段映射和推送）
         template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
         if not template:
-            template = await template_service.get_template(request.template_id)
+            try:
+                template = await template_service.get_template_with_details(request.template_id)
+            except Exception:
+                template = None
         if not template:
             raise HTTPException(status_code=404, detail="模板不存在")
         
@@ -602,28 +685,20 @@ async def _save_template_extraction_result(
     document_id: str,
     template: dict,
     result: dict,
-    user: CurrentUser
+    user: CurrentUser,
+    file_path: Optional[str] = None,
+    auto_approve: bool = False,
 ):
     """保存模板化提取结果"""
     try:
-        # 更新文档状态
-        await supabase_service.update_document(document_id, {
-            "status": "pending_review",
-            "document_type": result.get("template_name"),
-            "template_id": template.get("id"),
-            "tenant_id": user.tenant_id,
-            "ocr_text": result.get("ocr_text", ""),
-            "ocr_confidence": result.get("ocr_confidence"),
-            "processed_at": datetime.now().isoformat(),
-            "error_message": None
-        })
-        
-        # 保存提取结果
-        await supabase_service.save_extraction_result(
+        await _handle_processing_success(
             document_id=document_id,
-            document_type=result.get("template_name", "未知"),
-            extraction_data=result["extraction_data"]
+            result=result,
+            template_id=template.get("id"),
+            tenant_id=user.tenant_id,
+            generate_display_name=False,
+            auto_approve=auto_approve,
+            source_file_path=file_path
         )
-        
     except Exception as e:
         logger.error(f"保存模板提取结果失败: {e}")

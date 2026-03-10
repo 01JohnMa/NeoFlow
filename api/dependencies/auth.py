@@ -1,7 +1,8 @@
 # api/dependencies/auth.py
 """认证依赖注入 - FastAPI Depends 实现（支持多租户）"""
 
-from typing import Optional, Tuple
+import time
+from typing import Optional, Tuple, Dict, Any
 from fastapi import Header, Depends
 from pydantic import BaseModel
 from supabase import Client
@@ -10,6 +11,9 @@ import jwt
 
 from services.supabase_service import supabase_service
 from api.exceptions import AuthenticationError
+
+_PROFILE_CACHE_TTL = 60  # seconds
+_profile_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 
 class CurrentUser(BaseModel):
@@ -85,30 +89,32 @@ async def get_current_user(
     if not token or not user_id:
         raise AuthenticationError()
     
-    # 获取用户的 profile 信息（含租户和角色）
+    # 获取用户的 profile 信息（含租户和角色），优先读缓存
     user_data = CurrentUser(user_id=user_id, token=token)
     
     try:
-        from services.tenant_service import tenant_service
-        profile = await tenant_service.get_user_profile(user_id)
-        
-        logger.debug(f"获取用户 profile: user_id={user_id}, profile={profile}")
+        now = time.monotonic()
+        cached = _profile_cache.get(user_id)
+        if cached and (now - cached[0]) < _PROFILE_CACHE_TTL:
+            profile = cached[1]
+        else:
+            from services.tenant_service import tenant_service
+            profile = await tenant_service.get_user_profile(user_id)
+            if profile:
+                _profile_cache[user_id] = (now, profile)
+            logger.debug(f"获取用户 profile (DB): user_id={user_id}")
         
         if profile:
             user_data.tenant_id = profile.get("tenant_id")
             user_data.role = profile.get("role", "user")
             user_data.display_name = profile.get("display_name")
             
-            # 获取租户信息
             tenant = profile.get("tenants")
             if tenant:
                 user_data.tenant_code = tenant.get("code")
                 user_data.tenant_name = tenant.get("name")
             
-            # Log detailed info for debugging tenant issues
-            if user_data.tenant_id:
-                logger.debug(f"用户信息: user_id={user_id}, tenant_id={user_data.tenant_id}, tenant_code={user_data.tenant_code}, role={user_data.role}")
-            else:
+            if not user_data.tenant_id:
                 logger.warning(f"用户 {user_id} 的 profile 存在但 tenant_id 为空，可能是注册时触发器未正确写入或前端未补写")
         else:
             logger.warning(f"用户 {user_id} 没有 profile 记录，可能是 handle_new_user 触发器未执行")
@@ -116,6 +122,11 @@ async def get_current_user(
         logger.error(f"获取用户 profile 失败: user_id={user_id}, error={e}")
     
     return user_data
+
+
+def invalidate_profile_cache(user_id: str) -> None:
+    """清除指定用户的 profile 缓存（在 profile 更新后调用）"""
+    _profile_cache.pop(user_id, None)
 
 
 async def get_optional_user(

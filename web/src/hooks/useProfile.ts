@@ -7,12 +7,13 @@ import { getPendingProfile, clearPendingProfile } from '@/services/auth'
 export function useProfile() {
   const { profile, templates, mergeRules, isLoading, setProfile, setTemplates, setMergeRules, setLoading, reset } = useProfileStore()
   const { session } = useAuthStore()
+  const userId = session?.user?.id
   // Track if we've already attempted to sync pending profile (avoid infinite loops)
   const pendingSyncAttempted = useRef(false)
 
   // 获取用户 profile
   const fetchProfile = useCallback(async () => {
-    if (!session) {
+    if (!userId) {
       reset()
       pendingSyncAttempted.current = false
       return
@@ -58,11 +59,11 @@ export function useProfile() {
     } finally {
       setLoading(false)
     }
-  }, [session, setProfile, setLoading, reset])
+  }, [userId, setProfile, setLoading, reset])
 
   // 获取用户可用的模板
   const fetchTemplates = useCallback(async () => {
-    if (!session) {
+    if (!userId) {
       setTemplates([])
       return
     }
@@ -74,11 +75,11 @@ export function useProfile() {
       console.error('获取模板列表失败:', error)
       setTemplates([])
     }
-  }, [session, setTemplates])
+  }, [userId, setTemplates])
 
   // 获取合并规则（用于 merge 模式）
   const fetchMergeRules = useCallback(async () => {
-    if (!session) {
+    if (!userId) {
       setMergeRules([])
       return
     }
@@ -90,18 +91,18 @@ export function useProfile() {
       console.error('获取合并规则失败:', error)
       setMergeRules([])
     }
-  }, [session, setMergeRules])
+  }, [userId, setMergeRules])
 
   // 初始化
   useEffect(() => {
-    if (session) {
+    if (userId) {
       fetchProfile()
       fetchTemplates()
       fetchMergeRules()
     } else {
       reset()
     }
-  }, [session, fetchProfile, fetchTemplates, fetchMergeRules, reset])
+  }, [userId, fetchProfile, fetchTemplates, fetchMergeRules, reset])
 
   // 更新 profile
   const updateProfile = useCallback(async (data: { tenant_id?: string; display_name?: string }) => {
