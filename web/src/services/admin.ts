@@ -59,8 +59,8 @@ export async function updateField(
   return data.data
 }
 
-export async function deleteField(fieldId: string): Promise<void> {
-  await api.delete(`/admin/fields/${fieldId}`)
+export async function deleteField(fieldId: string, force = false): Promise<void> {
+  await api.delete(`/admin/fields/${fieldId}`, { params: force ? { force: true } : {} })
 }
 
 export async function reorderFields(

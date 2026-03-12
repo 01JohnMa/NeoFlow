@@ -31,44 +31,9 @@ class SupabaseService:
     # 非日期字段（字段名包含 date 但不应进行日期格式校验的复合字段）
     NON_DATE_FIELDS = ["production_date_batch"]
     
-    # 各表允许的 AI 提取字段白名单（防止 AI 返回额外字段导致数据库错误）
-    ALLOWED_FIELDS = {
-        DocumentTypeTable.INSPECTION_REPORT: [
-            "sample_name", "specification_model", "production_date_batch",
-            "inspected_unit_name", "inspected_unit_address", "inspected_unit_phone",
-            "manufacturer_name", "manufacturer_address", "manufacturer_phone",
-            "task_source", "sampling_agency", "sampling_date", "inspection_conclusion",
-            "inspection_category", "notes", "inspector", "reviewer", "approver"
-        ],
-        DocumentTypeTable.EXPRESS: [
-            "tracking_number", "recipient", "delivery_address",
-            "sender", "sender_address", "notes"
-        ],
-        DocumentTypeTable.SAMPLING_FORM: [
-            "task_source", "task_category", "manufacturer", "sample_name",
-            "specification_model", "production_date_batch", "sample_storage_location",
-            "sampling_channel", "sampling_unit", "sampling_date",
-            "sampled_province", "sampled_city"
-        ],
-        # 照明综合报告（20个字段）
-        DocumentTypeTable.LIGHTING_REPORT: [
-            # 来自积分球（14个）
-            "sample_model", "chromaticity_x", "chromaticity_y", "duv", "cct",
-            "ra", "r9", "cqs", "sdcm", "power_sphere", "luminous_flux_sphere",
-            "luminous_efficacy_sphere", "rf", "rg",
-            # 来自光分布（6个）
-            "lamp_specification", "power", "luminous_flux", "luminous_efficacy",
-            "peak_intensity", "beam_angle"
-        ],
-        # 包装（电连接事业部，19个字段）
-        DocumentTypeTable.PACKAGING: [
-            "product_name", "specification_model", "usb_input", "usb_single_output",
-            "usb_multi_output", "color", "rated_voltage", "max_power", "max_current",
-            "product_length", "execution_standard", "precautions", "warranty_period",
-            "authenticity_method", "address", "service_hotline", "official_website",
-            "recommended_lifespan"
-        ],
-    }
+    # ALLOWED_FIELDS 白名单已移除。
+    # 入库前字段过滤现在通过 schema_sync_service.get_columns() 动态读取
+    # 结果表的实际物理列来实现，详见 _filter_allowed_fields()。
     
     def __new__(cls):
         if cls._instance is None:
@@ -127,21 +92,29 @@ class SupabaseService:
     
     def _filter_allowed_fields(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
         """
-        过滤数据，只保留数据库表中存在的字段
-        
-        防止 AI 返回额外字段导致数据库插入失败
+        过滤数据，只保留结果表中实际存在的物理列。
+
+        使用 schema_sync_service 动态读取列名（带本地缓存），
+        避免硬编码白名单与数据库实际结构脱节。
+
+        降级策略：若无法获取列名（如网络异常），允许所有字段通过，
+        让数据库层自行报错（已记录 warning 日志）。
         """
-        allowed = self.ALLOWED_FIELDS.get(table_name, [])
-        if not allowed:
+        from services.schema_sync_service import schema_sync_service
+
+        actual_columns = schema_sync_service.get_columns(table_name)
+
+        if not actual_columns:
+            # 列查询失败时降级：放行所有字段，由数据库层报错
+            logger.warning(f"无法获取表 {table_name} 的列名，跳过字段过滤（降级模式）")
             return data
-        
-        filtered = {k: v for k, v in data.items() if k in allowed}
-        
-        # 记录被过滤掉的字段
+
+        filtered = {k: v for k, v in data.items() if k in actual_columns}
+
         removed = set(data.keys()) - set(filtered.keys())
         if removed:
-            logger.warning(f"过滤掉 AI 返回的额外字段: {removed}")
-        
+            logger.warning(f"过滤掉不在表 {table_name} 中的字段: {removed}")
+
         return filtered
     
     def _validate_and_fix_date(self, date_str: str) -> Optional[str]:
