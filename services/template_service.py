@@ -111,6 +111,7 @@ class TemplateService:
         "检测报告": "inspection_report",
         "快递单": "express",
         "抽样单": "sampling",
+        "包装": "packaging",
     }
     
     async def get_template_by_code(

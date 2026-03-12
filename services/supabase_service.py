@@ -59,7 +59,15 @@ class SupabaseService:
             # 来自光分布（6个）
             "lamp_specification", "power", "luminous_flux", "luminous_efficacy",
             "peak_intensity", "beam_angle"
-        ]
+        ],
+        # 包装（电连接事业部，19个字段）
+        DocumentTypeTable.PACKAGING: [
+            "product_name", "specification_model", "usb_input", "usb_single_output",
+            "usb_multi_output", "color", "rated_voltage", "max_power", "max_current",
+            "product_length", "execution_standard", "precautions", "warranty_period",
+            "authenticity_method", "address", "service_hotline", "official_website",
+            "recommended_lifespan"
+        ],
     }
     
     def __new__(cls):
@@ -427,6 +435,16 @@ class SupabaseService:
         """获取抽样单"""
         return await self._get_from_table("sampling_forms", document_id)
     
+    # ============ 包装操作 ============
+
+    async def save_packaging(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """保存包装信息"""
+        return await self._save_to_table("packagings", document_id, data)
+
+    async def get_packaging(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """获取包装信息"""
+        return await self._get_from_table("packagings", document_id)
+
     # ============ 照明报告操作 ============
     
     async def save_lighting_report(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -474,6 +492,7 @@ class SupabaseService:
             "expresses": self.save_express,
             "sampling_forms": self.save_sampling_form,
             "lighting_reports": self.save_lighting_report,
+            "packagings": self.save_packaging,
         }
         
         save_method = save_methods.get(table_name)
