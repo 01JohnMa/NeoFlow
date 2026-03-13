@@ -14,6 +14,7 @@ class DocumentTypeTable:
     EXPRESS = "expresses"
     SAMPLING_FORM = "sampling_forms"
     LIGHTING_REPORT = "lighting_reports"
+    PACKAGING = "packagings"
 
 
 # 文档类型名称到表名的映射（支持多种别名）
@@ -38,6 +39,10 @@ DOC_TYPE_TABLE_MAP = {
     # 积分球测试（合并主模板，新结构）
     "integrating_sphere": DocumentTypeTable.LIGHTING_REPORT,
     "积分球测试": DocumentTypeTable.LIGHTING_REPORT,
+
+    # 包装（电连接事业部）
+    "packaging": DocumentTypeTable.PACKAGING,
+    "包装": DocumentTypeTable.PACKAGING,
 }
 
 

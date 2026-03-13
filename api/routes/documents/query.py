@@ -205,9 +205,11 @@ async def get_extraction_result(
         
         ocr_text = document.get("ocr_text") or ""
 
-        # 从模板字段中收集有 review_allowed_values 的字段，用于前端保存前提示
-        # 支持两种来源：document.template_id（模板化处理）或 tenant_id+document_type（自动分类）
+        # 从模板字段中收集：
+        #   1. review_hint_fields — 有 review_allowed_values 的字段，用于前端保存前提示
+        #   2. template_fields    — 完整白名单字段列表，供前端详情页纯模板驱动渲染
         review_hint_fields = []
+        template_fields = []
         template_id = document.get("template_id")
         tenant_id = document.get("tenant_id")
         try:
@@ -227,8 +229,21 @@ async def get_extraction_result(
                         "field_label": field.get("field_label") or field.get("field_key"),
                         "allowed_values": allowed,
                     })
+            # 构造前端渲染所需白名单字段列表（按 sort_order 升序）
+            template_fields = [
+                {
+                    "field_key": f.get("field_key"),
+                    "field_label": f.get("field_label") or f.get("field_key"),
+                    "field_type": f.get("field_type", "text"),
+                    "is_required": bool(f.get("is_required", False)),
+                    "sort_order": f.get("sort_order", 0),
+                    "review_enforced": bool(f.get("review_enforced", False)),
+                    "review_allowed_values": parse_allowed_values(f.get("review_allowed_values")),
+                }
+                for f in sorted(fields_list, key=lambda x: x.get("sort_order", 0))
+            ]
         except Exception as hint_err:
-            logger.warning(f"获取 review_hint_fields 失败（不影响主流程）: {hint_err}")
+            logger.warning(f"获取模板字段失败（不影响主流程）: {hint_err}")
 
         return {
             "document_id": document_id,
@@ -239,6 +254,7 @@ async def get_extraction_result(
             "created_at": result.get("created_at"),
             "is_validated": result.get("is_validated", False),
             "review_hint_fields": review_hint_fields,
+            "template_fields": template_fields,
         }
         
     except (DocumentNotFoundError, HTTPException):

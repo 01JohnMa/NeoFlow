@@ -97,7 +97,59 @@ docker exec -i supabase-db psql -U postgres -d postgres -c "GRANT ALL ON ALL TAB
 | 001_multi_tenant.sql | 多租户基础表与策略 | ✅ 迁移执行器自动执行 |
 | 002_init_data.sql | 多租户初始化数据 | ✅ 迁移执行器自动执行 |
 | 003_post_auth_setup.sql | auth.users 触发器 | ✅ 迁移执行器等待 auth 就绪后执行 |
+| 003_electrical_connection.sql | 电连接事业部包装模板初始化 | ✅ 迁移执行器自动执行 |
+| 004_packaging_add_product_characteristics.sql | 补充包装表 product_characteristics 列 | ✅ 迁移执行器自动执行 |
+| 005_schema_sync_functions.sql | 动态 DDL 同步辅助函数 | ✅ 迁移执行器自动执行 |
 | run_migrations.sh | 迁移执行器脚本 | ✅ 容器启动时自动运行 |
+
+## 前端配置与数据库动态同步
+
+从 `005_schema_sync_functions.sql` 起，系统支持**前端模板字段配置自动同步数据库列**。
+
+### 工作原理
+
+```
+管理员在「模板配置」页操作字段
+        ↓
+后端 template_service（CRUD 拦截）
+        ↓
+schema_sync_service（RPC 调用）
+        ↓
+PostgreSQL 函数（SECURITY DEFINER）
+        ↓
+目标结果表 ALTER TABLE + pg_notify 刷新 PostgREST 缓存
+```
+
+### 支持的操作
+
+| 操作 | 触发动作 | 结果表 DDL |
+|------|----------|------------|
+| 新增字段 | `ADD COLUMN IF NOT EXISTS <key> TEXT` | 幂等，列已存在时跳过 |
+| 修改字段键名（field_key） | `RENAME COLUMN <old> TO <new>` | 历史数据自动迁移到新列名 |
+| 删除字段 | `DROP COLUMN <key>` | 有数据时默认拒绝，需二次确认 |
+
+### 安全保护
+
+- **表白名单**：只允许对 `inspection_reports`、`expresses`、`sampling_forms`、`lighting_reports`、`packagings` 执行 DDL，其他表拒绝。
+- **列名校验**：`field_key` 必须匹配 `^[a-z][a-z0-9_]{0,62}$`（小写字母开头，仅含字母/数字/下划线）。
+- **系统列保护**：`id`、`document_id`、`created_at` 等系统保留列不允许被改名或删除。
+- **数据保护**：删除有历史数据的列时，后端返回 409 并告知受影响行数，前端展示二次确认弹窗（**强制删除数据永久丢失**）。
+- **改名冲突**：目标列名已存在时拒绝改名，防止数据覆盖。
+
+### 扩展新模板类型（新增结果表）
+
+1. 在 `supabase/migrations/` 新建迁移脚本，`CREATE TABLE` 新结果表。
+2. 在 `constants/document_types.py` 的 `DOC_TYPE_TABLE_MAP` 中添加新模板 code 到表名的映射。
+3. 在 `supabase/migrations/005_schema_sync_functions.sql` 各函数的 `v_allowed` 数组中追加新表名（或新建一个 `006_update_allowed_tables.sql` 执行 `CREATE OR REPLACE FUNCTION` 重新定义）。
+4. 运行迁移后，新模板的字段配置即可自动同步数据库列，无需手工 `ALTER TABLE`。
+
+### 常见错误提示
+
+| HTTP 状态 | 错误场景 | 用户操作 |
+|-----------|----------|----------|
+| 422 | 字段键名不合法 / DDL 执行失败 | 修正 field_key 格式（小写字母开头，仅含字母/数字/下划线） |
+| 409（新增/更名） | 目标列名已存在于结果表 | 更换字段键名 |
+| 409（删除） | 列有历史数据 | 弹窗确认后使用强制删除（数据永久丢失）|
 
 ## 服务端口
 

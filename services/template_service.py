@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 from loguru import logger
 
 from config.settings import settings
+from constants.document_types import DOC_TYPE_TABLE_MAP
 
 
 class TemplateService:
@@ -111,6 +112,7 @@ class TemplateService:
         "检测报告": "inspection_report",
         "快递单": "express",
         "抽样单": "sampling",
+        "包装": "packaging",
     }
     
     async def get_template_by_code(
@@ -392,12 +394,45 @@ class TemplateService:
 
     # ============ 管理员 CRUD：字段操作 ============
 
+    async def _get_result_table_for_template(self, template_id: str) -> Optional[str]:
+        """
+        根据模板 ID 查出模板 code，再映射到对应的结果表名。
+
+        若模板 code 不在 DOC_TYPE_TABLE_MAP 中（如自定义模板），返回 None，
+        调用方跳过 DDL 同步但不报错。
+        """
+        template = await self.get_template(template_id)
+        if not template:
+            return None
+        code = template.get("code", "")
+        table = DOC_TYPE_TABLE_MAP.get(code)
+        if not table:
+            logger.debug(f"模板 code={code!r} 无对应结果表，跳过 DDL 同步")
+        return table
+
     async def create_field(self, template_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """新增模板字段"""
+        """
+        新增模板字段，并在对应结果表中自动 ADD COLUMN。
+
+        先执行 DDL（失败直接抛 SchemaError 阻止配置写入），
+        再写 template_fields，保持两者一致性。
+        """
+        from services.schema_sync_service import schema_sync_service, SchemaError
+
+        field_key = data.get("field_key", "")
+
+        # 1. 先同步数据库列（DDL 失败则阻止后续配置写入）
+        if field_key:
+            table_name = await self._get_result_table_for_template(template_id)
+            if table_name:
+                schema_sync_service.add_column(table_name, field_key)
+                # SchemaError 向上传播 -> 前端收到 422
+
+        # 2. DDL 成功后写模板字段配置
         try:
             payload = {
                 "template_id": template_id,
-                "field_key": data["field_key"],
+                "field_key": field_key,
                 "field_label": data["field_label"],
                 "field_type": data.get("field_type", "text"),
                 "extraction_hint": data.get("extraction_hint", ""),
@@ -413,7 +448,30 @@ class TemplateService:
             raise
 
     async def update_field(self, field_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """更新模板字段"""
+        """
+        更新模板字段。
+
+        若 field_key 发生变更（改名），先执行 RENAME COLUMN，
+        再更新 template_fields 记录。
+        """
+        from services.schema_sync_service import schema_sync_service, SchemaError
+
+        # 获取旧字段信息（用于检测 field_key 是否改变）
+        old_field = await self.get_field_by_id(field_id)
+        if not old_field:
+            raise ValueError("字段不存在")
+
+        old_key = old_field.get("field_key", "")
+        new_key = data.get("field_key", old_key)
+
+        # 检测 field_key 是否改变，若改变则先执行列改名
+        if new_key and new_key != old_key:
+            template_id = old_field.get("template_id", "")
+            table_name = await self._get_result_table_for_template(template_id)
+            if table_name:
+                schema_sync_service.rename_column(table_name, old_key, new_key)
+                # SchemaError 向上传播
+
         try:
             allowed_keys = {
                 "field_key", "field_label", "field_type", "extraction_hint",
@@ -426,8 +484,34 @@ class TemplateService:
             logger.error(f"更新模板字段失败: {e}")
             raise
 
-    async def delete_field(self, field_id: str) -> bool:
-        """删除模板字段"""
+    async def delete_field(self, field_id: str, force: bool = False) -> bool:
+        """
+        删除模板字段，并在对应结果表中自动 DROP COLUMN。
+
+        先执行 DDL（有历史数据且 force=False 时抛 SchemaError），
+        再删除 template_fields 记录，保持两者一致性。
+
+        Args:
+            field_id: 字段 ID
+            force: True 时即使有历史数据也强制删列（数据永久丢失）
+        """
+        from services.schema_sync_service import schema_sync_service, SchemaError
+
+        # 获取字段信息
+        field = await self.get_field_by_id(field_id)
+        if not field:
+            return True  # 已不存在，视为成功
+
+        field_key = field.get("field_key", "")
+        template_id = field.get("template_id", "")
+
+        # 1. 先执行列删除（有数据且非 force 时 SchemaError 阻止后续操作）
+        if field_key:
+            table_name = await self._get_result_table_for_template(template_id)
+            if table_name:
+                schema_sync_service.drop_column(table_name, field_key, force=force)
+
+        # 2. 列删除成功后再删除字段配置
         try:
             self._get_client().table("template_fields").delete().eq("id", field_id).execute()
             return True

@@ -368,6 +368,12 @@ function FieldFormModal({
 
 // ============ Tab 2：识别字段管理 ============
 
+/** 409 删除保护：后端告知该列有历史数据时的提示信息 */
+interface ForceDeleteInfo {
+  message: string
+  non_null_count: number | null
+}
+
 function FieldsTab({ templateId }: { templateId: string }) {
   const [fields, setFields] = useState<TemplateField[]>([])
   const [loading, setLoading] = useState(true)
@@ -375,6 +381,8 @@ function FieldsTab({ templateId }: { templateId: string }) {
   const [editTarget, setEditTarget] = useState<TemplateField | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TemplateField | null>(null)
   const [deleting, setDeleting] = useState(false)
+  /** 有历史数据时的强制删除提示（来自后端 409 响应） */
+  const [forceDeleteInfo, setForceDeleteInfo] = useState<ForceDeleteInfo | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -401,13 +409,26 @@ function FieldsTab({ templateId }: { templateId: string }) {
     await load()
   }
 
-  const handleDelete = async () => {
+  const handleDelete = async (force = false) => {
     if (!deleteTarget) return
     setDeleting(true)
     try {
-      await adminApi.deleteField(deleteTarget.id)
+      await adminApi.deleteField(deleteTarget.id, force)
       setDeleteTarget(null)
+      setForceDeleteInfo(null)
       await load()
+    } catch (err: unknown) {
+      // 409：列有历史数据，等待用户确认强制删除
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: { message?: string; non_null_count?: number } } } }
+      if (axiosErr?.response?.status === 409) {
+        const detail = axiosErr.response.data?.detail
+        setForceDeleteInfo({
+          message: detail?.message ?? '该列存在历史数据，删除将永久丢失',
+          non_null_count: detail?.non_null_count ?? null,
+        })
+      } else {
+        throw err
+      }
     } finally {
       setDeleting(false)
     }
@@ -557,14 +578,33 @@ function FieldsTab({ templateId }: { templateId: string }) {
         onSubmit={editTarget ? handleUpdate : handleCreate}
       />
 
+      {/* 一次确认：常规删除 */}
       <Modal
-        open={!!deleteTarget}
+        open={!!deleteTarget && !forceDeleteInfo}
         title="删除字段"
-        message={`确定删除字段「${deleteTarget?.field_label}」？此操作不可恢复。`}
+        message={`确定删除字段「${deleteTarget?.field_label}」？对应数据库列也将同步删除，此操作不可恢复。`}
         confirmText={deleting ? '删除中...' : '删除'}
         cancelText="取消"
         onClose={() => setDeleteTarget(null)}
-        onConfirm={handleDelete}
+        onConfirm={() => handleDelete(false)}
+      />
+
+      {/* 二次确认：列有历史数据，需要强制删除 */}
+      <Modal
+        open={!!forceDeleteInfo}
+        title="⚠️ 存在历史数据，确认强制删除？"
+        message={
+          forceDeleteInfo
+            ? `${forceDeleteInfo.message}${forceDeleteInfo.non_null_count != null ? `（共 ${forceDeleteInfo.non_null_count} 条）` : ''}。\n强制删除后数据将永久丢失，无法恢复，请确认！`
+            : ''
+        }
+        confirmText={deleting ? '强制删除中...' : '强制删除'}
+        cancelText="取消"
+        onClose={() => {
+          setForceDeleteInfo(null)
+          setDeleteTarget(null)
+        }}
+        onConfirm={() => handleDelete(true)}
       />
     </div>
   )

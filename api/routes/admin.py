@@ -7,6 +7,7 @@ from typing import Optional, List, Any, Dict
 from loguru import logger
 
 from services.template_service import template_service
+from services.schema_sync_service import SchemaError
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import AuthorizationError
 
@@ -163,12 +164,19 @@ async def create_field(
     request: CreateFieldRequest,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """新增模板字段"""
+    """
+    新增模板字段，并自动在对应结果表中 ADD COLUMN。
+
+    若数据库列创建失败（如列名不合法、无对应结果表），返回 422 并附带错误原因。
+    """
     _require_admin(user)
     await _require_template_access(template_id, user)
 
-    field = await template_service.create_field(template_id, request.model_dump())
-    return {"success": True, "data": field}
+    try:
+        field = await template_service.create_field(template_id, request.model_dump())
+        return {"success": True, "data": field}
+    except SchemaError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.put("/fields/{field_id}")
@@ -177,7 +185,12 @@ async def update_field(
     request: UpdateFieldRequest,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """更新模板字段"""
+    """
+    更新模板字段。
+
+    若 field_key 发生变更，自动在结果表执行 RENAME COLUMN。
+    目标列名已存在时返回 409 并提示冲突原因。
+    """
     _require_admin(user)
     await _require_field_access(field_id, user)
 
@@ -185,21 +198,40 @@ async def update_field(
     if not data:
         raise HTTPException(status_code=400, detail="无有效更新字段")
 
-    updated = await template_service.update_field(field_id, data)
-    return {"success": True, "data": updated}
+    try:
+        updated = await template_service.update_field(field_id, data)
+        return {"success": True, "data": updated}
+    except SchemaError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.delete("/fields/{field_id}", status_code=200)
 async def delete_field(
     field_id: str,
+    force: bool = Query(False, description="强制删除（即使结果表中该列有历史数据，数据将永久丢失）"),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """删除模板字段"""
+    """
+    删除模板字段，并自动在对应结果表中 DROP COLUMN。
+
+    - 默认（force=false）：若该列有历史数据，返回 409，响应体中包含
+      `non_null_count`（受影响行数），前端可据此展示确认弹窗。
+    - force=true：忽略历史数据强制删列（不可恢复，请谨慎使用）。
+    """
     _require_admin(user)
     await _require_field_access(field_id, user)
 
-    await template_service.delete_field(field_id)
-    return {"success": True}
+    try:
+        await template_service.delete_field(field_id, force=force)
+        return {"success": True}
+    except SchemaError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "non_null_count": e.non_null_count,
+            },
+        )
 
 
 @router.put("/templates/{template_id}/fields/reorder")

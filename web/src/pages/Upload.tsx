@@ -25,18 +25,15 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 
-// ============ 上传模式配置（解耦：各租户独立配置）============
+// ============ 上传模式配置（数据驱动：根据模板数据自动判断）============
 
-// 上传模式类型
-type UploadMode = 'lighting_merge' | 'quality_auto' | 'unknown'
+// 上传模式类型：merge=合并多文件模式，single=单文件手动选模板模式
+type UploadMode = 'merge' | 'single' | 'unknown'
 
 // 照明合并进度阶段
 type MergePhase = 'idle' | 'uploading' | 'processing'
 
-// 照明系统固定的文档类型配置（不依赖 API 查询）
-const LIGHTING_DOC_TYPES = ['光分布', '积分球']
-
-// 照明系统的模板 ID（积分球测试为合并主模板）
+// merge 模式回退模板 ID（当 mergeRules 尚未加载时使用）
 const LIGHTING_TEMPLATE_ID = 'integrating_sphere'
 
 // Merge 模式文件信息
@@ -66,12 +63,26 @@ export function Upload() {
   const uploadMultipleMutation = useUploadMultiple()
   const { tenantName, tenantCode, mergeRules, templates, isLoading: profileLoading } = useProfile()
 
-  // ============ 解耦：直接根据 tenantCode 决定上传模式 ============
+  // ============ 数据驱动：根据模板数据自动判断上传模式 ============
+  // merge 规则存在 → merge 模式；有 single 模板 → single 模式；无部门 → unknown
   const uploadMode: UploadMode = useMemo(() => {
-    if (tenantCode === 'lighting') return 'lighting_merge'
-    if (tenantCode === 'quality') return 'quality_auto'
+    if (!tenantCode) return 'unknown'
+    if (mergeRules.length > 0) return 'merge'
+    if (templates.some(t => t.process_mode === 'single')) return 'single'
     return 'unknown'
-  }, [tenantCode])
+  }, [tenantCode, mergeRules, templates])
+
+  // single 模式可用的模板列表
+  const singleTemplates = useMemo(
+    () => templates.filter(t => t.process_mode === 'single'),
+    [templates]
+  )
+
+  // merge 模式的两种文档类型（从 mergeRules 派生，不再硬编码）
+  const mergeDocTypes = useMemo(() => {
+    if (mergeRules.length === 0) return ['积分球', '光分布'] // 回退值
+    return [mergeRules[0].doc_type_a, mergeRules[0].doc_type_b]
+  }, [mergeRules])
 
   // 优先使用后端返回的 merge 模板 ID，避免前端硬编码导致配置不生效
   const lightingMergeTemplateId = useMemo(() => {
@@ -93,6 +104,8 @@ export function Upload() {
   const [dragOver, setDragOver] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)
+  // single 模式：用户选中的模板 ID（单模板时自动选中）
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
 
   // ============ 照明合并进度 ============
   const [mergePhase, setMergePhase] = useState<MergePhase>('idle')
@@ -106,10 +119,17 @@ export function Upload() {
     }
   }, [])
 
-  // ============ 照明系统：直接初始化固定的两文件列表（不依赖 API）============
+  // single 模式：只有一个模板时自动选中
   useEffect(() => {
-    if (uploadMode === 'lighting_merge' && mergeFiles.length === 0) {
-      const initialFiles: MergeFileItem[] = LIGHTING_DOC_TYPES.map((docType, index) => ({
+    if (uploadMode === 'single' && singleTemplates.length === 1) {
+      setSelectedTemplateId(singleTemplates[0].id)
+    }
+  }, [uploadMode, singleTemplates])
+
+  // merge 模式：根据 mergeDocTypes 初始化文件列表
+  useEffect(() => {
+    if (uploadMode === 'merge' && mergeFiles.length === 0 && mergeDocTypes.length > 0) {
+      const initialFiles: MergeFileItem[] = mergeDocTypes.map((docType, index) => ({
         id: `merge-${index}-${Date.now()}`,
         file: null,
         docType,
@@ -117,7 +137,7 @@ export function Upload() {
       }))
       setMergeFiles(initialFiles)
     }
-  }, [uploadMode, mergeFiles.length])
+  }, [uploadMode, mergeFiles.length, mergeDocTypes])
 
   // 组件卸载时清理定时器
   useEffect(() => {
@@ -241,23 +261,20 @@ export function Upload() {
     }
   }
 
-  // Upload and process (质量管理中心：单文件自动识别模式)
+  // Upload and process (single 模式：用户手动选模板)
   const handleUpload = async () => {
     if (!selectedFile) return
 
     try {
       setUploadError(null)
-      // 质量管理中心不传 templateId，后端自动识别文档类型
       const result = await uploadMutation.mutateAsync({
         file: selectedFile,
-        templateId: undefined
+        templateId: selectedTemplateId || undefined
       })
       setUploadedDocId(result.document_id)
 
-      // Start processing (后端会自动识别文档类型并处理)
       await processMutation.mutateAsync({ documentId: result.document_id })
 
-      // Navigate to document detail
       navigate(`/documents/${result.document_id}`)
     } catch (err) {
       const message = err instanceof Error ? err.message : '上传失败'
@@ -356,8 +373,8 @@ export function Upload() {
   const isUploading = uploadMutation.isPending || processMutation.isPending ||
                       uploadMultipleMutation.isPending
   
-  // 检查照明系统合并模式是否可以提交
-  const canSubmitMerge = uploadMode === 'lighting_merge' && mergeFiles.length > 0 && mergeFiles.some(item => item.file !== null)
+  // 检查合并模式是否可以提交
+  const canSubmitMerge = uploadMode === 'merge' && mergeFiles.length > 0 && mergeFiles.some(item => item.file !== null)
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fadeIn">
@@ -368,8 +385,8 @@ export function Upload() {
         </p>
       </div>
 
-      {/* 未知模式：提示用户选择部门 */}
-      {uploadMode === 'unknown' && !profileLoading && (
+      {/* 未知模式：仅在确认无部门时提示，避免模板加载中时误显示 */}
+      {uploadMode === 'unknown' && !profileLoading && !tenantCode && (
         <Card className="border-warning-500/50">
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 text-warning-500">
@@ -385,22 +402,52 @@ export function Upload() {
         </Card>
       )}
 
-      {/* 照明系统：显示固定的两文件上传模式提示 */}
-      {uploadMode === 'lighting_merge' && (
+      {/* merge 模式：显示合并上传说明 */}
+      {uploadMode === 'merge' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Layers className="h-5 w-5 text-accent-400" />
-              照明综合报告
+              综合报告
             </CardTitle>
             <CardDescription>
-              {tenantName && `${tenantName} - `}可上传积分球或光分布（或两者）
+              {tenantName && `${tenantName} - `}可上传 {mergeDocTypes.join(' 或 ')}（或两者）
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Badge variant="outline" className="text-accent-400 border-accent-400">
               合并模式 - 可上传 1-2 份文档
             </Badge>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* single 模式：多模板时显示模板选择器 */}
+      {uploadMode === 'single' && singleTemplates.length > 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">选择文档类型</CardTitle>
+            <CardDescription>
+              {tenantName && `${tenantName} - `}请选择本次上传的文档类型
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {singleTemplates.map(template => (
+                <button
+                  key={template.id}
+                  onClick={() => setSelectedTemplateId(template.id)}
+                  className={cn(
+                    'px-4 py-2 rounded-lg border text-sm transition-colors',
+                    selectedTemplateId === template.id
+                      ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                      : 'border-border-default hover:border-primary-500/50 text-text-secondary'
+                  )}
+                >
+                  {template.name}
+                </button>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -441,8 +488,8 @@ export function Upload() {
         </Card>
       )}
 
-      {/* Upload Area - 质量管理中心：单文件自动识别模式 */}
-      {!isCameraOpen && !selectedFile && uploadMode === 'quality_auto' && (
+      {/* Upload Area - single 模式：需先选模板（多模板时）才显示上传区域 */}
+      {!isCameraOpen && !selectedFile && uploadMode === 'single' && selectedTemplateId && (
         <Card>
           <CardContent className="pt-6">
             <div
@@ -488,8 +535,8 @@ export function Upload() {
         </Card>
       )}
 
-      {/* Upload Area - 照明系统：固定两文件合并模式 */}
-      {!isCameraOpen && uploadMode === 'lighting_merge' && mergeFiles.length > 0 && (
+      {/* Upload Area - merge 模式：多文件合并上传 */}
+      {!isCameraOpen && uploadMode === 'merge' && mergeFiles.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -497,7 +544,7 @@ export function Upload() {
               上传文档
             </CardTitle>
             <CardDescription>
-              请分别上传 {LIGHTING_DOC_TYPES.join(' 和 ')}
+              请分别上传 {mergeDocTypes.join(' 和 ')}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -618,8 +665,8 @@ export function Upload() {
         </Card>
       )}
 
-      {/* Selected File Preview - 质量管理中心单文件模式 */}
-      {selectedFile && !isCameraOpen && uploadMode === 'quality_auto' && (
+      {/* Selected File Preview - single 模式 */}
+      {selectedFile && !isCameraOpen && uploadMode === 'single' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">已选择文件</CardTitle>
@@ -716,18 +763,18 @@ export function Upload() {
             </li>
             <li className="flex items-start gap-2">
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />
-              {uploadMode === 'quality_auto' ? (
-                <span>系统将自动识别文档类型（快递单/检测报告/抽样单）并提取关键信息</span>
-              ) : uploadMode === 'lighting_merge' ? (
-                <span>请上传积分球和光分布，系统将分别提取后合并结果</span>
+              {uploadMode === 'single' ? (
+                <span>选择文档类型后上传，系统将自动提取关键信息</span>
+              ) : uploadMode === 'merge' ? (
+                <span>请上传 {mergeDocTypes.join(' 和 ')}，系统将分别提取后合并结果</span>
               ) : (
                 <span>请先选择所属部门</span>
               )}
             </li>
-            {uploadMode === 'lighting_merge' && (
+            {uploadMode === 'merge' && (
               <li className="flex items-start gap-2">
                 <Layers className="h-4 w-4 mt-0.5 text-accent-400" />
-                <span>合并模式：分别上传积分球和光分布，系统将提取关键参数并生成综合报告</span>
+                <span>合并模式：分别上传 {mergeDocTypes.join(' 和 ')}，系统将提取关键参数并生成综合报告</span>
               </li>
             )}
           </ul>

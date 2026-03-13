@@ -20,11 +20,7 @@ import { cn, getStatusColor, getStatusText, formatDate, getDocumentTypeText } fr
 import { documentsService } from '@/services/documents'
 import { shouldHideDownloadForType } from '@/config/features'
 import {
-  INSPECTION_REPORT_FIELDS,
-  EXPRESS_FIELDS,
-  SAMPLING_FORM_FIELDS,
-  LIGHTING_REPORT_FIELDS,
-  type FieldDefinition,
+  type TemplateFieldForDetail,
   type ReviewHintField,
 } from '@/types'
 import {
@@ -76,17 +72,7 @@ export function DocumentDetail() {
     }
   }, [result])
 
-  // Get field definitions based on document type
-  const getFields = (): FieldDefinition[] => {
-    const type = status?.document_type || result?.document_type
-    if (type === '检测报告' || type === 'inspection_report') return INSPECTION_REPORT_FIELDS
-    if (type === '快递单' || type === 'express') return EXPRESS_FIELDS
-    if (type === '抽样单' || type === 'sampling_form') return SAMPLING_FORM_FIELDS
-    if (type === '照明综合报告' || type === 'lighting_combined' || type === 'lighting_report') return LIGHTING_REPORT_FIELDS
-    return []
-  }
-
-  const fields = getFields()
+  const fields: TemplateFieldForDetail[] = result?.template_fields ?? []
   const hideDownload = shouldHideDownloadForType(status?.document_type || result?.document_type)
 
   // Handle field change
@@ -403,52 +389,49 @@ export function DocumentDetail() {
             ) : fields.length === 0 ? (
               <div className="text-center py-8">
                 <FileText className="h-12 w-12 text-text-muted mx-auto mb-4" />
-                <p className="text-text-secondary">无法识别的文档类型</p>
+                <p className="text-text-secondary">
+                  {result ? '模板字段未配置，请联系管理员' : '暂无提取结果'}
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {fields.map((field) => {
-                  const value = (editedData[field.key] as string) || ''
-                  const originalValue = (result?.extraction_data as unknown as Record<string, unknown>)?.[field.key] as string || ''
+                  const rawValue = editedData[field.field_key]
+                  const value = Array.isArray(rawValue)
+                    ? rawValue.join('\n')
+                    : (rawValue as string) || ''
+                  const rawOriginal = result?.extraction_data?.[field.field_key]
+                  const originalValue = Array.isArray(rawOriginal)
+                    ? rawOriginal.join('\n')
+                    : (rawOriginal as string) || ''
                   const isChanged = isEditing && value !== originalValue
-                  
-                  // 判断是否需要高亮（待审核状态 + 检测报告 + 检验结论字段）
-                  const documentType = status?.document_type || result?.document_type
-                  const needsHighlight = status?.status === 'pending_review' 
-                    && (documentType === '检测报告' || documentType === 'inspection_report')
-                    && field.key === 'inspection_conclusion'
+
+                  // 高亮：由模板规则驱动 — review_enforced 或有 review_allowed_values
+                  const needsHighlight = status?.status === 'pending_review'
+                    && (field.review_enforced || (field.review_allowed_values?.length ?? 0) > 0)
 
                   return (
-                    <div key={field.key} className={cn(field.type === 'textarea' && 'md:col-span-2')}>
-                      <Label 
-                        htmlFor={`field-${field.key}`}
+                    <div key={field.field_key}>
+                      <Label
+                        htmlFor={`field-${field.field_key}`}
                         className={cn(
                           isChanged && 'text-warning-500',
                           needsHighlight && 'text-orange-500 font-semibold'
                         )}
                       >
-                        {field.label}
+                        {field.field_label}
+                        {field.is_required && <span className="ml-1 text-error-500">*</span>}
                         {isChanged && <span className="ml-2 text-xs">(已修改)</span>}
                         {needsHighlight && <span className="ml-2 text-xs animate-pulse">(待审核确认)</span>}
                       </Label>
                       {isEditing ? (
-                        field.type === 'textarea' ? (
-                          <Textarea
-                            id={`field-${field.key}`}
-                            value={value}
-                            onChange={(e) => handleFieldChange(field.key, e.target.value)}
-                            className={cn('mt-1', needsHighlight && 'border-orange-500 border-2')}
-                            rows={3}
-                          />
-                        ) : (
-                          <Input
-                            id={`field-${field.key}`}
-                            type={field.type === 'date' ? 'date' : 'text'}
-                            value={value}
-                            onChange={(e) => handleFieldChange(field.key, e.target.value)}
-                            className={cn('mt-1', isChanged && 'border-warning-500', needsHighlight && 'border-orange-500 border-2')}
-                          />
-                        )
+                        <Input
+                          id={`field-${field.field_key}`}
+                          type={field.field_type === 'date' ? 'date' : field.field_type === 'number' ? 'number' : 'text'}
+                          value={value}
+                          onChange={(e) => handleFieldChange(field.field_key, e.target.value)}
+                          className={cn('mt-1', isChanged && 'border-warning-500', needsHighlight && 'border-orange-500 border-2')}
+                        />
                       ) : (
                         <p className={cn(
                           'mt-1 p-2 rounded-lg bg-bg-secondary text-text-primary min-h-[40px]',
