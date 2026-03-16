@@ -6,6 +6,7 @@
 避免每次入库都查询 information_schema。
 """
 
+import ast
 import threading
 from typing import Optional, Set, Dict, Any
 from loguru import logger
@@ -97,8 +98,8 @@ class SchemaSyncService:
 
     # ── RPC 辅助 ──────────────────────────────────────────────────────
 
-    @staticmethod
-    def _parse_rpc_response(raw: Any) -> Dict[str, Any]:
+    @classmethod
+    def _parse_rpc_response(cls, raw: Any) -> Dict[str, Any]:
         """
         将 supabase-py RPC 返回的 data 统一解析为 dict。
 
@@ -107,16 +108,57 @@ class SchemaSyncService:
         - list 中的第一个 dict
         """
         if isinstance(raw, dict):
+            # 直接返回标准结构 {"success": ..., "message"/"error": ...}
+            if "success" in raw:
+                return raw
+            # 兼容某些 PostgREST 返回：{"function_name": {"success": ...}}
+            if len(raw) == 1:
+                only_val = next(iter(raw.values()))
+                if isinstance(only_val, dict):
+                    return cls._parse_rpc_response(only_val)
             return raw
         if isinstance(raw, list) and raw:
-            first = raw[0]
-            return first if isinstance(first, dict) else {}
+            return cls._parse_rpc_response(raw[0])
+        return {}
+
+    @classmethod
+    def _extract_payload_from_exception(cls, err: Exception) -> Dict[str, Any]:
+        """
+        从异常对象中尽可能提取 RPC 的 JSON payload。
+
+        某些版本/场景下，postgrest 客户端可能把函数返回的 JSON（即便 success=true）
+        包装进异常对象。这里做容错解析，避免把成功结果误判为失败。
+        """
+        # 1) 异常参数直接是 dict/list
+        if getattr(err, "args", None):
+            first = err.args[0]
+            if isinstance(first, (dict, list)):
+                parsed = cls._parse_rpc_response(first)
+                if parsed:
+                    return parsed
+            # 2) 异常参数是字符串化 dict
+            if isinstance(first, str):
+                try:
+                    literal = ast.literal_eval(first)
+                except Exception:
+                    literal = None
+                if isinstance(literal, (dict, list)):
+                    parsed = cls._parse_rpc_response(literal)
+                    if parsed:
+                        return parsed
         return {}
 
     def _call_ddl_rpc(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行 DDL 类 RPC 并返回解析后的结果 dict"""
-        result = self._get_client().rpc(func_name, params).execute()
-        return self._parse_rpc_response(result.data)
+        try:
+            result = self._get_client().rpc(func_name, params).execute()
+            return self._parse_rpc_response(result.data)
+        except Exception as e:
+            parsed = self._extract_payload_from_exception(e)
+            # 兼容“异常里其实是 success=true 的 payload”场景
+            if parsed.get("success") is True:
+                return parsed
+            raise
 
     # ── DDL 操作 ──────────────────────────────────────────────────────
 
