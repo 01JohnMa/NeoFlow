@@ -14,11 +14,11 @@ import os
 from config.settings import settings
 from services.supabase_service import supabase_service
 from services.template_service import template_service
-from services.feishu_service import feishu_service
 from agents.workflow import ocr_workflow
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.jobs import create_job, update_job, get_job
+from .helpers import push_to_feishu
 
 
 # ============ 请求模型 ============
@@ -115,40 +115,14 @@ async def _handle_processing_success(
                     result.get("document_type") or result.get("template_name")
                 )
 
-            bitable_token = template.get("feishu_bitable_token") if template else None
-            table_id = template.get("feishu_table_id") if template else None
-
-            if template and bitable_token and table_id:
-                field_mapping = template_service.build_field_mapping(template)
-                push_data = {**result.get("extraction_data", {})}
-
-                file_name_for_push = (
-                    (display_name or "").strip()
-                    or str(result.get("document_type") or result.get("template_name") or "").strip()
-                    or document_id
+            if template:
+                await push_to_feishu(
+                    template=template,
+                    extraction_data=result.get("extraction_data", {}),
+                    display_name=display_name,
+                    document_id=document_id,
+                    source_file_path=source_file_path,
                 )
-                if file_name_for_push:
-                    if "file_name" not in field_mapping:
-                        field_mapping["file_name"] = "文件名"
-                    push_data["file_name"] = file_name_for_push
-
-                # 模板开启附件推送且存在源文件时，上传附件到飞书
-                if template.get("push_attachment", True) and source_file_path and os.path.exists(source_file_path):
-                    file_token = await feishu_service._upload_file_to_feishu(source_file_path, bitable_token)
-                    if file_token:
-                        push_data["attachment"] = [{"file_token": file_token}]
-                        field_mapping["attachment"] = "附件"
-
-                success = await feishu_service.push_by_template(
-                    push_data,
-                    field_mapping,
-                    bitable_token,
-                    table_id
-                )
-                if success:
-                    logger.info(f"auto_approve 单模板飞书推送成功: {document_id}")
-                else:
-                    logger.warning(f"auto_approve 单模板飞书推送失败: {document_id}")
             else:
                 logger.info(f"auto_approve 单模板模板未配置飞书，跳过推送: {document_id}")
         except Exception as feishu_error:
@@ -175,8 +149,8 @@ async def _handle_processing_exception(
     logger.error(f"后台任务异常: {exception}")
     try:
         await supabase_service.update_document_status(document_id, "failed", str(exception))
-    except:
-        pass
+    except Exception as update_err:
+        logger.warning(f"更新失败状态时出错: {update_err}")
 
 
 @router.post("/{document_id}/process")
@@ -277,8 +251,8 @@ async def process_document(
             # 更新状态
             try:
                 await supabase_service.update_document_status(document_id, "processing")
-            except:
-                pass
+            except Exception as status_err:
+                logger.warning(f"更新处理状态失败: {status_err}")
             
             return {
                 "document_id": document_id,
@@ -453,12 +427,12 @@ async def process_document_with_template(
             
             await supabase_service.update_document_status(document_id, "processing")
             
-            return {
+            return JSONResponse(status_code=202, content={
                 "document_id": document_id,
                 "template_id": request.template_id,
                 "status": "processing",
                 "message": "文档处理已开始（后台任务）"
-            }
+            })
         
     except (DocumentNotFoundError, FileNotFoundError, HTTPException):
         raise
@@ -667,19 +641,13 @@ async def _run_merge_job(
 
             if auto_approve:
                 try:
-                    _bitable_token = template.get("feishu_bitable_token")
-                    _table_id = template.get("feishu_table_id")
-                    if _bitable_token and _table_id:
-                        _field_mapping = template_service.build_field_mapping(template)
-                        _push_data = {**sample_data, "file_name": display_name}
-                        if "file_name" not in _field_mapping:
-                            _field_mapping["file_name"] = "文件名"
-                        await feishu_service.push_by_template(
-                            _push_data, _field_mapping, _bitable_token, _table_id
-                        )
-                        logger.info(f"[job={job_id}] 样品{sample_index} 飞书推送成功")
-                    else:
-                        logger.info(f"[job={job_id}] 样品{sample_index} 模板未配置飞书，跳过")
+                    await push_to_feishu(
+                        template=template,
+                        extraction_data=sample_data,
+                        display_name=display_name,
+                        document_id=doc_id,
+                        log_prefix=f"[job={job_id}] 样品{sample_index} ",
+                    )
                 except Exception as feishu_error:
                     logger.warning(f"[job={job_id}] 飞书推送失败（不影响结果）: {feishu_error}")
 

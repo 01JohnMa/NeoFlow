@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from loguru import logger
 import os
 
+from api.exceptions import AppException
 from config.settings import settings
 from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
@@ -97,10 +98,6 @@ app.include_router(tenants_router, prefix="/api", tags=["租户管理"])
 app.include_router(admin_router, prefix="/api", tags=["管理员配置"])
 
 
-# 全局异常处理
-from api.exceptions import AppException
-
-
 @app.exception_handler(AppException)
 async def app_exception_handler(request, exc: AppException):
     """处理业务异常 - 返回统一格式"""
@@ -138,7 +135,6 @@ async def general_exception_handler(request, exc):
         content={
             "error": "内部服务器错误",
             "code": "INTERNAL_ERROR",
-            "detail": str(exc)
         }
     )
 

@@ -33,6 +33,7 @@ export interface AdminTemplate {
   sort_order: number
   is_active: boolean
   auto_approve: boolean
+  extraction_mode: 'ocr_llm' | 'vlm'
   feishu_bitable_token: string | null
   feishu_table_id: string | null
 }
@@ -63,6 +64,7 @@ export interface UpdateTemplateConfigPayload {
   feishu_bitable_token?: string
   feishu_table_id?: string
   auto_approve?: boolean
+  extraction_mode?: 'ocr_llm' | 'vlm'
 }
 
 export interface ReorderItem {

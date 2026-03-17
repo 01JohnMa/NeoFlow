@@ -8,7 +8,7 @@ from loguru import logger
 
 from services.tenant_service import tenant_service
 from services.template_service import template_service
-from api.dependencies.auth import get_current_user, get_optional_user, CurrentUser, invalidate_profile_cache
+from api.dependencies.auth import get_current_user, CurrentUser, invalidate_profile_cache
 
 router = APIRouter(prefix="/tenants", tags=["租户管理"])
 
@@ -144,7 +144,7 @@ async def update_my_profile(
         }
     except Exception as e:
         logger.error(f"更新用户 profile 失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="更新失败，请稍后重试")
 
 
 @router.get("/me/templates", response_model=List[TemplateResponse])

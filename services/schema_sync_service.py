@@ -10,6 +10,8 @@ import threading
 from typing import Optional, Set, Dict, Any
 from loguru import logger
 
+from services.base import SupabaseClientMixin
+
 
 # 系统保留列：这些列在所有结果表中都存在，禁止通过字段配置增删改
 SYSTEM_COLUMNS: Set[str] = {
@@ -27,7 +29,7 @@ class SchemaError(Exception):
         self.non_null_count = non_null_count
 
 
-class SchemaSyncService:
+class SchemaSyncService(SupabaseClientMixin):
     """
     通过 Supabase RPC 调用 PostgreSQL 函数对结果表执行 DDL。
 
@@ -46,13 +48,6 @@ class SchemaSyncService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-
-    def _get_client(self):
-        """懒加载 Supabase 客户端（避免循环导入）"""
-        if self._client is None:
-            from services.supabase_service import supabase_service
-            self._client = supabase_service.client
-        return self._client
 
     # ── 缓存管理 ──────────────────────────────────────────────────────
 

@@ -29,3 +29,8 @@ class WorkflowError(Exception):
         self.error_type = error_type
         self.message = message
         self.step = step or error_type.value
+
+    @staticmethod
+    def extract_message(e: Exception) -> str:
+        """从异常中提取错误消息（兼容 WorkflowError 和普通异常）"""
+        return e.message if isinstance(e, WorkflowError) else str(e)

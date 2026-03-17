@@ -39,6 +39,12 @@ import {
   Check,
 } from 'lucide-react'
 
+function getConfidenceColor(confidence: number): string {
+  if (confidence > 0.8) return 'text-success-500'
+  if (confidence > 0.6) return 'text-warning-500'
+  return 'text-error-500'
+}
+
 export function DocumentDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -49,6 +55,7 @@ export function DocumentDetail() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [modalMessage, setModalMessage] = useState('')
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   
   // 重命名相关状态
   const [isRenaming, setIsRenaming] = useState(false)
@@ -130,10 +137,8 @@ export function DocumentDetail() {
   // Delete document
   const handleDelete = async () => {
     if (!id) return
-    if (confirm('确定要删除此文档吗？')) {
-      await deleteMutation.mutateAsync(id)
-      navigate('/documents')
-    }
+    await deleteMutation.mutateAsync(id)
+    navigate('/documents')
   }
 
   // Reprocess document
@@ -277,7 +282,7 @@ export function DocumentDetail() {
           <Button
             variant="destructive"
             size="sm"
-            onClick={handleDelete}
+            onClick={() => setShowDeleteConfirm(true)}
             disabled={deleteMutation.isPending}
           >
             <Trash2 className="h-4 w-4 mr-2" />
@@ -427,7 +432,11 @@ export function DocumentDetail() {
                       {isEditing ? (
                         <Input
                           id={`field-${field.field_key}`}
-                          type={field.field_type === 'date' ? 'date' : field.field_type === 'number' ? 'number' : 'text'}
+                          type={
+                            field.field_type === 'date' ? 'date'
+                            : field.field_type === 'number' ? 'number'
+                            : 'text'
+                          }
                           value={value}
                           onChange={(e) => handleFieldChange(field.field_key, e.target.value)}
                           className={cn('mt-1', isChanged && 'border-warning-500', needsHighlight && 'border-orange-500 border-2')}
@@ -469,8 +478,7 @@ export function DocumentDetail() {
                   OCR 置信度: 
                   <span className={cn(
                     'ml-2 font-medium',
-                    result.ocr_confidence > 0.8 ? 'text-success-500' :
-                    result.ocr_confidence > 0.6 ? 'text-warning-500' : 'text-error-500'
+                    getConfidenceColor(result.ocr_confidence)
                   )}>
                     {(result.ocr_confidence * 100).toFixed(1)}%
                   </span>
@@ -544,6 +552,16 @@ export function DocumentDetail() {
         title="审核提示"
         message={modalMessage}
         onClose={() => setIsModalOpen(false)}
+      />
+
+      <Modal
+        open={showDeleteConfirm}
+        title="删除文档"
+        message="确定要删除此文档吗？此操作不可恢复。"
+        confirmText={deleteMutation.isPending ? '删除中...' : '删除'}
+        cancelText="取消"
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
       />
     </div>
   )

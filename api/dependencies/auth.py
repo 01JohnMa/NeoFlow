@@ -5,7 +5,6 @@ import time
 from typing import Optional, Tuple, Dict, Any
 from fastapi import Header, Depends
 from pydantic import BaseModel
-from supabase import Client
 from loguru import logger
 import jwt
 
@@ -60,8 +59,10 @@ def _extract_token_and_user_id(authorization: Optional[str]) -> Tuple[Optional[s
     token = authorization[7:]  # 移除 "Bearer " 前缀
     
     try:
-        # 解码 JWT（不验证签名，仅提取信息）
-        # Supabase 的用户 ID 存储在 "sub" 字段
+        # 解码 JWT 仅提取 user_id（sub 字段）。
+        # 签名验证由 Supabase 服务端负责：后续所有数据库操作均通过
+        # service_role 客户端 + 手动权限检查完成，不依赖 JWT 签名本身。
+        # 若需在本地验证签名，需配置 SUPABASE_JWT_SECRET。
         payload = jwt.decode(token, options={"verify_signature": False})
         user_id = payload.get("sub")
         return token, user_id
@@ -151,16 +152,3 @@ async def get_optional_user(
         return None
     
     return CurrentUser(user_id=user_id, token=token)
-
-
-def get_user_client(user: CurrentUser) -> Client:
-    """
-    根据用户创建带 RLS 的 Supabase 客户端
-    
-    用法:
-        @router.get("/documents")
-        async def list_docs(user: CurrentUser = Depends(get_current_user)):
-            client = get_user_client(user)
-            result = client.table("documents").select("*").execute()
-    """
-    return supabase_service.get_user_client(user.token)

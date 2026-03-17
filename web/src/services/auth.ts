@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+﻿import { supabase } from '@/lib/supabase'
 import { api } from './api'
 import type { User, Session } from '@supabase/supabase-js'
 
@@ -57,7 +57,7 @@ export const authService = {
       const { data } = await api.get<Tenant[]>('/tenants')
       return data || []
     } catch (error) {
-      console.error('获取租户列表失败:', error)
+      console.error('鑾峰彇绉熸埛鍒楄〃澶辫触:', error)
       return []
     }
   },
@@ -87,13 +87,13 @@ export const authService = {
             display_name: displayName || email
           })
         } catch (profileError) {
-          console.warn('更新用户 profile 失败:', profileError)
+          console.warn('鏇存柊鐢ㄦ埛 profile 澶辫触:', profileError)
           // Cache for fallback on first login
           cachePendingProfile(tenantId, displayName || email)
         }
       } else {
         // No session (email confirmation required), cache for first login
-        console.log('缓存待更新的 profile 数据（等待邮箱确认后首次登录时更新）')
+        console.log('缂撳瓨寰呮洿鏂扮殑 profile 鏁版嵁锛堢瓑寰呴偖绠辩‘璁ゅ悗棣栨鐧诲綍鏃舵洿鏂帮級')
         cachePendingProfile(tenantId, displayName || email)
       }
     }

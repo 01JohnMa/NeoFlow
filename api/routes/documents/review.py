@@ -6,7 +6,6 @@ from datetime import datetime
 from loguru import logger
 
 from services.supabase_service import supabase_service
-from services.feishu_service import feishu_service
 from services.template_service import template_service
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import (
@@ -16,7 +15,8 @@ from api.exceptions import (
     ProcessingError
 )
 from .schemas import ValidateRequest, RejectRequest, RenameRequest
-from .helpers import normalize_review_value, parse_allowed_values
+from .helpers import normalize_review_value, parse_allowed_values, push_to_feishu
+from .query import _check_document_access
 
 router = APIRouter()
 
@@ -64,14 +64,7 @@ async def validate_document(
             raise DocumentNotFoundError(document_id)
         
         # 验证用户权限（只有文档所有者或管理员可以审核）
-        doc_user_id = document.get("user_id")
-        doc_tenant_id = document.get("tenant_id")
-        if not user.is_super_admin():
-            if user.is_tenant_admin():
-                if doc_tenant_id != user.tenant_id:
-                    raise DocumentNotFoundError(document_id)
-            elif doc_user_id != user.user_id:
-                raise DocumentNotFoundError(document_id)
+        _check_document_access(document, user, document_id)
         
         # 校验强制审核条件（如果配置了字段规则）
         template_id = document.get("template_id")
@@ -117,53 +110,19 @@ async def validate_document(
         )
 
         # 审核保存后推送到飞书多维表格（统一使用模板配置）
-        try:
-            bitable_token = template.get("feishu_bitable_token") if template else None
-            table_id = template.get("feishu_table_id") if template else None
-            
-            if template and bitable_token and table_id:
-                field_mapping = template_service.build_field_mapping(template)
-                
-                logger.info(f"使用模板配置推送飞书: template_id={template.get('id')}, bitable_token={bitable_token}, table_id={table_id}")
-                
-                # 准备推送数据
-                push_data = {**result.data[0]}
-                
-                # 处理文件名字段
-                if file_name_for_push:
-                    file_name_field = next(
-                        (k for k, v in field_mapping.items() if v == "文件名"),
-                        None
-                    )
-                    if file_name_field:
-                        push_data[file_name_field] = file_name_for_push
-                    elif "file_name" not in push_data:
-                        push_data["file_name"] = file_name_for_push
-                        field_mapping["file_name"] = "文件名"
-                
-                # 处理附件：模板开启 push_attachment 且文档有本地文件时，上传并写入飞书附件列
-                file_path = document.get("file_path", "")
-                if template.get("push_attachment", True) and file_path:
-                    file_token = await feishu_service._upload_file_to_feishu(file_path, bitable_token)
-                    if file_token:
-                        push_data["attachment"] = [{"file_token": file_token}]
-                        field_mapping["attachment"] = "附件"
-                
-                success = await feishu_service.push_by_template(
-                    push_data,
-                    field_mapping,
-                    bitable_token,
-                    table_id
+        if template:
+            try:
+                await push_to_feishu(
+                    template=template,
+                    extraction_data=result.data[0],
+                    display_name=file_name_for_push,
+                    document_id=document_id,
+                    source_file_path=document.get("file_path", ""),
                 )
-                
-                if success:
-                    logger.info(f"飞书推送成功: {document_id}")
-                else:
-                    logger.warning(f"飞书推送失败: {document_id}")
-            else:
-                logger.info(f"模板未配置飞书，跳过推送: {document_id}")
-        except Exception as feishu_error:
-            logger.warning(f"飞书推送失败（不影响审核结果）: {feishu_error}")
+            except Exception as feishu_error:
+                logger.warning(f"飞书推送失败（不影响审核结果）: {feishu_error}")
+        else:
+            logger.info(f"模板未配置飞书，跳过推送: {document_id}")
         
         return {
             "success": True,
@@ -206,14 +165,7 @@ async def rename_document(
             raise DocumentNotFoundError(document_id)
         
         # 验证用户权限（只有文档所有者或管理员可以重命名）
-        doc_user_id = document.get("user_id")
-        doc_tenant_id = document.get("tenant_id")
-        if not user.is_super_admin():
-            if user.is_tenant_admin():
-                if doc_tenant_id != user.tenant_id:
-                    raise DocumentNotFoundError(document_id)
-            elif doc_user_id != user.user_id:
-                raise DocumentNotFoundError(document_id)
+        _check_document_access(document, user, document_id)
         
         # 更新显示名称
         supabase_service.client.table("documents").update({
@@ -257,14 +209,7 @@ async def reject_document(
             raise DocumentNotFoundError(document_id)
         
         # 验证用户权限（只有文档所有者或管理员可以打回）
-        doc_user_id = document.get("user_id")
-        doc_tenant_id = document.get("tenant_id")
-        if not user.is_super_admin():
-            if user.is_tenant_admin():
-                if doc_tenant_id != user.tenant_id:
-                    raise DocumentNotFoundError(document_id)
-            elif doc_user_id != user.user_id:
-                raise DocumentNotFoundError(document_id)
+        _check_document_access(document, user, document_id)
         
         # 更新文档状态为失败
         supabase_service.client.table("documents").update({

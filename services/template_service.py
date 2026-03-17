@@ -8,9 +8,10 @@ from loguru import logger
 
 from config.settings import settings
 from constants.document_types import DOC_TYPE_TABLE_MAP
+from services.base import SupabaseClientMixin, build_field_table, build_examples_section
 
 
-class TemplateService:
+class TemplateService(SupabaseClientMixin):
     """模板服务封装"""
     
     _instance: Optional['TemplateService'] = None
@@ -41,13 +42,6 @@ class TemplateService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def _get_client(self):
-        """获取 Supabase 客户端"""
-        if self._client is None:
-            from services.supabase_service import supabase_service
-            self._client = supabase_service.client
-        return self._client
     
     # ============ 模板操作 ============
     
@@ -308,44 +302,11 @@ class TemplateService:
         """
         # 1. 构建字段列表
         fields = template.get("template_fields", [])
-        field_lines = []
-        for i, field in enumerate(fields, 1):
-            field_key = field.get("field_key", "")
-            field_label = field.get("field_label", "")
-            field_type = field.get("field_type", "text")
-            extraction_hint = field.get("extraction_hint", "")
-            
-            type_hint = ""
-            if field_type == "date":
-                type_hint = "（日期格式：YYYY-MM-DD）"
-            elif field_type == "number":
-                type_hint = "（数值类型）"
-            
-            hint = f"{type_hint} {extraction_hint}".strip()
-            field_lines.append(f"| {i} | {field_label} | {field_key} | {hint}")
-        
-        field_list = "| 序号 | 字段含义 | JSON键名 | 说明 |\n|------|----------|----------|------|\n" + "\n".join(field_lines)
+        field_list = build_field_table(fields)
         
         # 2. 构建示例部分
         examples = template.get("template_examples", [])
-        examples_section = ""
-        
-        if examples:
-            examples_section = "**参考示例：**\n"
-            for i, ex in enumerate(examples, 1):
-                example_input = ex.get("example_input", "").strip()
-                example_output = ex.get("example_output", {})
-                
-                # 格式化输出
-                if isinstance(example_output, str):
-                    try:
-                        example_output = json.loads(example_output)
-                    except:
-                        pass
-                
-                output_str = json.dumps(example_output, ensure_ascii=False)
-                
-                examples_section += f"\n示例{i}输入文本片段：\n{example_input}\n\n示例{i}输出：\n{output_str}\n"
+        examples_section = build_examples_section(examples)
         
         # 3. 组装完整 Prompt
         prompt = self.EXTRACTION_PROMPT_TEMPLATE.format(
@@ -609,7 +570,7 @@ class TemplateService:
             query = self._get_client().table("document_templates").select(
                 "id, tenant_id, name, code, description, process_mode, "
                 "required_doc_count, sort_order, is_active, auto_approve, "
-                "feishu_bitable_token, feishu_table_id"
+                "extraction_mode, feishu_bitable_token, feishu_table_id"
             )
             if tenant_id:
                 query = query.eq("tenant_id", tenant_id)
@@ -622,14 +583,14 @@ class TemplateService:
 
     async def update_template_config(self, template_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        更新模板的飞书配置和自动审批开关
+        更新模板配置（飞书推送、自动审批、提取引擎等）
         
         Args:
             template_id: 模板ID
-            data: 包含 feishu_bitable_token, feishu_table_id, auto_approve 的字典
+            data: 包含 feishu_bitable_token, feishu_table_id, auto_approve, extraction_mode 的字典
         """
         try:
-            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve"}
+            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve", "extraction_mode"}
             payload = {k: v for k, v in data.items() if k in allowed_keys}
             if not payload:
                 return {}
@@ -638,7 +599,8 @@ class TemplateService:
             self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
             fresh = self._get_client().table("document_templates").select(
                 "id, tenant_id, name, code, description, process_mode, required_doc_count, "
-                "sort_order, is_active, auto_approve, feishu_bitable_token, feishu_table_id"
+                "sort_order, is_active, auto_approve, extraction_mode, "
+                "feishu_bitable_token, feishu_table_id"
             ).eq("id", template_id).execute()
             return fresh.data[0] if fresh.data else {}
         except Exception as e:
@@ -710,8 +672,7 @@ class TemplateService:
             return template
         except Exception as e:
             logger.error(f"获取合并模板信息失败: {type(e).__name__}: {e}")
-            import traceback
-            logger.error(f"堆栈: {traceback.format_exc()}")
+            logger.exception("堆栈信息:")
             return None
     
     def merge_extraction_results(

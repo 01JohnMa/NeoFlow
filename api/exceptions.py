@@ -2,7 +2,7 @@
 """统一异常定义 - 业务异常类型"""
 
 from fastapi import HTTPException
-from typing import Optional, Dict, Any
+from typing import Dict, Optional
 
 
 class AppException(HTTPException):

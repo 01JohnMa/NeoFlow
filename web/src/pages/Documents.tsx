@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
+import { Modal } from '@/components/ui/modal'
 import { cn, getStatusColor, getStatusText, formatDate, formatFileSize } from '@/lib/utils'
 import { shouldHideDownloadForType } from '@/config/features'
 import type { DocumentStatus } from '@/types'
@@ -24,6 +25,7 @@ export function Documents() {
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [typeFilter, setTypeFilter] = useState<string>('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const limit = 10
 
   const { data, isLoading, refetch, isFetching } = useDocumentList({
@@ -38,9 +40,13 @@ export function Documents() {
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (confirm('确定要删除此文档吗？')) {
-      await deleteMutation.mutateAsync(id)
-    }
+    setDeleteTargetId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return
+    await deleteMutation.mutateAsync(deleteTargetId)
+    setDeleteTargetId(null)
   }
 
   const handleDownload = async (id: string, filename: string | undefined, e: React.MouseEvent) => {
@@ -261,6 +267,16 @@ export function Documents() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={!!deleteTargetId}
+        title="删除文档"
+        message="确定要删除此文档吗？此操作不可恢复。"
+        confirmText={deleteMutation.isPending ? '删除中...' : '删除'}
+        cancelText="取消"
+        onClose={() => setDeleteTargetId(null)}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

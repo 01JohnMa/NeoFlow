@@ -4,10 +4,10 @@
 from typing import Optional, Dict, Any, List
 from loguru import logger
 
-from config.settings import settings
+from services.base import SupabaseClientMixin
 
 
-class TenantService:
+class TenantService(SupabaseClientMixin):
     """租户服务封装"""
     
     _instance: Optional['TenantService'] = None
@@ -17,13 +17,6 @@ class TenantService:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def _get_client(self):
-        """获取 Supabase 客户端"""
-        if self._client is None:
-            from services.supabase_service import supabase_service
-            self._client = supabase_service.client
-        return self._client
     
     # ============ 租户操作 ============
     

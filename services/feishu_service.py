@@ -1,11 +1,12 @@
 # services/feishu_service.py
 """飞书多维表格推送服务 - 支持多租户动态配置"""
 
-import httpx
 import mimetypes
 import os
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
+
+import httpx
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 

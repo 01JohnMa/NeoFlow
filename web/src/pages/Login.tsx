@@ -28,7 +28,6 @@ export function Login() {
     } catch (err) {
       console.error('登录错误:', err)
       const errorMessage = getAuthErrorMessage(err, '登录失败，请重试')
-      console.log('设置错误消息:', errorMessage)
       setError(errorMessage)
     }
   }
