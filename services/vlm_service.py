@@ -208,6 +208,50 @@ class VLMService:
         logger.info(f"VLM 提取完成，合并后共 {len(merged)} 个字段")
         return merged
 
+    async def extract_per_page(
+        self, file_path: str, template: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        逐页提取，每页独立返回一个结果（用于 merge 模式的多样品场景）。
+
+        与 extract_from_image 的区别：不做跨页合并，每页作为独立样品。
+
+        Returns:
+            [{"page": 1, "data": {...}}, {"page": 2, "data": {...}}, ...]
+        """
+        from agents.json_cleaner import parse_llm_json
+
+        prompt = self.build_vlm_prompt(template)
+        b64_list = self.get_image_base64_list(file_path)
+
+        logger.info(
+            f"VLM 逐页提取开始: {file_path}，共 {len(b64_list)} 页，"
+            f"模板: {template.get('name')}"
+        )
+
+        results: List[Dict[str, Any]] = []
+        for page_idx, b64 in enumerate(b64_list, 1):
+            try:
+                raw = self._call_vlm(b64, prompt)
+                page_data = parse_llm_json(raw)
+
+                if "raw_response" in page_data:
+                    logger.warning(
+                        f"VLM 第 {page_idx} 页返回非 JSON，跳过"
+                    )
+                    continue
+
+                results.append({"page": page_idx, "data": page_data})
+                logger.debug(
+                    f"VLM 逐页提取 第 {page_idx}/{len(b64_list)} 页完成，"
+                    f"{len(page_data)} 个字段"
+                )
+            except Exception as e:
+                logger.error(f"VLM 逐页提取 第 {page_idx} 页失败: {e}")
+
+        logger.info(f"VLM 逐页提取完成，共 {len(results)} 页有效结果")
+        return results
+
 
 # 单例实例
 vlm_service = VLMService()
