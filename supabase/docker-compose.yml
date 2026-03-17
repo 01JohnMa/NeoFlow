@@ -24,7 +24,7 @@ services:
       PGDATABASE: postgres
       POSTGRES_DB: postgres
     volumes:
-      - ./volumes/db/data:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     restart: unless-stopped
     networks:
@@ -217,4 +217,7 @@ services:
 networks:
   supabase-network:
     driver: bridge
+
+volumes:
+  db_data:
 
