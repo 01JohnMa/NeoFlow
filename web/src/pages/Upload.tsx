@@ -23,12 +23,19 @@ import {
   Layers,
   Plus,
   AlertTriangle,
+  FolderUp,
 } from 'lucide-react'
+import { BatchMergePairing } from '@/components/BatchMergePairing'
+import type { UploadedFile, MergePair } from '@/components/BatchMergePairing'
+import type { BatchProcessItem } from '@/types'
 
 // ============ 上传模式配置（数据驱动：根据模板数据自动判断）============
 
-// 上传模式类型：merge=合并多文件模式，single=单文件手动选模板模式
-type UploadMode = 'merge' | 'single' | 'unknown'
+// 上传模式类型：merge=合并多文件模式，single=单文件手动选模板模式，batch=批量模式
+type UploadMode = 'merge' | 'single' | 'batch' | 'unknown'
+
+// 当前激活的 Tab（用户可手动切换到 batch）
+type ActiveTab = 'default' | 'batch'
 
 // 照明合并进度阶段
 type MergePhase = 'idle' | 'uploading' | 'processing'
@@ -107,6 +114,21 @@ export function Upload() {
   // single 模式：用户选中的模板 ID（单模板时自动选中）
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
 
+  // ============ 批量模式状态 ============
+  const [activeTab, setActiveTab] = useState<ActiveTab>('default')
+  const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([])
+  const [batchSingleAssignments, setBatchSingleAssignments] = useState<Record<string, string>>({}) // fileId -> templateId
+  const [batchMergePairs, setBatchMergePairs] = useState<MergePair[]>([])
+  const [batchPhase, setBatchPhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
+  const [batchProgress, setBatchProgress] = useState(0)
+  const batchFileInputRef = useRef<HTMLInputElement>(null)
+  const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const mergeTemplates = useMemo(
+    () => templates.filter(t => t.process_mode === 'merge'),
+    [templates]
+  )
+
   // ============ 照明合并进度 ============
   const [mergePhase, setMergePhase] = useState<MergePhase>('idle')
   const [mergeProgress, setMergeProgress] = useState(0)
@@ -116,6 +138,13 @@ export function Upload() {
     if (mergeTimerRef.current) {
       clearInterval(mergeTimerRef.current)
       mergeTimerRef.current = null
+    }
+  }, [])
+
+  const stopBatchTimer = useCallback(() => {
+    if (batchTimerRef.current) {
+      clearInterval(batchTimerRef.current)
+      batchTimerRef.current = null
     }
   }, [])
 
@@ -141,7 +170,7 @@ export function Upload() {
 
   // 组件卸载时清理定时器
   useEffect(() => {
-    return () => { stopMergeTimer() }
+    return () => { stopMergeTimer(); stopBatchTimer() }
   }, [])
 
   const {
@@ -370,8 +399,192 @@ export function Upload() {
     }
   }
 
+  // ============ 批量模式处理函数 ============
+
+  const handleBatchFileAdd = useCallback((fileList: FileList) => {
+    const newFiles: UploadedFile[] = []
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i]
+      const error = validateFile(file)
+      if (error) {
+        setUploadError(error)
+        return
+      }
+      const id = `batch-${Date.now()}-${i}`
+      let preview: string | null = null
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          setBatchFiles(prev =>
+            prev.map(f => f.id === id ? { ...f, preview: e.target?.result as string } : f)
+          )
+        }
+        reader.readAsDataURL(file)
+      }
+      newFiles.push({ id, file, preview })
+    }
+    setUploadError(null)
+    setBatchFiles(prev => {
+      const total = prev.length + newFiles.length
+      if (total > 10) {
+        setUploadError('最多选择 10 个文件')
+        return prev
+      }
+      return [...prev, ...newFiles]
+    })
+  }, [])
+
+  const removeBatchFile = useCallback((fileId: string) => {
+    setBatchFiles(prev => prev.filter(f => f.id !== fileId))
+    setBatchSingleAssignments(prev => {
+      const next = { ...prev }
+      delete next[fileId]
+      return next
+    })
+    // 移除包含该文件的配对
+    setBatchMergePairs(prev =>
+      prev.filter(p => p.fileA?.id !== fileId && p.fileB?.id !== fileId)
+    )
+  }, [])
+
+  // 计算未配对的文件（排除已分配为 merge 的文件）
+  const pairedFileIds = useMemo(() => {
+    const ids = new Set<string>()
+    batchMergePairs.forEach(p => {
+      if (p.fileA) ids.add(p.fileA.id)
+      if (p.fileB) ids.add(p.fileB.id)
+    })
+    return ids
+  }, [batchMergePairs])
+
+  const unpairedBatchFiles = useMemo(
+    () => batchFiles.filter(f => !pairedFileIds.has(f.id)),
+    [batchFiles, pairedFileIds]
+  )
+
+  // 计算任务项数量
+  const batchTaskCount = useMemo(() => {
+    const singleCount = Object.keys(batchSingleAssignments).filter(
+      fid => !pairedFileIds.has(fid)
+    ).length
+    return singleCount + batchMergePairs.length
+  }, [batchSingleAssignments, pairedFileIds, batchMergePairs])
+
+  const handleBatchSubmit = async () => {
+    if (batchTaskCount === 0) {
+      setUploadError('请至少分配一个任务')
+      return
+    }
+    if (batchTaskCount > 5) {
+      setUploadError(`任务项不能超过 5 个（当前 ${batchTaskCount} 个）`)
+      return
+    }
+
+    setUploadError(null)
+    setBatchPhase('uploading')
+    setBatchProgress(0)
+
+    try {
+      // 1. 上传所有文件
+      const allFiles = batchFiles.filter(f => !f.documentId)
+      const uploadResults: Record<string, { document_id: string; file_path: string }> = {}
+
+      for (let i = 0; i < allFiles.length; i++) {
+        const f = allFiles[i]
+        const result = await documentsService.upload(f.file, {
+          onProgress: (p) => {
+            const totalProgress = Math.round(((i + p / 100) / allFiles.length) * 20)
+            setBatchProgress(totalProgress)
+          },
+        })
+        uploadResults[f.id] = { document_id: result.document_id, file_path: result.file_path }
+        setBatchFiles(prev =>
+          prev.map(bf => bf.id === f.id
+            ? { ...bf, documentId: result.document_id, filePath: result.file_path }
+            : bf
+          )
+        )
+      }
+
+      // 2. 构建 batch items
+      setBatchPhase('processing')
+      setBatchProgress(20)
+
+      const items: BatchProcessItem[] = []
+
+      // single 任务
+      for (const [fileId, templateId] of Object.entries(batchSingleAssignments)) {
+        if (pairedFileIds.has(fileId)) continue
+        const docId = uploadResults[fileId]?.document_id
+          || batchFiles.find(f => f.id === fileId)?.documentId
+        if (docId) {
+          items.push({ type: 'single', document_id: docId, template_id: templateId })
+        }
+      }
+
+      // merge 任务
+      for (const pair of batchMergePairs) {
+        const docIdA = pair.fileA ? (uploadResults[pair.fileA.id]?.document_id || pair.fileA.documentId) : undefined
+        const docIdB = pair.fileB ? (uploadResults[pair.fileB.id]?.document_id || pair.fileB.documentId) : undefined
+        if (docIdA && docIdB) {
+          items.push({
+            type: 'merge',
+            document_id_a: docIdA,
+            doc_type_a: pair.docTypeA,
+            document_id_b: docIdB,
+            doc_type_b: pair.docTypeB,
+            template_id: pair.templateId,
+          })
+        }
+      }
+
+      // 3. 提交批量处理
+      const { job_id } = await documentsService.submitBatchProcess(items)
+
+      // 4. 轮询状态
+      await new Promise<void>((resolve, reject) => {
+        batchTimerRef.current = setInterval(async () => {
+          try {
+            const jobStatus = await documentsService.getBatchJobStatus(job_id)
+            setBatchProgress(Math.max(20, jobStatus.progress))
+
+            if (jobStatus.status === 'completed') {
+              stopBatchTimer()
+              setBatchProgress(100)
+              await new Promise(r => setTimeout(r, 600))
+              const firstDocId = jobStatus.document_ids?.[0]
+              navigate(firstDocId ? `/documents/${firstDocId}` : '/documents')
+              resolve()
+            } else if (jobStatus.status === 'failed') {
+              stopBatchTimer()
+              reject(new Error(jobStatus.error || '批量处理失败'))
+            }
+          } catch {
+            // 单次轮询失败不中断
+          }
+        }, 3000)
+      })
+    } catch (err) {
+      stopBatchTimer()
+      setBatchPhase('idle')
+      setBatchProgress(0)
+      const message = err instanceof Error ? err.message : '批量处理失败'
+      setUploadError(message)
+    }
+  }
+
+  const clearBatch = () => {
+    setBatchFiles([])
+    setBatchSingleAssignments({})
+    setBatchMergePairs([])
+    setBatchPhase('idle')
+    setBatchProgress(0)
+    setUploadError(null)
+    stopBatchTimer()
+  }
+
   const isUploading = uploadMutation.isPending || processMutation.isPending ||
-                      uploadMultipleMutation.isPending
+                      uploadMultipleMutation.isPending || batchPhase !== 'idle'
   
   // 检查合并模式是否可以提交
   const canSubmitMerge = uploadMode === 'merge' && mergeFiles.length > 0 && mergeFiles.some(item => item.file !== null)
@@ -384,6 +597,35 @@ export function Upload() {
           支持 PDF、PNG、JPG、TIFF、BMP 格式，最大 20MB
         </p>
       </div>
+
+      {/* Tab 切换：默认模式 / 批量模式 */}
+      {tenantCode && templates.length > 0 && (
+        <div className="flex gap-2 border-b border-border-default pb-2">
+          <button
+            onClick={() => { setActiveTab('default'); clearBatch() }}
+            className={cn(
+              'px-4 py-2 text-sm rounded-t-lg transition-colors',
+              activeTab === 'default'
+                ? 'bg-primary-500/10 text-primary-400 border-b-2 border-primary-500'
+                : 'text-text-secondary hover:text-text-primary'
+            )}
+          >
+            {uploadMode === 'merge' ? '合并上传' : '单文件上传'}
+          </button>
+          <button
+            onClick={() => { setActiveTab('batch'); clearSelection() }}
+            className={cn(
+              'px-4 py-2 text-sm rounded-t-lg transition-colors flex items-center gap-1',
+              activeTab === 'batch'
+                ? 'bg-primary-500/10 text-primary-400 border-b-2 border-primary-500'
+                : 'text-text-secondary hover:text-text-primary'
+            )}
+          >
+            <FolderUp className="h-4 w-4" />
+            批量上传
+          </button>
+        </div>
+      )}
 
       {/* 未知模式：仅在确认无部门时提示，避免模板加载中时误显示 */}
       {uploadMode === 'unknown' && !profileLoading && !tenantCode && (
@@ -403,7 +645,7 @@ export function Upload() {
       )}
 
       {/* merge 模式：显示合并上传说明 */}
-      {uploadMode === 'merge' && (
+      {activeTab === 'default' && uploadMode === 'merge' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -423,7 +665,7 @@ export function Upload() {
       )}
 
       {/* single 模式：多模板时显示模板选择器 */}
-      {uploadMode === 'single' && singleTemplates.length > 1 && (
+      {activeTab === 'default' && uploadMode === 'single' && singleTemplates.length > 1 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">选择文档类型</CardTitle>
@@ -489,7 +731,7 @@ export function Upload() {
       )}
 
       {/* Upload Area - single 模式：需先选模板（多模板时）才显示上传区域 */}
-      {!isCameraOpen && !selectedFile && uploadMode === 'single' && selectedTemplateId && (
+      {!isCameraOpen && !selectedFile && activeTab === 'default' && uploadMode === 'single' && selectedTemplateId && (
         <Card>
           <CardContent className="pt-6">
             <div
@@ -536,7 +778,7 @@ export function Upload() {
       )}
 
       {/* Upload Area - merge 模式：多文件合并上传 */}
-      {!isCameraOpen && uploadMode === 'merge' && mergeFiles.length > 0 && (
+      {!isCameraOpen && activeTab === 'default' && uploadMode === 'merge' && mergeFiles.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -666,7 +908,7 @@ export function Upload() {
       )}
 
       {/* Selected File Preview - single 模式 */}
-      {selectedFile && !isCameraOpen && uploadMode === 'single' && (
+      {selectedFile && !isCameraOpen && activeTab === 'default' && uploadMode === 'single' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">已选择文件</CardTitle>
@@ -744,6 +986,196 @@ export function Upload() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* ============ 批量模式 UI ============ */}
+      {activeTab === 'batch' && tenantCode && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FolderUp className="h-5 w-5 text-primary-400" />
+                批量上传
+              </CardTitle>
+              <CardDescription>
+                选择 1～10 个文件，为每个文件指定模板或配对合并。最多 5 个任务项。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* 文件选择区域 */}
+              <div
+                className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all hover:border-primary-500/50 hover:bg-bg-hover"
+                onClick={() => batchFileInputRef.current?.click()}
+              >
+                <input
+                  ref={batchFileInputRef}
+                  type="file"
+                  accept={fileAccept}
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files) handleBatchFileAdd(e.target.files)
+                    e.target.value = ''
+                  }}
+                  className="hidden"
+                />
+                <Plus className="h-8 w-8 text-text-muted mx-auto mb-2" />
+                <p className="text-sm text-text-muted">点击选择文件（可多选）</p>
+              </div>
+
+              {/* 已选文件列表 + 模板分配 */}
+              {batchFiles.length > 0 && (
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium text-text-secondary">
+                    已选文件（{batchFiles.length} 个）
+                  </Label>
+                  {batchFiles.map(f => (
+                    <div
+                      key={f.id}
+                      className={cn(
+                        'flex items-center gap-3 p-3 rounded-lg border',
+                        pairedFileIds.has(f.id)
+                          ? 'bg-accent-400/5 border-accent-400/30'
+                          : 'bg-bg-secondary border-border-default'
+                      )}
+                    >
+                      <div className="w-10 h-10 rounded bg-bg-hover flex items-center justify-center flex-shrink-0">
+                        {f.preview ? (
+                          <img src={f.preview} alt="" className="w-full h-full object-cover rounded" />
+                        ) : (
+                          <FileText className="h-5 w-5 text-text-muted" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-text-primary truncate">{f.file.name}</p>
+                        <p className="text-xs text-text-muted">{formatFileSize(f.file.size)}</p>
+                      </div>
+                      {pairedFileIds.has(f.id) ? (
+                        <Badge variant="outline" className="text-accent-400 border-accent-400 text-xs flex-shrink-0">
+                          已配对
+                        </Badge>
+                      ) : (
+                        <select
+                          value={batchSingleAssignments[f.id] || ''}
+                          onChange={e => {
+                            const val = e.target.value
+                            setBatchSingleAssignments(prev => {
+                              if (!val) {
+                                const next = { ...prev }
+                                delete next[f.id]
+                                return next
+                              }
+                              return { ...prev, [f.id]: val }
+                            })
+                          }}
+                          className="w-36 rounded-md border border-border-default bg-bg-primary px-2 py-1 text-xs flex-shrink-0"
+                        >
+                          <option value="">选择模板...</option>
+                          {singleTemplates.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                      )}
+                      {batchPhase === 'idle' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-text-muted hover:text-error-500 flex-shrink-0"
+                          onClick={() => removeBatchFile(f.id)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Merge 配对区域 */}
+              {mergeRules.length > 0 && batchFiles.length >= 2 && (
+                <BatchMergePairing
+                  mergeRules={mergeRules}
+                  mergeTemplates={mergeTemplates}
+                  unpairedFiles={unpairedBatchFiles.filter(f => !batchSingleAssignments[f.id])}
+                  pairs={batchMergePairs}
+                  onCreatePair={(pair) => setBatchMergePairs(prev => [...prev, pair])}
+                  onRemovePair={(pairId) => setBatchMergePairs(prev => prev.filter(p => p.id !== pairId))}
+                />
+              )}
+
+              {/* 任务统计 */}
+              {batchFiles.length > 0 && (
+                <div className="flex items-center justify-between text-sm text-text-secondary pt-2 border-t border-border-default">
+                  <span>
+                    任务项: {batchTaskCount} / 5
+                    {batchTaskCount > 5 && (
+                      <span className="text-error-500 ml-2">（超出上限）</span>
+                    )}
+                  </span>
+                  <span className="text-text-muted">
+                    single: {Object.keys(batchSingleAssignments).filter(fid => !pairedFileIds.has(fid)).length}
+                    {batchMergePairs.length > 0 && ` / merge: ${batchMergePairs.length}`}
+                  </span>
+                </div>
+              )}
+
+              {/* Error */}
+              {uploadError && (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
+
+              {/* 提交按钮 */}
+              {batchFiles.length > 0 && (
+                <div className="pt-2 flex gap-3">
+                  <Button
+                    className="flex-1"
+                    onClick={handleBatchSubmit}
+                    disabled={batchPhase !== 'idle' || batchTaskCount === 0 || batchTaskCount > 5}
+                  >
+                    {batchPhase !== 'idle' ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        {batchPhase === 'uploading' ? '上传中...' : '批量处理中...'}
+                      </>
+                    ) : (
+                      <>
+                        <UploadIcon className="h-4 w-4 mr-2" />
+                        提交批量处理（{batchTaskCount} 项）
+                      </>
+                    )}
+                  </Button>
+                  {batchPhase === 'idle' && (
+                    <Button variant="outline" onClick={clearBatch}>
+                      清空
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* 批量进度条 */}
+              {batchPhase !== 'idle' && (
+                <div className="pt-3 space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-text-secondary">
+                      {batchPhase === 'uploading'
+                        ? '正在上传文件...'
+                        : '正在批量处理，请勿关闭页面...'}
+                    </span>
+                    <span className="text-text-muted tabular-nums">{batchProgress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-bg-secondary rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary-500 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${batchProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {/* Help Card */}

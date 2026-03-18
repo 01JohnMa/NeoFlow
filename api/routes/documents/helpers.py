@@ -5,6 +5,7 @@ import os
 import json
 import aiofiles
 from typing import Optional
+from datetime import datetime
 from fastapi import UploadFile
 from loguru import logger
 
@@ -139,3 +140,96 @@ async def push_to_feishu(
         logger.info(f"{log_prefix}飞书推送成功: {document_id}")
     else:
         logger.warning(f"{log_prefix}飞书推送失败: {document_id}")
+
+
+async def handle_processing_success(
+    document_id: str,
+    result: dict,
+    template_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    generate_display_name: bool = True,
+    auto_approve: bool = False,
+    source_file_path: Optional[str] = None,
+) -> None:
+    """处理成功时的统一逻辑"""
+    from services.supabase_service import supabase_service
+    from services.template_service import template_service
+
+    await supabase_service.save_extraction_result(
+        document_id=document_id,
+        document_type=result.get("document_type") or result.get("template_name", "未知"),
+        extraction_data=result["extraction_data"]
+    )
+    logger.info(f"提取结果已保存: {document_id}")
+
+    display_name = None
+    if generate_display_name:
+        display_name = supabase_service.generate_display_name(
+            document_type=result.get("document_type") or result.get("template_name"),
+            extraction_data=result["extraction_data"]
+        )
+
+    doc_status = "completed" if auto_approve else "pending_review"
+    update_data = {
+        "status": doc_status,
+        "document_type": result.get("document_type") or result.get("template_name"),
+        "template_id": template_id,
+        "tenant_id": tenant_id,
+        "ocr_text": result.get("ocr_text", ""),
+        "ocr_confidence": result.get("ocr_confidence"),
+        "processed_at": datetime.now().isoformat(),
+        "error_message": None
+    }
+    if display_name:
+        update_data["display_name"] = display_name
+
+    await supabase_service.update_document(document_id, update_data)
+    logger.info(
+        f"后台处理完成: {document_id}, 状态: {doc_status}"
+        + (f", 显示名称: {display_name}" if display_name else "")
+    )
+
+    if auto_approve:
+        try:
+            template = None
+            if template_id:
+                template = await template_service.get_template_with_details(template_id)
+            elif tenant_id and (result.get("document_type") or result.get("template_name")):
+                template = await template_service.get_template_by_code(
+                    tenant_id,
+                    result.get("document_type") or result.get("template_name")
+                )
+
+            if template:
+                await push_to_feishu(
+                    template=template,
+                    extraction_data=result.get("extraction_data", {}),
+                    display_name=display_name,
+                    document_id=document_id,
+                    source_file_path=source_file_path,
+                )
+            else:
+                logger.info(f"auto_approve 单模板模板未配置飞书，跳过推送: {document_id}")
+        except Exception as feishu_error:
+            logger.warning(f"auto_approve 单模板飞书推送失败（不影响结果）: {feishu_error}")
+
+
+async def handle_processing_failure(document_id: str, error_message: str) -> None:
+    """处理失败时的统一逻辑"""
+    from services.supabase_service import supabase_service
+
+    await supabase_service.update_document_status(
+        document_id, "failed", error_message=error_message
+    )
+    logger.error(f"后台处理失败: {document_id} - {error_message}")
+
+
+async def handle_processing_exception(document_id: str, exception: Exception) -> None:
+    """处理异常时的统一逻辑"""
+    from services.supabase_service import supabase_service
+
+    logger.error(f"后台任务异常: {exception}")
+    try:
+        await supabase_service.update_document_status(document_id, "failed", str(exception))
+    except Exception as update_err:
+        logger.warning(f"更新失败状态时出错: {update_err}")

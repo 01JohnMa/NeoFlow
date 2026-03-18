@@ -5,6 +5,8 @@ import type {
   ProcessResponse,
   DocumentListResponse,
   ExtractionResultResponse,
+  BatchProcessItem,
+  BatchJobStatus,
 } from '@/types'
 
 export const documentsService = {
@@ -219,6 +221,23 @@ export const documentsService = {
     }
 
     return results
+  },
+
+  // Submit batch process job (异步提交，立即返回 job_id)
+  async submitBatchProcess(
+    items: BatchProcessItem[]
+  ): Promise<{ job_id: string; status: string }> {
+    const response = await api.post<{ job_id: string; status: string }>(
+      '/documents/batch-process',
+      { items }
+    )
+    return response.data
+  },
+
+  // Get batch job status (轮询用，兼容普通 job 和 batch job)
+  async getBatchJobStatus(jobId: string): Promise<BatchJobStatus> {
+    const response = await api.get<BatchJobStatus>(`/documents/jobs/${jobId}`)
+    return response.data
   },
 }
 

@@ -100,12 +100,20 @@ class SchemaSyncService(SupabaseClientMixin):
         supabase-py 2.x 对 JSONB 返回函数的响应格式可能是：
         - dict（直接）
         - list 中的第一个 dict
+        - list 中的第一个 dict，其唯一 value 才是真正结果（函数名作为 key 的嵌套格式）
         """
         if isinstance(raw, dict):
             return raw
         if isinstance(raw, list) and raw:
             first = raw[0]
-            return first if isinstance(first, dict) else {}
+            if not isinstance(first, dict):
+                return {}
+            # 处理 supabase-py 将函数名作为 key 的嵌套格式：
+            # [{'func_name': {'success': True, ...}}]
+            values = list(first.values())
+            if len(first) == 1 and isinstance(values[0], dict):
+                return values[0]
+            return first
         return {}
 
     def _call_ddl_rpc(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:

@@ -159,5 +159,37 @@ export interface ExtractionResultResponse {
   template_fields: TemplateFieldForDetail[]
 }
 
+// ============ Batch types ============
+
+export interface BatchProcessItem {
+  type: 'single' | 'merge'
+  document_id?: string       // single 时必填
+  document_id_a?: string     // merge 时必填
+  doc_type_a?: string        // merge 时必填
+  document_id_b?: string     // merge 时必填
+  doc_type_b?: string        // merge 时必填
+  template_id: string
+}
+
+export interface BatchJobItemStatus {
+  index: number
+  type: 'single' | 'merge'
+  document_ids: string[]
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  error?: string
+}
+
+export interface BatchJobStatus {
+  job_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  stage: string
+  progress: number
+  document_ids: string[]
+  error: string | null
+  items?: BatchJobItemStatus[]
+  total?: number
+  completed_count?: number
+}
+
 
 

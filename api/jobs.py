@@ -24,10 +24,14 @@ _JOB_TTL_SECONDS = 3600
 _jobs: Dict[str, Dict[str, Any]] = {}
 
 
-def create_job() -> str:
-    """创建新 Job，返回 job_id"""
+def create_job(batch_items: list = None) -> str:
+    """创建新 Job，返回 job_id
+
+    Args:
+        batch_items: 批量任务项列表（可选），每项含 index, type, document_ids, status
+    """
     job_id = str(uuid.uuid4())
-    _jobs[job_id] = {
+    job_data: Dict[str, Any] = {
         "job_id":       job_id,
         "status":       "pending",   # pending | processing | completed | failed
         "stage":        "pending",   # pending | ocr | llm | saving | completed | failed
@@ -36,6 +40,11 @@ def create_job() -> str:
         "error":        None,
         "created_at":   time.monotonic(),
     }
+    if batch_items is not None:
+        job_data["items"] = batch_items
+        job_data["total"] = len(batch_items)
+        job_data["completed_count"] = 0
+    _jobs[job_id] = job_data
     _cleanup_expired_jobs()
     return job_id
 
@@ -69,6 +78,30 @@ def update_job(job_id: str, stage: str, **extra: Any) -> None:
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     """按 ID 获取 Job，不存在返回 None"""
     return _jobs.get(job_id)
+
+
+def update_batch_item(job_id: str, index: int, status: str, error: str = None, document_ids: list = None) -> None:
+    """更新批量 Job 中某一项的状态，并自动计算 progress"""
+    job = _jobs.get(job_id)
+    if not job or "items" not in job:
+        return
+
+    items = job["items"]
+    if index < 0 or index >= len(items):
+        return
+
+    items[index]["status"] = status
+    if error:
+        items[index]["error"] = error
+    if document_ids:
+        items[index]["document_ids"] = document_ids
+        job["document_ids"] = job.get("document_ids", []) + document_ids
+
+    completed = sum(1 for it in items if it["status"] in ("completed", "failed"))
+    job["completed_count"] = completed
+    total = job.get("total", len(items))
+    job["progress"] = int(completed / total * 100) if total > 0 else 0
+    job["status"] = "processing"
 
 
 def _cleanup_expired_jobs() -> None:

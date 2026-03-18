@@ -7,6 +7,7 @@ from .upload import router as upload_router
 from .process import router as process_router
 from .query import router as query_router
 from .review import router as review_router
+from .batch import router as batch_router
 
 # 创建主路由
 router = APIRouter()
@@ -16,3 +17,4 @@ router.include_router(upload_router, tags=["文档上传"])
 router.include_router(process_router, tags=["文档处理"])
 router.include_router(query_router, tags=["文档查询"])
 router.include_router(review_router, tags=["文档审核"])
+router.include_router(batch_router, tags=["批量处理"])

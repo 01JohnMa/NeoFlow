@@ -11,6 +11,11 @@ def _patch_supabase():
     return patch("api.routes.documents.process.supabase_service")
 
 
+def _patch_supabase_in_helpers():
+    """Patch supabase where helpers imports it (used by handler tests)."""
+    return patch("services.supabase_service.supabase_service")
+
+
 def _patch_workflow():
     return patch("api.routes.documents.process.ocr_workflow")
 
@@ -140,22 +145,32 @@ class TestProcessingHandlers:
             "document_type": "inspection_report",
             "extraction_data": {"sample_name": "LED灯"},
         }
-        with _patch_supabase() as mock_svc, \
-             patch("api.routes.documents.process.template_service") as mock_ts, \
+        with _patch_supabase_in_helpers() as mock_svc, \
+             patch("services.template_service.template_service") as mock_ts, \
              patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock):
             mock_svc.save_extraction_result = AsyncMock()
             mock_svc.generate_display_name.return_value = "报告_LED灯"
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
             mock_ts.get_template = AsyncMock(return_value=None)
-            await _handle_processing_success("doc-001", result)
+            mock_ts.get_template_with_details = AsyncMock(return_value=None)
+            mock_ts.get_template_by_code = AsyncMock(return_value=None)
+            await _handle_processing_success(
+                document_id="doc-001",
+                result=result,
+                template_id=None,
+                tenant_id=None,
+                generate_display_name=True,
+                auto_approve=False,
+                source_file_path=None,
+            )
         mock_svc.save_extraction_result.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_failure_updates_status(self):
         """失败处理更新文档状态为 failed"""
         from api.routes.documents.process import _handle_processing_failure
-        with _patch_supabase() as mock_svc:
+        with _patch_supabase_in_helpers() as mock_svc:
             mock_svc.update_document_status = AsyncMock()
             await _handle_processing_failure("doc-001", "OCR失败")
         mock_svc.update_document_status.assert_called_once_with(
@@ -166,16 +181,18 @@ class TestProcessingHandlers:
     async def test_handle_exception_updates_status(self):
         """异常处理更新文档状态为 failed"""
         from api.routes.documents.process import _handle_processing_exception
-        with _patch_supabase() as mock_svc:
+        with _patch_supabase_in_helpers() as mock_svc:
             mock_svc.update_document_status = AsyncMock()
             await _handle_processing_exception("doc-001", RuntimeError("意外错误"))
-        mock_svc.update_document_status.assert_called_once()
+        mock_svc.update_document_status.assert_called_once_with(
+            "doc-001", "failed", "意外错误"
+        )
 
     @pytest.mark.asyncio
     async def test_handle_exception_swallows_db_error(self):
         """异常处理中数据库更新失败不会再抛异常"""
         from api.routes.documents.process import _handle_processing_exception
-        with _patch_supabase() as mock_svc:
+        with _patch_supabase_in_helpers() as mock_svc:
             mock_svc.update_document_status = AsyncMock(side_effect=Exception("DB挂了"))
             # 不应抛异常
             await _handle_processing_exception("doc-001", RuntimeError("原始错误"))
