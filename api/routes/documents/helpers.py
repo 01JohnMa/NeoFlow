@@ -94,19 +94,19 @@ async def push_to_feishu(
     extraction_data: dict,
     display_name: Optional[str],
     document_id: str,
-    source_file_path: Optional[str] = None,
+    source_file_path: Optional[str | list] = None,
     log_prefix: str = "",
+    extra_template: Optional[dict] = None,
 ) -> None:
     """
-    统一飞书推送逻辑：构建 field_mapping → 处理 file_name → 上传附件 → push_by_template
+    统一飞书推送逻辑：构建 field_mapping → 生成文件名 → 上传附件 → push_by_template
+
+    文件名规则：{模板名}_YYYYMMDD_HHmmss
+    - single：{template.name}_20260319_031245
+    - merge：{template.name}+{extra_template.name}_20260319_031245
 
     Args:
-        template: 模板字典，需含 feishu_bitable_token / feishu_table_id
-        extraction_data: 提取结果数据
-        display_name: 文档显示名称（用于 file_name 字段）
-        document_id: 文档 ID（用于日志和兜底 file_name）
-        source_file_path: 源文件路径（可选，用于上传附件）
-        log_prefix: 日志前缀（如 "[job=xxx]"）
+        source_file_path: 单个文件路径（str）或多个文件路径列表（list），merge 时传 [fp_a, fp_b]
     """
     from services.feishu_service import feishu_service
 
@@ -118,23 +118,39 @@ async def push_to_feishu(
         return
 
     field_mapping = template_service.build_field_mapping(template)
+
+    # merge 模式：合并附加模板的字段映射（B 的字段也推到同一行）
+    if extra_template:
+        extra_mapping = template_service.build_field_mapping(extra_template)
+        field_mapping = {**extra_mapping, **field_mapping}  # A 优先（覆盖同名 key）
+
     push_data = {**extraction_data}
 
-    file_name_for_push = (
-        (display_name or "").strip()
-        or str(template.get("name") or "").strip()
-        or document_id
-    )
-    if file_name_for_push:
-        if "file_name" not in field_mapping:
-            field_mapping["file_name"] = "文件名"
-        push_data["file_name"] = file_name_for_push
+    # 统一文件名：{模板名}_YYYYMMDD_HHmmss，merge 时拼接两个模板名
+    template_name = str(template.get("name") or "文档")
+    if extra_template:
+        template_name = f"{template_name}+{extra_template.get('name', '')}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name_for_push = f"{template_name}_{timestamp}"
 
-    if template.get("push_attachment", True) and source_file_path and os.path.exists(source_file_path):
-        file_token = await feishu_service._upload_file_to_feishu(source_file_path, bitable_token)
-        if file_token:
-            push_data["attachment"] = [{"file_token": file_token}]
-            field_mapping["attachment"] = "附件"
+    if "file_name" not in field_mapping:
+        field_mapping["file_name"] = "文件名"
+    push_data["file_name"] = file_name_for_push
+
+    # 附件上传：传入的文件全部上传，调用方负责按 push_attachment 过滤
+    file_paths = (
+        source_file_path if isinstance(source_file_path, list)
+        else ([source_file_path] if source_file_path else [])
+    )
+    file_tokens = []
+    for fp in file_paths:
+        if fp and os.path.exists(fp):
+            token = await feishu_service._upload_file_to_feishu(fp, bitable_token)
+            if token:
+                file_tokens.append({"file_token": token})
+    if file_tokens:
+        push_data["attachment"] = file_tokens
+        field_mapping["attachment"] = "文件"
 
     success = await feishu_service.push_by_template(push_data, field_mapping, bitable_token, table_id)
     if success:

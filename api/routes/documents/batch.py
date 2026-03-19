@@ -234,12 +234,20 @@ async def _process_merge_item(
             if sample_count > 1:
                 display_name = f"{display_name}_样品{sample_index}"
             try:
+                # 根据各自模板的 push_attachment 决定推哪些文件
+                merge_file_paths = []
+                if sub_template_a.get("push_attachment", True) and fp_a:
+                    merge_file_paths.append(fp_a)
+                if sub_template_b.get("push_attachment", True) and fp_b:
+                    merge_file_paths.append(fp_b)
                 await push_to_feishu(
                     template=sub_template_a,
                     extraction_data=sample_data,
                     display_name=display_name,
                     document_id=f"batch-merge-{job_id}-{idx}-{sample_index}",
+                    source_file_path=merge_file_paths or None,
                     log_prefix=f"[job={job_id}] batch-merge 样品{sample_index} ",
+                    extra_template=sub_template_b,
                 )
             except Exception as feishu_err:
                 logger.warning(f"[job={job_id}] 飞书推送失败: {feishu_err}")

@@ -567,7 +567,7 @@ class TemplateService(SupabaseClientMixin):
             data: 包含 feishu_bitable_token, feishu_table_id, auto_approve, extraction_mode 的字典
         """
         try:
-            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve", "extraction_mode"}
+            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve", "extraction_mode", "push_attachment"}
             payload = {k: v for k, v in data.items() if k in allowed_keys}
             if not payload:
                 return {}
@@ -576,7 +576,7 @@ class TemplateService(SupabaseClientMixin):
             self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
             fresh = self._get_client().table("document_templates").select(
                 "id, tenant_id, name, code, description, required_doc_count, "
-                "sort_order, is_active, auto_approve, extraction_mode, "
+                "sort_order, is_active, auto_approve, push_attachment, extraction_mode, "
                 "feishu_bitable_token, feishu_table_id"
             ).eq("id", template_id).execute()
             return fresh.data[0] if fresh.data else {}

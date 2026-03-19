@@ -500,14 +500,17 @@ async def _run_merge_job(
         results_a = sub_results.get("results_a", [])
         result_b = sub_results.get("result_b")
 
-        # 获取子模板详情（用于 code 字段）
-        sub_template_a = await template_service.get_template(sub_template_a_id)
-        sub_template_b = await template_service.get_template(sub_template_b_id)
+        # 获取子模板详情（含 template_fields，用于飞书字段映射）
+        sub_template_a = await template_service.get_template_with_details(sub_template_a_id)
+        sub_template_b = await template_service.get_template_with_details(sub_template_b_id)
 
         doc_b_id = source_doc_ids[1] if len(source_doc_ids) > 1 else None
         doc_a_id_original = source_doc_ids[0] if source_doc_ids else None
 
         if auto_approve:
+            # fp_a/fp_b 在循环外计算，避免重复赋值
+            fp_a = files[0]["file_path"] if len(files) > 0 else None
+            fp_b = files[1]["file_path"] if len(files) > 1 else None
             for sample_result in extraction_results:
                 sample_index = sample_result.get("sample_index", 1)
                 sample_data = sample_result.get("data", {})
@@ -519,12 +522,20 @@ async def _run_merge_job(
                 if sample_count > 1:
                     display_name = f"{display_name}_样品{sample_index}"
                 try:
+                    # 根据各自模板的 push_attachment 决定推哪些文件
+                    merge_file_paths = []
+                    if sub_template_a and sub_template_a.get("push_attachment", True) and fp_a:
+                        merge_file_paths.append(fp_a)
+                    if sub_template_b and sub_template_b.get("push_attachment", True) and fp_b:
+                        merge_file_paths.append(fp_b)
                     await push_to_feishu(
-                        template=template_a,
+                        template=sub_template_a or template_a,
                         extraction_data=sample_data,
                         display_name=display_name,
                         document_id=f"merge-{job_id}-{sample_index}",
+                        source_file_path=merge_file_paths or None,
                         log_prefix=f"[job={job_id}] 样品{sample_index} ",
+                        extra_template=sub_template_b,
                     )
                 except Exception as feishu_error:
                     logger.warning(f"[job={job_id}] 飞书推送失败（不影响结果）: {feishu_error}")

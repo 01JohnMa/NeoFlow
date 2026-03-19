@@ -132,13 +132,8 @@ ON CONFLICT (id) DO UPDATE SET
 -- PART 5: 照明事业部模板字段
 -- ############################################################
 
--- 5.1 积分球测试字段（22个：3个光分布扩展 + 14个积分球 + 5个光分布，均由此主模板负责飞书推送）
+-- 5.1 积分球测试字段（14个：纯积分球字段）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order, source_doc_type) VALUES
-    -- 光分布扩展（3个，sort_order=0）
-    ('b0000000-0000-0000-0000-000000000010', 'c0_180', 'C0/180', 'C0/180', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000010', 'c90_270', 'C90/270', 'C90/270', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000010', 'avg_beam_angle', '平均光束角', '平均光束角', 'text', FALSE, 0, NULL),
-    -- 来自积分球（14个）
     ('b0000000-0000-0000-0000-000000000010', 'sample_model', '样品型号', '样品型号', 'text', FALSE, 1, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'chromaticity_x', '色品坐标X', '色品坐标X', 'text', FALSE, 2, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'chromaticity_y', '色品坐标Y', '色品坐标Y', 'text', FALSE, 3, '积分球'),
@@ -152,21 +147,14 @@ INSERT INTO template_fields (template_id, field_key, field_label, feishu_column,
     ('b0000000-0000-0000-0000-000000000010', 'luminous_flux_sphere', '光通量(积分球)', '光通量(积分球)', 'text', FALSE, 11, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'luminous_efficacy_sphere', '光效(积分球)', '光效(积分球)', 'text', FALSE, 12, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'rf', 'Rf', 'Rf', 'text', FALSE, 13, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'rg', 'Rg', 'Rg', 'text', FALSE, 14, '积分球'),
-    -- 来自光分布（5个，此处仅用于 Feishu 推送，提取由光分布子模板负责）
-    ('b0000000-0000-0000-0000-000000000010', 'lamp_specification', '灯具规格', '灯具规格', 'text', FALSE, 15, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'power', '功率', '功率', 'text', FALSE, 16, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'luminous_flux', '光通量(光分布)', '光通量(光分布)', 'text', FALSE, 17, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'luminous_efficacy', '光效(光分布)', '光效(光分布)', 'text', FALSE, 18, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'peak_intensity', '峰值光强', '峰值光强', 'text', FALSE, 19, '光分布')
+    ('b0000000-0000-0000-0000-000000000010', 'rg', 'Rg', 'Rg', 'text', FALSE, 14, '积分球')
 ON CONFLICT (template_id, field_key) DO NOTHING;
 
 -- 积分球测试：提取提示
 UPDATE template_fields
 SET extraction_hint = '仅数值，不带单位'
 WHERE template_id = 'b0000000-0000-0000-0000-000000000010'
-  AND field_key IN ('cct', 'luminous_efficacy_sphere', 'luminous_flux_sphere', 'power_sphere', 'sdcm',
-                    'c0_180', 'c90_270', 'avg_beam_angle');
+  AND field_key IN ('cct', 'luminous_efficacy_sphere', 'luminous_flux_sphere', 'power_sphere', 'sdcm');
 
 UPDATE template_fields
 SET extraction_hint = '将duv字段提取结果科学记数法转换为小数'

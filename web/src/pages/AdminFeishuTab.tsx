@@ -17,6 +17,7 @@ export function FeishuConfigTab({
   const [token, setToken] = useState(template.feishu_bitable_token ?? '')
   const [tableId, setTableId] = useState(template.feishu_table_id ?? '')
   const [autoApprove, setAutoApprove] = useState(template.auto_approve)
+  const [pushAttachment, setPushAttachment] = useState(template.push_attachment ?? true)
   const [extractionMode, setExtractionMode] = useState<'ocr_llm' | 'vlm'>(template.extraction_mode ?? 'ocr_llm')
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -25,6 +26,7 @@ export function FeishuConfigTab({
     setToken(template.feishu_bitable_token ?? '')
     setTableId(template.feishu_table_id ?? '')
     setAutoApprove(template.auto_approve)
+    setPushAttachment(template.push_attachment ?? true)
     setExtractionMode(template.extraction_mode ?? 'ocr_llm')
   }, [template])
 
@@ -36,6 +38,7 @@ export function FeishuConfigTab({
         feishu_bitable_token: token,
         feishu_table_id: tableId,
         auto_approve: autoApprove,
+        push_attachment: pushAttachment,
         extraction_mode: extractionMode,
       })
       onSaved({ ...template, ...updated })
@@ -114,6 +117,23 @@ export function FeishuConfigTab({
             className="text-primary-400 hover:text-primary-300 transition-colors"
           >
             {autoApprove ? (
+              <ToggleRight className="h-8 w-8" />
+            ) : (
+              <ToggleLeft className="h-8 w-8 text-text-muted" />
+            )}
+          </button>
+        </div>
+        <div className="flex items-center justify-between rounded-lg border border-border-default bg-bg-secondary p-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">推送附件</p>
+            <p className="text-xs text-text-muted">开启后推送飞书时同步上传原始文件作为附件</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPushAttachment((v) => !v)}
+            className="text-primary-400 hover:text-primary-300 transition-colors"
+          >
+            {pushAttachment ? (
               <ToggleRight className="h-8 w-8" />
             ) : (
               <ToggleLeft className="h-8 w-8 text-text-muted" />
