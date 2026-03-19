@@ -20,7 +20,6 @@ import {
   Loader2,
   SwitchCamera,
   Aperture,
-  Layers,
   Plus,
   AlertTriangle,
   FolderUp,
@@ -31,25 +30,11 @@ import type { BatchProcessItem } from '@/types'
 
 // ============ 上传模式配置（数据驱动：根据模板数据自动判断）============
 
-// 上传模式类型：merge=合并多文件模式，single=单文件手动选模板模式，batch=批量模式
-type UploadMode = 'merge' | 'single' | 'batch' | 'unknown'
+// 上传模式类型：single=单文件手动选模板模式，batch=批量模式
+type UploadMode = 'single' | 'batch' | 'unknown'
 
 // 当前激活的 Tab（用户可手动切换到 batch）
 type ActiveTab = 'default' | 'batch'
-
-// 照明合并进度阶段
-type MergePhase = 'idle' | 'uploading' | 'processing'
-
-// merge 模式回退模板 ID（当 mergeRules 尚未加载时使用）
-const LIGHTING_TEMPLATE_ID = 'integrating_sphere'
-
-// Merge 模式文件信息
-interface MergeFileItem {
-  id: string
-  file: File | null
-  docType: string
-  preview: string | null
-}
 
 const ACCEPTED_TYPES = [
   'application/pdf',
@@ -64,41 +49,24 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
 export function Upload() {
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const mergeFileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
   const uploadMutation = useUploadDocument()
   const processMutation = useProcessDocument()
   const uploadMultipleMutation = useUploadMultiple()
-  const { tenantName, tenantCode, mergeRules, templates, isLoading: profileLoading } = useProfile()
+  const { tenantName, tenantCode, templates, isLoading: profileLoading } = useProfile()
 
   // ============ 数据驱动：根据模板数据自动判断上传模式 ============
-  // merge 规则存在 → merge 模式；有 single 模板 → single 模式；无部门 → unknown
+  // 有模板 → single 模式；无部门 → unknown
   const uploadMode: UploadMode = useMemo(() => {
     if (!tenantCode) return 'unknown'
-    if (mergeRules.length > 0) return 'merge'
-    if (templates.some(t => t.process_mode === 'single')) return 'single'
+    if (templates.some(t => t.is_active !== false)) return 'single'
     return 'unknown'
-  }, [tenantCode, mergeRules, templates])
+  }, [tenantCode, templates])
 
-  // single 模式可用的模板列表
+  // single 模式可用的模板列表（所有 is_active 模板）
   const singleTemplates = useMemo(
-    () => templates.filter(t => t.process_mode === 'single'),
+    () => templates.filter(t => t.is_active !== false),
     [templates]
   )
-
-  // merge 模式的两种文档类型（从 mergeRules 派生，不再硬编码）
-  const mergeDocTypes = useMemo(() => {
-    if (mergeRules.length === 0) return ['积分球', '光分布'] // 回退值
-    return [mergeRules[0].doc_type_a, mergeRules[0].doc_type_b]
-  }, [mergeRules])
-
-  // 优先使用后端返回的 merge 模板 ID，避免前端硬编码导致配置不生效
-  const lightingMergeTemplateId = useMemo(() => {
-    const mergeTemplateIds = new Set(mergeRules.map((rule) => rule.template_id))
-    const firstMergeTemplate = templates.find(
-      (template) => template.process_mode === 'merge' && mergeTemplateIds.has(template.id)
-    )
-    return firstMergeTemplate?.id || mergeRules[0]?.template_id || LIGHTING_TEMPLATE_ID
-  }, [mergeRules, templates])
   const isMobile = useMemo(() => {
     if (typeof window === 'undefined') return false
     return window.matchMedia('(pointer: coarse)').matches
@@ -106,7 +74,6 @@ export function Upload() {
   const fileAccept = isMobile ? 'image/*,application/pdf' : '.pdf,.png,.jpg,.jpeg,.tiff,.bmp'
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [mergeFiles, setMergeFiles] = useState<MergeFileItem[]>([]) // merge 模式多文件
   const [preview, setPreview] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -117,29 +84,12 @@ export function Upload() {
   // ============ 批量模式状态 ============
   const [activeTab, setActiveTab] = useState<ActiveTab>('default')
   const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([])
-  const [batchSingleAssignments, setBatchSingleAssignments] = useState<Record<string, string>>({}) // fileId -> templateId
+  const [batchSingleAssignments, setBatchSingleAssignments] = useState<Record<string, string>>({})
   const [batchMergePairs, setBatchMergePairs] = useState<MergePair[]>([])
   const [batchPhase, setBatchPhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
   const [batchProgress, setBatchProgress] = useState(0)
   const batchFileInputRef = useRef<HTMLInputElement>(null)
   const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const mergeTemplates = useMemo(
-    () => templates.filter(t => t.process_mode === 'merge'),
-    [templates]
-  )
-
-  // ============ 照明合并进度 ============
-  const [mergePhase, setMergePhase] = useState<MergePhase>('idle')
-  const [mergeProgress, setMergeProgress] = useState(0)
-  const mergeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const stopMergeTimer = useCallback(() => {
-    if (mergeTimerRef.current) {
-      clearInterval(mergeTimerRef.current)
-      mergeTimerRef.current = null
-    }
-  }, [])
 
   const stopBatchTimer = useCallback(() => {
     if (batchTimerRef.current) {
@@ -155,22 +105,9 @@ export function Upload() {
     }
   }, [uploadMode, singleTemplates])
 
-  // merge 模式：根据 mergeDocTypes 初始化文件列表
-  useEffect(() => {
-    if (uploadMode === 'merge' && mergeFiles.length === 0 && mergeDocTypes.length > 0) {
-      const initialFiles: MergeFileItem[] = mergeDocTypes.map((docType, index) => ({
-        id: `merge-${index}-${Date.now()}`,
-        file: null,
-        docType,
-        preview: null,
-      }))
-      setMergeFiles(initialFiles)
-    }
-  }, [uploadMode, mergeFiles.length, mergeDocTypes])
-
   // 组件卸载时清理定时器
   useEffect(() => {
-    return () => { stopMergeTimer(); stopBatchTimer() }
+    return () => { stopBatchTimer() }
   }, [])
 
   const {
@@ -215,46 +152,6 @@ export function Upload() {
     } else {
       setPreview(null)
     }
-  }, [])
-
-  // Handle merge mode file selection
-  const handleMergeFileSelect = useCallback((itemId: string, file: File) => {
-    const error = validateFile(file)
-    if (error) {
-      setUploadError(error)
-      return
-    }
-
-    setUploadError(null)
-
-    // Generate preview for images
-    let filePreview: string | null = null
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setMergeFiles(prev =>
-          prev.map(item =>
-            item.id === itemId ? { ...item, preview: e.target?.result as string } : item
-          )
-        )
-      }
-      reader.readAsDataURL(file)
-    }
-
-    setMergeFiles(prev =>
-      prev.map(item =>
-        item.id === itemId ? { ...item, file, preview: filePreview } : item
-      )
-    )
-  }, [])
-
-  // Remove merge file
-  const removeMergeFile = useCallback((itemId: string) => {
-    setMergeFiles(prev =>
-      prev.map(item =>
-        item.id === itemId ? { ...item, file: null, preview: null } : item
-      )
-    )
   }, [])
 
   // Drag and drop handlers
@@ -311,89 +208,12 @@ export function Upload() {
     }
   }
 
-  // Upload and process (照明系统：固定两文件合并模式)
-  const handleMergeUpload = async () => {
-    // 至少选择一个文件即可提交
-    const hasAtLeastOneFile = mergeFiles.some(item => item.file !== null)
-    if (!hasAtLeastOneFile) {
-      setUploadError('请至少上传一个文档')
-      return
-    }
-
-    setUploadError(null)
-    setMergePhase('uploading')
-    setMergeProgress(0)
-    stopMergeTimer()
-
-    try {
-      // 1. 上传所有文件，实时反映上传进度（占总进度 0–20%）
-      const filesToUpload = mergeFiles
-        .filter(item => item.file !== null)
-        .map(item => ({
-          file: item.file!,
-          docType: item.docType,
-        }))
-
-      const uploadResults = await uploadMultipleMutation.mutateAsync({
-        files: filesToUpload,
-        onProgress: (p) => setMergeProgress(Math.round(p * 0.2)),
-      })
-
-      // 2. 提交合并任务（立即返回 job_id，后台处理）
-      setMergePhase('processing')
-      setMergeProgress(20)
-      const { job_id } = await documentsService.submitMergeJob(
-        lightingMergeTemplateId,
-        uploadResults.map(r => ({ file_path: r.file_path, doc_type: r.doc_type })),
-      )
-
-      // 3. 轮询任务状态，根据后端真实阶段更新进度条
-      await new Promise<void>((resolve, reject) => {
-        mergeTimerRef.current = setInterval(async () => {
-          try {
-            const jobStatus = await documentsService.getJobStatus(job_id)
-            // 进度：后端值在 20~100 区间内展示
-            setMergeProgress(Math.max(20, jobStatus.progress))
-
-            if (jobStatus.status === 'completed') {
-              stopMergeTimer()
-              setMergeProgress(100)
-              await new Promise(r => setTimeout(r, 600))
-              const firstDocId = jobStatus.document_ids?.[0]
-              if (firstDocId) {
-                navigate(`/documents/${firstDocId}`)
-              } else {
-                navigate('/documents')
-              }
-              resolve()
-            } else if (jobStatus.status === 'failed') {
-              stopMergeTimer()
-              reject(new Error(jobStatus.error || '处理失败'))
-            }
-          } catch {
-            // 单次轮询失败不中断，继续等待
-          }
-        }, 3000)
-      })
-    } catch (err) {
-      stopMergeTimer()
-      setMergePhase('idle')
-      setMergeProgress(0)
-      const message = err instanceof Error ? err.message : '上传失败'
-      setUploadError(message)
-    }
-  }
-
   // Clear selection
   const clearSelection = () => {
     setSelectedFile(null)
     setPreview(null)
     setUploadError(null)
     setUploadedDocId(null)
-    setMergeFiles([])
-    stopMergeTimer()
-    setMergePhase('idle')
-    setMergeProgress(0)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -518,22 +338,20 @@ export function Upload() {
         const docId = uploadResults[fileId]?.document_id
           || batchFiles.find(f => f.id === fileId)?.documentId
         if (docId) {
-          items.push({ type: 'single', document_id: docId, template_id: templateId })
+          items.push({ document_id: docId, template_id: templateId })
         }
       }
 
-      // merge 任务
+      // merge 任务：只提交一条，后端 _process_merge_item 负责同时处理 A 和 B
       for (const pair of batchMergePairs) {
         const docIdA = pair.fileA ? (uploadResults[pair.fileA.id]?.document_id || pair.fileA.documentId) : undefined
         const docIdB = pair.fileB ? (uploadResults[pair.fileB.id]?.document_id || pair.fileB.documentId) : undefined
         if (docIdA && docIdB) {
           items.push({
-            type: 'merge',
-            document_id_a: docIdA,
-            doc_type_a: pair.docTypeA,
-            document_id_b: docIdB,
-            doc_type_b: pair.docTypeB,
-            template_id: pair.templateId,
+            document_id: docIdA,
+            template_id: pair.templateIdA,
+            paired_document_id: docIdB,
+            paired_template_id: pair.templateIdB,
           })
         }
       }
@@ -585,9 +403,6 @@ export function Upload() {
 
   const isUploading = uploadMutation.isPending || processMutation.isPending ||
                       uploadMultipleMutation.isPending || batchPhase !== 'idle'
-  
-  // 检查合并模式是否可以提交
-  const canSubmitMerge = uploadMode === 'merge' && mergeFiles.length > 0 && mergeFiles.some(item => item.file !== null)
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fadeIn">
@@ -610,7 +425,7 @@ export function Upload() {
                 : 'text-text-secondary hover:text-text-primary'
             )}
           >
-            {uploadMode === 'merge' ? '合并上传' : '单文件上传'}
+            单文件上传
           </button>
           <button
             onClick={() => { setActiveTab('batch'); clearSelection() }}
@@ -640,26 +455,6 @@ export function Upload() {
                 </p>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* merge 模式：显示合并上传说明 */}
-      {activeTab === 'default' && uploadMode === 'merge' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Layers className="h-5 w-5 text-accent-400" />
-              综合报告
-            </CardTitle>
-            <CardDescription>
-              {tenantName && `${tenantName} - `}可上传 {mergeDocTypes.join(' 或 ')}（或两者）
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Badge variant="outline" className="text-accent-400 border-accent-400">
-              合并模式 - 可上传 1-2 份文档
-            </Badge>
           </CardContent>
         </Card>
       )}
@@ -771,136 +566,6 @@ export function Upload() {
                   <Camera className="h-4 w-4" />
                   打开相机
                 </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Upload Area - merge 模式：多文件合并上传 */}
-      {!isCameraOpen && activeTab === 'default' && uploadMode === 'merge' && mergeFiles.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Layers className="h-5 w-5 text-accent-400" />
-              上传文档
-            </CardTitle>
-            <CardDescription>
-              请分别上传 {mergeDocTypes.join(' 和 ')}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {mergeFiles.map((item, index) => (
-              <div key={item.id} className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-accent-400 border-accent-400">
-                    文档 {index + 1}
-                  </Badge>
-                  <span>{item.docType}</span>
-                </Label>
-                
-                {item.file ? (
-                  // 已选择文件
-                  <div className="flex items-center gap-4 p-4 rounded-lg bg-bg-secondary border border-border-default">
-                    <div className="w-16 h-16 rounded-lg bg-bg-hover flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {item.preview ? (
-                        <img src={item.preview} alt="预览" className="w-full h-full object-cover" />
-                      ) : (
-                        <FileText className="h-8 w-8 text-text-muted" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-text-primary truncate">{item.file.name}</p>
-                      <p className="text-sm text-text-muted">{formatFileSize(item.file.size)}</p>
-                    </div>
-                    {!isUploading && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeMergeFile(item.id)}
-                        className="text-text-muted hover:text-error-500"
-                      >
-                        <X className="h-5 w-5" />
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  // 未选择文件 - 上传区域
-                  <div
-                    className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all hover:border-primary-500/50 hover:bg-bg-hover"
-                    onClick={() => mergeFileInputRefs.current[item.id]?.click()}
-                  >
-                    <input
-                      ref={(el) => { mergeFileInputRefs.current[item.id] = el }}
-                      type="file"
-                      accept={fileAccept}
-                      capture={isMobile ? 'environment' : undefined}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) handleMergeFileSelect(item.id, file)
-                      }}
-                      className="hidden"
-                    />
-                    <Plus className="h-8 w-8 text-text-muted mx-auto mb-2" />
-                    <p className="text-sm text-text-muted">
-                      点击选择 {item.docType} 文档
-                    </p>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Error */}
-            {uploadError && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                <span>{uploadError}</span>
-              </div>
-            )}
-
-            {/* Upload Button */}
-            <div className="pt-4 flex gap-3">
-              <Button
-                className="flex-1"
-                onClick={handleMergeUpload}
-                disabled={isUploading || !canSubmitMerge || mergePhase !== 'idle'}
-              >
-                {mergePhase !== 'idle' ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    {mergePhase === 'uploading' ? '上传中...' : '识别处理中...'}
-                  </>
-                ) : (
-                  <>
-                    <UploadIcon className="h-4 w-4 mr-2" />
-                    上传并合并处理
-                  </>
-                )}
-              </Button>
-              {mergePhase === 'idle' && !isUploading && (
-                <Button variant="outline" onClick={clearSelection}>
-                  重新选择
-                </Button>
-              )}
-            </div>
-
-            {/* 合并进度条 */}
-            {mergePhase !== 'idle' && (
-              <div className="pt-3 space-y-2">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-text-secondary">
-                    {mergePhase === 'uploading'
-                      ? '正在上传文件...'
-                      : '正在识别提取，预计 1–2 分钟，请勿关闭页面...'}
-                  </span>
-                  <span className="text-text-muted tabular-nums">{mergeProgress}%</span>
-                </div>
-                <div className="w-full h-2 bg-bg-secondary rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary-500 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${mergeProgress}%` }}
-                  />
-                </div>
               </div>
             )}
           </CardContent>
@@ -1091,10 +756,9 @@ export function Upload() {
               )}
 
               {/* Merge 配对区域 */}
-              {mergeRules.length > 0 && batchFiles.length >= 2 && (
+              {batchFiles.length >= 2 && (
                 <BatchMergePairing
-                  mergeRules={mergeRules}
-                  mergeTemplates={mergeTemplates}
+                  allTemplates={templates}
                   unpairedFiles={unpairedBatchFiles.filter(f => !batchSingleAssignments[f.id])}
                   pairs={batchMergePairs}
                   onCreatePair={(pair) => setBatchMergePairs(prev => [...prev, pair])}
@@ -1197,18 +861,10 @@ export function Upload() {
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />
               {uploadMode === 'single' ? (
                 <span>选择文档类型后上传，系统将自动提取关键信息</span>
-              ) : uploadMode === 'merge' ? (
-                <span>请上传 {mergeDocTypes.join(' 和 ')}，系统将分别提取后合并结果</span>
               ) : (
                 <span>请先选择所属部门</span>
               )}
             </li>
-            {uploadMode === 'merge' && (
-              <li className="flex items-start gap-2">
-                <Layers className="h-4 w-4 mt-0.5 text-accent-400" />
-                <span>合并模式：分别上传 {mergeDocTypes.join(' 和 ')}，系统将提取关键参数并生成综合报告</span>
-              </li>
-            )}
           </ul>
         </CardContent>
       </Card>

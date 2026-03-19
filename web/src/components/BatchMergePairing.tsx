@@ -8,7 +8,7 @@ import {
   Link2,
   AlertCircle,
 } from 'lucide-react'
-import type { MergeRule, Template } from '@/store/useStore'
+import type { Template } from '@/store/useStore'
 
 interface UploadedFile {
   id: string
@@ -22,23 +22,20 @@ interface MergePair {
   id: string
   fileA: UploadedFile | null
   fileB: UploadedFile | null
-  docTypeA: string
-  docTypeB: string
-  templateId: string
+  templateIdA: string
+  templateIdB: string
 }
 
 interface BatchMergePairingProps {
-  mergeRules: MergeRule[]
-  mergeTemplates: Template[]
+  allTemplates: Template[]
   unpairedFiles: UploadedFile[]
+  pairs: MergePair[]
   onCreatePair: (pair: MergePair) => void
   onRemovePair: (pairId: string) => void
-  pairs: MergePair[]
 }
 
 export function BatchMergePairing({
-  mergeRules,
-  mergeTemplates,
+  allTemplates,
   unpairedFiles,
   onCreatePair,
   onRemovePair,
@@ -46,17 +43,9 @@ export function BatchMergePairing({
 }: BatchMergePairingProps) {
   const [selectedFileA, setSelectedFileA] = useState<string>('')
   const [selectedFileB, setSelectedFileB] = useState<string>('')
-  const [selectedDocTypeA, setSelectedDocTypeA] = useState<string>('')
-  const [selectedDocTypeB, setSelectedDocTypeB] = useState<string>('')
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
+  const [selectedTemplateIdA, setSelectedTemplateIdA] = useState<string>('')
+  const [selectedTemplateIdB, setSelectedTemplateIdB] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
-
-  // 从 mergeRules 获取可用的 doc_type 选项
-  const docTypeOptions = mergeRules.length > 0
-    ? [mergeRules[0].doc_type_a, mergeRules[0].doc_type_b]
-    : ['积分球', '光分布']
-
-  const defaultTemplateId = mergeTemplates[0]?.id || ''
 
   const handleCreatePair = () => {
     if (!selectedFileA || !selectedFileB) {
@@ -67,12 +56,8 @@ export function BatchMergePairing({
       setError('不能选择同一个文件')
       return
     }
-    if (!selectedDocTypeA || !selectedDocTypeB) {
-      setError('请为两个文件分别选择文档类型')
-      return
-    }
-    if (selectedDocTypeA === selectedDocTypeB) {
-      setError('两个文件的文档类型不能相同')
+    if (!selectedTemplateIdA || !selectedTemplateIdB) {
+      setError('请为两个文件分别选择模板')
       return
     }
 
@@ -83,27 +68,19 @@ export function BatchMergePairing({
       return
     }
 
-    const templateId = selectedTemplateId || defaultTemplateId
-    if (!templateId) {
-      setError('没有可用的合并模板')
-      return
-    }
-
     setError(null)
     onCreatePair({
       id: `pair-${Date.now()}`,
       fileA,
       fileB,
-      docTypeA: selectedDocTypeA,
-      docTypeB: selectedDocTypeB,
-      templateId,
+      templateIdA: selectedTemplateIdA,
+      templateIdB: selectedTemplateIdB,
     })
 
-    // 重置选择
     setSelectedFileA('')
     setSelectedFileB('')
-    setSelectedDocTypeA('')
-    setSelectedDocTypeB('')
+    setSelectedTemplateIdA('')
+    setSelectedTemplateIdB('')
   }
 
   if (unpairedFiles.length < 2 && pairs.length === 0) {
@@ -116,44 +93,48 @@ export function BatchMergePairing({
       {pairs.length > 0 && (
         <div className="space-y-2">
           <Label className="text-sm font-medium text-text-secondary">已配对</Label>
-          {pairs.map(pair => (
-            <div
-              key={pair.id}
-              className="flex items-center gap-3 p-3 rounded-lg bg-bg-secondary border border-border-default"
-            >
-              <Link2 className="h-4 w-4 text-accent-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0 text-sm">
-                <span className="text-text-primary truncate">
-                  {pair.fileA?.file.name}
-                </span>
-                <Badge variant="outline" className="mx-1 text-xs">
-                  {pair.docTypeA}
-                </Badge>
-                <span className="text-text-muted mx-1">+</span>
-                <span className="text-text-primary truncate">
-                  {pair.fileB?.file.name}
-                </span>
-                <Badge variant="outline" className="mx-1 text-xs">
-                  {pair.docTypeB}
-                </Badge>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-text-muted hover:text-error-500"
-                onClick={() => onRemovePair(pair.id)}
+          {pairs.map(pair => {
+            const tplA = allTemplates.find(t => t.id === pair.templateIdA)
+            const tplB = allTemplates.find(t => t.id === pair.templateIdB)
+            return (
+              <div
+                key={pair.id}
+                className="flex items-center gap-3 p-3 rounded-lg bg-bg-secondary border border-border-default"
               >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
+                <Link2 className="h-4 w-4 text-accent-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0 text-sm">
+                  <span className="text-text-primary truncate">
+                    {pair.fileA?.file.name}
+                  </span>
+                  <Badge variant="outline" className="mx-1 text-xs">
+                    {tplA?.name || pair.templateIdA}
+                  </Badge>
+                  <span className="text-text-muted mx-1">+</span>
+                  <span className="text-text-primary truncate">
+                    {pair.fileB?.file.name}
+                  </span>
+                  <Badge variant="outline" className="mx-1 text-xs">
+                    {tplB?.name || pair.templateIdB}
+                  </Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-text-muted hover:text-error-500"
+                  onClick={() => onRemovePair(pair.id)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )
+          })}
         </div>
       )}
 
       {/* 新建配对 */}
       {unpairedFiles.length >= 2 && (
         <div className="space-y-3 p-4 rounded-lg border border-dashed border-border-default">
-          <Label className="text-sm font-medium text-text-secondary">新建 Merge 配对</Label>
+          <Label className="text-sm font-medium text-text-secondary">新建配对</Label>
 
           <div className="grid grid-cols-2 gap-3">
             {/* 文件 A */}
@@ -172,13 +153,13 @@ export function BatchMergePairing({
                   ))}
               </select>
               <select
-                value={selectedDocTypeA}
-                onChange={e => setSelectedDocTypeA(e.target.value)}
+                value={selectedTemplateIdA}
+                onChange={e => setSelectedTemplateIdA(e.target.value)}
                 className="w-full rounded-md border border-border-default bg-bg-primary px-3 py-2 text-sm"
               >
-                <option value="">文档类型...</option>
-                {docTypeOptions.map(dt => (
-                  <option key={dt} value={dt}>{dt}</option>
+                <option value="">选择模板...</option>
+                {allTemplates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
             </div>
@@ -199,33 +180,17 @@ export function BatchMergePairing({
                   ))}
               </select>
               <select
-                value={selectedDocTypeB}
-                onChange={e => setSelectedDocTypeB(e.target.value)}
+                value={selectedTemplateIdB}
+                onChange={e => setSelectedTemplateIdB(e.target.value)}
                 className="w-full rounded-md border border-border-default bg-bg-primary px-3 py-2 text-sm"
               >
-                <option value="">文档类型...</option>
-                {docTypeOptions.map(dt => (
-                  <option key={dt} value={dt}>{dt}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* 模板选择（多个 merge 模板时显示） */}
-          {mergeTemplates.length > 1 && (
-            <div className="space-y-1">
-              <label className="text-xs text-text-muted">合并模板</label>
-              <select
-                value={selectedTemplateId || defaultTemplateId}
-                onChange={e => setSelectedTemplateId(e.target.value)}
-                className="w-full rounded-md border border-border-default bg-bg-primary px-3 py-2 text-sm"
-              >
-                {mergeTemplates.map(t => (
+                <option value="">选择模板...</option>
+                {allTemplates.map(t => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
             </div>
-          )}
+          </div>
 
           {error && (
             <div className="flex items-center gap-2 text-error-500 text-xs">

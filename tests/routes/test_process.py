@@ -13,7 +13,7 @@ def _patch_supabase():
 
 def _patch_supabase_in_helpers():
     """Patch supabase where helpers imports it (used by handler tests)."""
-    return patch("services.supabase_service.supabase_service")
+    return patch("api.routes.documents.helpers.supabase_service")
 
 
 def _patch_workflow():
@@ -146,7 +146,7 @@ class TestProcessingHandlers:
             "extraction_data": {"sample_name": "LED灯"},
         }
         with _patch_supabase_in_helpers() as mock_svc, \
-             patch("services.template_service.template_service") as mock_ts, \
+             patch("api.routes.documents.helpers.template_service") as mock_ts, \
              patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock):
             mock_svc.save_extraction_result = AsyncMock()
             mock_svc.generate_display_name.return_value = "报告_LED灯"

@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     VLM_MODEL_ID: str = "qwen3.5-plus"
     VLM_API_KEY: str = ""
     VLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    VLM_TEMPERATURE: float = 0.7
+    VLM_TEMPERATURE: float = 0.1
 
     @property
     def allowed_extensions_list(self) -> List[str]:

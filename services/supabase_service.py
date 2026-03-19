@@ -200,17 +200,28 @@ class SupabaseService:
         )
     
     def get_table_name(self, document_type: str) -> Optional[str]:
-        """
-        根据文档类型获取表名
-        
-        Args:
-            document_type: 文档类型（支持中文和英文）
-            
-        Returns:
-            表名，如果类型不存在则返回 None
-        """
+        """根据文档类型获取表名（支持中文和英文）"""
         return self.TABLE_MAP.get(document_type)
-    
+
+    def resolve_table_name(
+        self,
+        template_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        统一解析业务表名。
+
+        查找顺序：
+        1. 若提供 template_id，查询 document_templates.target_table（优先）
+        2. fallback 到 TABLE_MAP 静态映射（兼容旧数据）
+        """
+        if template_id:
+            row = self.client.table("document_templates").select("target_table").eq("id", template_id).execute()
+            target = (row.data[0].get("target_table") or "") if row.data else ""
+            if target:
+                return target
+        return self.TABLE_MAP.get(document_type) if document_type else None
+
     # ============ 文档操作 ============
     
     async def create_document(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -448,15 +459,19 @@ class SupabaseService:
     # ============ 通用保存方法 ============
     
     async def save_extraction_result(
-        self, 
-        document_id: str, 
-        document_type: str, 
-        extraction_data: Dict[str, Any]
+        self,
+        document_id: str,
+        document_type: str,
+        extraction_data: Dict[str, Any],
+        template_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """根据文档类型保存提取结果（使用 TABLE_MAP 解耦）"""
-        table_name = self.TABLE_MAP.get(document_type)
+        """根据文档类型保存提取结果（优先 template_id → target_table，fallback TABLE_MAP）。"""
+        table_name = self.resolve_table_name(template_id=template_id, document_type=document_type)
         if not table_name:
-            logger.warning(f"未知文档类型: {document_type}")
+            logger.error(
+                f"未知文档类型: {document_type}，无法保存提取结果。"
+                f"document_id={document_id}, fields={list(extraction_data.keys())}"
+            )
             return None
         return await self._save_to_table(table_name, document_id, extraction_data)
     

@@ -117,9 +117,12 @@ async def get_extraction_result(
         
         document_type = document.get("document_type")
         doc_status = document.get("status")
-        
-        # 表映射关系（使用 supabase_service 的方法）
-        table_name = supabase_service.get_table_name(document_type) if document_type else None
+
+        # 优先用 template_id 查 target_table，fallback 到 TABLE_MAP
+        table_name = supabase_service.resolve_table_name(
+            template_id=document.get("template_id"),
+            document_type=document_type,
+        )
         
         # 如果文档正在处理中或尚未有类型
         if not document_type:
@@ -172,9 +175,8 @@ async def get_extraction_result(
         else:
             result = None
         
-        # 按 document_type 查询
+        # 按 document_type 查询（复用上面已解析的 table_name）
         if result is None:
-            table_name = supabase_service.get_table_name(document_type)
             if table_name:
                 result_query = supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
                 result = result_query.data[0] if result_query.data else None

@@ -62,7 +62,7 @@ class TemplateService(SupabaseClientMixin):
         """
         try:
             query = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, process_mode, required_doc_count, sort_order"
+                "id, tenant_id, name, code, description, required_doc_count, sort_order"
             ).eq("tenant_id", tenant_id)
             
             if active_only:
@@ -167,7 +167,7 @@ class TemplateService(SupabaseClientMixin):
     
     async def get_template_with_details(self, template_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取模板完整信息（含字段、示例、合并规则）
+        获取模板完整信息（含字段、示例）
         
         Args:
             template_id: 模板ID
@@ -179,9 +179,8 @@ class TemplateService(SupabaseClientMixin):
             Exception: 数据库查询异常（向上抛出，让调用者处理）
         """
         try:
-            # 注意：template_merge_rules 有多个外键关系，需要明确指定使用 template_id 外键
             result = self._get_client().table("document_templates").select(
-                "*, template_fields(*), template_examples(*), template_merge_rules!template_merge_rules_template_id_fkey(*)"
+                "*, template_fields(*), template_examples(*)"
             ).eq("id", template_id).execute()
             
             if not result.data:
@@ -260,28 +259,6 @@ class TemplateService(SupabaseClientMixin):
         except Exception as e:
             logger.error(f"获取模板示例失败: {e}")
             return []
-    
-    # ============ 合并规则操作 ============
-    
-    async def get_merge_rule(self, template_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取模板的合并规则
-        
-        Args:
-            template_id: 模板ID
-            
-        Returns:
-            合并规则
-        """
-        try:
-            result = self._get_client().table("template_merge_rules").select(
-                "*, sub_template_a:sub_template_a_id(*), sub_template_b:sub_template_b_id(*)"
-            ).eq("template_id", template_id).execute()
-            
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取合并规则失败: {e}")
-            return None
     
     # ============ 动态 Prompt 构建 ============
     
@@ -568,7 +545,7 @@ class TemplateService(SupabaseClientMixin):
         """
         try:
             query = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, process_mode, "
+                "id, tenant_id, name, code, description, "
                 "required_doc_count, sort_order, is_active, auto_approve, "
                 "extraction_mode, feishu_bitable_token, feishu_table_id"
             )
@@ -598,7 +575,7 @@ class TemplateService(SupabaseClientMixin):
             # 先更新，再显式回读，避免 PostgREST 返回最小化响应导致前端拿到空对象
             self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
             fresh = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, process_mode, required_doc_count, "
+                "id, tenant_id, name, code, description, required_doc_count, "
                 "sort_order, is_active, auto_approve, extraction_mode, "
                 "feishu_bitable_token, feishu_table_id"
             ).eq("id", template_id).execute()
@@ -608,72 +585,6 @@ class TemplateService(SupabaseClientMixin):
             raise
     
     # ============ Merge 模式支持 ============
-    
-    async def get_merge_template_info(self, template_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取 merge 模式模板的完整信息（包含子模板）
-        
-        Args:
-            template_id: 合并模板ID
-            
-        Returns:
-            合并模板信息，包含子模板 A 和 B 的完整配置
-        """
-        try:
-            logger.debug(f"开始获取合并模板信息: {template_id}")
-            
-            # 获取主模板
-            template = await self.get_template_with_details(template_id)
-            if not template:
-                logger.warning(f"主模板不存在: {template_id}")
-                return None
-            
-            logger.debug(f"主模板获取成功: {template.get('name')}, process_mode={template.get('process_mode')}")
-            
-            if template.get("process_mode") != "merge":
-                return template
-            
-            # 获取合并规则（优先走独立查询，避免结构不一致）
-            merge_rule = await self.get_merge_rule(template_id)
-            if not merge_rule:
-                merge_rules = template.get("template_merge_rules")
-                merge_rules_type = type(merge_rules).__name__
-                if isinstance(merge_rules, dict):
-                    merge_rules = list(merge_rules.values())
-                logger.debug(
-                    f"合并规则类型: {merge_rules_type}, "
-                    f"数量: {len(merge_rules) if isinstance(merge_rules, list) else 0}"
-                )
-
-                if not merge_rules:
-                    logger.warning(f"模板 {template_id} 没有合并规则")
-                    return template
-
-                if not isinstance(merge_rules, list):
-                    logger.warning(
-                        f"模板 {template_id} 合并规则结构异常: {merge_rules_type}"
-                    )
-                    return template
-
-                merge_rule = merge_rules[0]
-            sub_a_id = merge_rule.get("sub_template_a_id")
-            sub_b_id = merge_rule.get("sub_template_b_id")
-            logger.debug(f"子模板ID: A={sub_a_id}, B={sub_b_id}")
-            
-            # 获取子模板详情
-            if sub_a_id:
-                template["sub_template_a"] = await self.get_template_with_details(sub_a_id)
-                logger.debug(f"子模板A获取: {'成功' if template.get('sub_template_a') else '失败'}")
-            
-            if sub_b_id:
-                template["sub_template_b"] = await self.get_template_with_details(sub_b_id)
-                logger.debug(f"子模板B获取: {'成功' if template.get('sub_template_b') else '失败'}")
-            
-            return template
-        except Exception as e:
-            logger.error(f"获取合并模板信息失败: {type(e).__name__}: {e}")
-            logger.exception("堆栈信息:")
-            return None
     
     def merge_extraction_results(
         self, 

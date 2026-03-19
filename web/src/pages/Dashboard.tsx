@@ -245,11 +245,6 @@ export function Dashboard() {
                 <p className="text-sm text-text-secondary mb-4">
                   {template.description || getTemplateDescription(template.code)}
                 </p>
-                {template.process_mode === 'merge' && (
-                  <Badge variant="outline" className="mb-3 text-xs">
-                    需上传 {template.required_doc_count} 份文档
-                  </Badge>
-                )}
                 <Link to="/upload">
                   <Button size="sm" variant="secondary">开始识别</Button>
                 </Link>

@@ -26,7 +26,6 @@ from .helpers import push_to_feishu, handle_processing_success, handle_processin
 class MergeFileInfo(BaseModel):
     """Merge 模式文件信息"""
     file_path: str
-    doc_type: str  # 如 "积分球" 或 "光分布"
 
 
 class ProcessWithTemplateRequest(BaseModel):
@@ -37,7 +36,8 @@ class ProcessWithTemplateRequest(BaseModel):
 
 class ProcessMergeRequest(BaseModel):
     """合并模式处理请求"""
-    template_id: str
+    sub_template_a_id: str
+    sub_template_b_id: str
     files: List[MergeFileInfo]
 
 router = APIRouter()
@@ -386,8 +386,9 @@ async def process_merge_documents(
 
     前端拿到 job_id 后轮询 GET /documents/jobs/{job_id} 获取进度。
 
-    - **template_id**: 合并模板ID（process_mode='merge'）
-    - **files**: 文件列表，每项包含 file_path 和 doc_type
+    - **sub_template_a_id**: 文件A的子模板ID
+    - **sub_template_b_id**: 文件B的子模板ID
+    - **files**: 文件列表，files[0] 对应 sub_template_a，files[1] 对应 sub_template_b
     """
     if not user.tenant_id:
         raise HTTPException(status_code=400, detail="请先选择所属部门")
@@ -395,21 +396,16 @@ async def process_merge_documents(
     if not request.files:
         raise HTTPException(status_code=400, detail="请提供至少一个文件")
 
-    # 前置校验（快速失败，不进入后台任务）
-    template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
-    if not template:
-        try:
-            template = await template_service.get_template_with_details(request.template_id)
-        except Exception:
-            template = None
-    if not template:
-        raise HTTPException(status_code=404, detail="模板不存在")
+    # 前置校验
+    template_a = await template_service.get_template(request.sub_template_a_id)
+    if not template_a:
+        raise HTTPException(status_code=404, detail="子模板 A 不存在")
+    template_b = await template_service.get_template(request.sub_template_b_id)
+    if not template_b:
+        raise HTTPException(status_code=404, detail="子模板 B 不存在")
 
-    if template.get("process_mode") != "merge":
-        raise HTTPException(status_code=400, detail="此模板不支持合并模式")
-
-    if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
-        raise HTTPException(status_code=403, detail="无权使用此模板")
+    if template_a.get("tenant_id") != user.tenant_id and not user.is_super_admin():
+        raise HTTPException(status_code=403, detail="无权使用子模板 A")
 
     # 验证文件存在并收集原始文档 ID
     files = []
@@ -417,7 +413,7 @@ async def process_merge_documents(
     for file_info in request.files:
         if not os.path.exists(file_info.file_path):
             raise HTTPException(status_code=404, detail=f"文件不存在: {file_info.file_path}")
-        files.append({"file_path": file_info.file_path, "doc_type": file_info.doc_type})
+        files.append({"file_path": file_info.file_path})
         source_doc = await supabase_service.get_document_by_file_path(file_info.file_path)
         if source_doc:
             source_doc_ids.append(source_doc["id"])
@@ -425,7 +421,11 @@ async def process_merge_documents(
     # 创建 Job 并在后台运行
     job_id = create_job()
     asyncio.create_task(
-        _run_merge_job(job_id, files, source_doc_ids, template, user)
+        _run_merge_job(
+            job_id, files, source_doc_ids,
+            request.sub_template_a_id, request.sub_template_b_id,
+            template_a, user,
+        )
     )
     logger.info(f"合并任务已提交: job_id={job_id}, 文件数={len(files)}")
 
@@ -459,22 +459,24 @@ async def _run_merge_job(
     job_id: str,
     files: list,
     source_doc_ids: list,
-    template: dict,
+    sub_template_a_id: str,
+    sub_template_b_id: str,
+    template_a: dict,
     user: CurrentUser,
 ):
-    """后台合并任务：OCR → LLM → 保存 → 推送飞书"""
+    """后台合并任务：OCR → LLM → 推送或存储待审核"""
     created_doc_ids: list = []
     try:
-        template_uuid = template.get("id")
-        template_name = template.get("name", "照明综合报告")
-        auto_approve = template.get("auto_approve", False)
+        template_name = template_a.get("name", "综合报告")
+        auto_approve = template_a.get("auto_approve", False)
 
-        # 阶段1：OCR + LLM 提取（耗时主体）
+        # 阶段1：OCR + LLM 提取
         update_job(job_id, "ocr")
         result = await ocr_workflow.process_merge(
             document_id=str(uuid.uuid4()),
             files=files,
-            template_id=template_uuid,
+            sub_template_a_id=sub_template_a_id,
+            sub_template_b_id=sub_template_b_id,
             tenant_id=user.tenant_id,
         )
 
@@ -492,69 +494,113 @@ async def _run_merge_job(
         sample_count = len(extraction_results)
         logger.info(f"[job={job_id}] 提取完成，共 {sample_count} 个样品")
 
-        # 阶段2：保存结果
         update_job(job_id, "saving")
 
-        for sample_result in extraction_results:
-            sample_index = sample_result.get("sample_index", 1)
-            sample_data = sample_result.get("data", {})
-            if not sample_data:
-                continue
+        sub_results = result.get("sub_results", {})
+        results_a = sub_results.get("results_a", [])
+        result_b = sub_results.get("result_b")
 
-            doc_id = str(uuid.uuid4())
-            created_doc_ids.append(doc_id)
+        # 获取子模板详情（用于 code 字段）
+        sub_template_a = await template_service.get_template(sub_template_a_id)
+        sub_template_b = await template_service.get_template(sub_template_b_id)
 
-            base_display_name = supabase_service.generate_display_name(
-                document_type=template_name,
-                extraction_data=sample_data,
-            )
-            display_name = (
-                f"{base_display_name}_样品{sample_index}" if sample_count > 1 else base_display_name
-            )
-            doc_status = "completed" if auto_approve else "pending_review"
+        doc_b_id = source_doc_ids[1] if len(source_doc_ids) > 1 else None
+        doc_a_id_original = source_doc_ids[0] if source_doc_ids else None
 
-            doc_data = {
-                "id": doc_id,
-                "user_id": user.user_id,
-                "tenant_id": user.tenant_id,
-                "template_id": template_uuid,
-                "document_type": template_name,
-                "status": doc_status,
-                "display_name": display_name,
-                "original_file_name": display_name,
-                "file_name": f"merged_{doc_id}",
-                "file_path": "",
-                "source_document_ids": source_doc_ids,
-                "ocr_confidence": result.get("ocr_confidence"),
-                "processed_at": datetime.now().isoformat(),
-            }
-            await supabase_service.create_document(doc_data)
-            await supabase_service.save_extraction_result(
-                document_id=doc_id,
-                document_type=template_name,
-                extraction_data=sample_data,
-            )
-            logger.info(f"[job={job_id}] 样品{sample_index} 已保存: {doc_id}")
-
-            if auto_approve:
+        if auto_approve:
+            for sample_result in extraction_results:
+                sample_index = sample_result.get("sample_index", 1)
+                sample_data = sample_result.get("data", {})
+                if not sample_data:
+                    continue
+                display_name = supabase_service.generate_display_name(
+                    document_type=template_name, extraction_data=sample_data,
+                )
+                if sample_count > 1:
+                    display_name = f"{display_name}_样品{sample_index}"
                 try:
                     await push_to_feishu(
-                        template=template,
+                        template=template_a,
                         extraction_data=sample_data,
                         display_name=display_name,
-                        document_id=doc_id,
+                        document_id=f"merge-{job_id}-{sample_index}",
                         log_prefix=f"[job={job_id}] 样品{sample_index} ",
                     )
                 except Exception as feishu_error:
                     logger.warning(f"[job={job_id}] 飞书推送失败（不影响结果）: {feishu_error}")
 
-        # 完成
-        update_job(job_id, "completed", document_ids=created_doc_ids)
-        logger.info(f"[job={job_id}] 任务完成，document_ids={created_doc_ids}")
+            update_job(job_id, "completed", document_ids=source_doc_ids)
+            logger.info(f"[job={job_id}] auto_approve 合并推送完成")
+            return
+
+        # 非 auto_approve：各文档只存自己的原始字段，记录配对关系
+        first_doc_a_id = None
+        sub_a_code = sub_template_a.get("code", "") if sub_template_a else ""
+        for i, result_a_data in enumerate(results_a):
+            sample_index = i + 1
+            if not result_a_data:
+                continue
+
+            if len(results_a) <= 1 and doc_a_id_original:
+                doc_a_id = doc_a_id_original
+            else:
+                doc_a_id = str(uuid.uuid4())
+                created_doc_ids.append(doc_a_id)
+                display_name = supabase_service.generate_display_name(
+                    document_type=template_name, extraction_data=result_a_data,
+                )
+                await supabase_service.create_document({
+                    "id": doc_a_id,
+                    "user_id": user.user_id,
+                    "tenant_id": user.tenant_id,
+                    "template_id": sub_template_a_id,
+                    "document_type": sub_a_code,
+                    "status": "pending_review",
+                    "display_name": f"{display_name}_样品{sample_index}",
+                    "original_file_name": f"{display_name}_样品{sample_index}",
+                    "file_name": f"sample_{doc_a_id}",
+                    "file_path": "",
+                    "source_document_ids": [doc_a_id_original] if doc_a_id_original else [],
+                    "processed_at": datetime.now().isoformat(),
+                })
+
+            if first_doc_a_id is None:
+                first_doc_a_id = doc_a_id
+
+            await supabase_service.save_extraction_result(
+                document_id=doc_a_id,
+                document_type=sub_a_code,
+                extraction_data=result_a_data,
+                template_id=sub_template_a_id,
+            )
+            await supabase_service.update_document(doc_a_id, {
+                "status": "pending_review",
+                "paired_document_id": doc_b_id,
+                "merge_template_id": sub_template_a_id,
+            })
+            logger.info(f"[job={job_id}] 样品{sample_index} 存入文档A: {doc_a_id}")
+
+        if result_b and doc_b_id:
+            sub_b_code = sub_template_b.get("code", "") if sub_template_b else ""
+            await supabase_service.save_extraction_result(
+                document_id=doc_b_id,
+                document_type=sub_b_code,
+                extraction_data=result_b,
+                template_id=sub_template_b_id,
+            )
+            await supabase_service.update_document(doc_b_id, {
+                "status": "pending_review",
+                "paired_document_id": first_doc_a_id,
+                "merge_template_id": sub_template_a_id,
+            })
+            logger.info(f"[job={job_id}] 文档B 存储完成: {doc_b_id}")
+
+        all_doc_ids = ([doc_a_id_original] if doc_a_id_original else []) + created_doc_ids + ([doc_b_id] if doc_b_id else [])
+        update_job(job_id, "completed", document_ids=all_doc_ids)
+        logger.info(f"[job={job_id}] 任务完成，待审核文档: {all_doc_ids}")
 
     except Exception as e:
         logger.error(f"[job={job_id}] 后台任务异常: {e}")
-        # 清理已创建的文档记录
         for doc_id in created_doc_ids:
             try:
                 await supabase_service.update_document_status(doc_id, "failed", str(e))

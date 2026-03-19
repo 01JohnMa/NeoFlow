@@ -386,127 +386,93 @@ class OCRWorkflow:
     async def process_merge(
         self,
         document_id: str,
-        files: list,  # [{file_path, doc_type}, ...]
-        template_id: str,
+        files: list,  # files[0] → sub_template_a, files[1] → sub_template_b
+        sub_template_a_id: str,
+        sub_template_b_id: str,
         tenant_id: str,
     ) -> Dict[str, Any]:
-        """Merge 模式处理：多份文档分别提取后合并
+        """Merge 模式处理：两份文档分别用各自子模板提取后合并
 
-        用于照明事业部等场景：上传积分球+光分布两份文档，
-        分别用各自的子模板提取，然后合并结果。
-
-        支持多样品场景：积分球 PDF 可能有多页（每页一个样品），
-        每个样品的积分球数据会与同一份光分布数据合并，生成多条结果。
+        按文件顺序分配子模板：files[0] 对应 sub_template_a，files[1] 对应 sub_template_b。
+        支持多样品场景：files[0] 可能有多页（每页一个样品）。
 
         Args:
             document_id: 文档ID
-            files: 文件列表，每项包含 file_path 和 doc_type
-            template_id: 合并模板ID（process_mode='merge'）
+            files: 文件列表，每项包含 file_path
+            sub_template_a_id: 文件A的子模板ID
+            sub_template_b_id: 文件B的子模板ID
             tenant_id: 租户ID
         """
         processing_start = datetime.now()
 
         try:
-            template = await template_service.get_merge_template_info(template_id)
-            if not template:
+            sub_template_a = await template_service.get_template_with_details(sub_template_a_id)
+            if not sub_template_a:
                 raise WorkflowError(
                     WorkflowErrorType.TEMPLATE_NOT_FOUND,
-                    f"模板不存在: {template_id}",
+                    f"子模板 A 不存在: {sub_template_a_id}",
                 )
 
-            if template.get("process_mode") != "merge":
+            sub_template_b = await template_service.get_template_with_details(sub_template_b_id)
+            if not sub_template_b:
                 raise WorkflowError(
-                    WorkflowErrorType.VALIDATION_ERROR,
-                    f"模板 {template['name']} 不是合并模式",
+                    WorkflowErrorType.TEMPLATE_NOT_FOUND,
+                    f"子模板 B 不存在: {sub_template_b_id}",
                 )
 
-            logger.info(f"使用合并模板 [{template['name']}] 处理 {len(files)} 份文档")
+            logger.info(
+                f"合并处理: 文件数={len(files)}, "
+                f"模板A=[{sub_template_a['name']}], 模板B=[{sub_template_b['name']}]"
+            )
 
-            merge_rule = await template_service.get_merge_rule(template_id)
-            if not merge_rule:
-                raise WorkflowError(
-                    WorkflowErrorType.VALIDATION_ERROR,
-                    "合并规则配置缺失",
-                )
-
-            sub_template_a = template.get("sub_template_a")
-            sub_template_b = template.get("sub_template_b")
-
-            # doc_type_a（如积分球）支持多样品（逐页提取）
-            # doc_type_b（如光分布）保持单一结果
             results_a = []
             result_b = None
 
-            for file_info in files:
-                file_path = file_info.get("file_path")
-                doc_type = file_info.get("doc_type", "")
-
-                if not file_path:
-                    continue
-
-                if doc_type == merge_rule.get("doc_type_a") and sub_template_a:
-                    # doc_type_a（积分球）：逐页处理，支持多样品
-                    # 当 sub_template_a 与主模板自引用时（积分球升格为主模板场景），
-                    # 仅保留 source_doc_type == doc_type_a 的字段构建提取 prompt，
-                    # 避免将光分布字段混入积分球提取指令
-                    doc_type_a_label = merge_rule.get("doc_type_a", "")
-                    if sub_template_a.get("id") == template.get("id") and doc_type_a_label:
-                        extraction_template_a = {
-                            **sub_template_a,
-                            "template_fields": [
-                                f for f in sub_template_a.get("template_fields", [])
-                                if f.get("source_doc_type") == doc_type_a_label
-                            ],
-                        }
-                        logger.info(
-                            f"sub_template_a 自引用，按 source_doc_type='{doc_type_a_label}' "
-                            f"过滤后字段数: {len(extraction_template_a['template_fields'])}"
-                        )
-                    else:
-                        extraction_template_a = sub_template_a
-
-                    mode_a = extraction_template_a.get("extraction_mode", settings.DOC_PROCESS_MODE)
+            # files[0] → sub_template_a（支持多样品逐页提取）
+            if len(files) > 0:
+                file_path_a = files[0].get("file_path", "")
+                if file_path_a:
+                    mode_a = sub_template_a.get("extraction_mode", settings.DOC_PROCESS_MODE)
                     if mode_a == "vlm":
                         from services.vlm_service import vlm_service
-
-                        logger.info(f"VLM逐页处理文档A: {file_path} (类型: {doc_type})")
-                        vlm_pages = await vlm_service.extract_per_page(file_path, extraction_template_a)
+                        logger.info(f"VLM逐页处理文档A: {file_path_a}")
+                        vlm_pages = await vlm_service.extract_per_page(file_path_a, sub_template_a)
                         for vp in vlm_pages:
                             results_a.append(vp["data"])
                             logger.info(f"文档A 第{vp['page']}页VLM提取完成: {len(vp['data'])}个字段")
                     else:
-                        logger.info(f"逐页OCR处理文档A: {file_path} (类型: {doc_type})")
-                        page_results = await ocr_service.process_document_per_page(file_path)
+                        logger.info(f"逐页OCR处理文档A: {file_path_a}")
+                        page_results = await ocr_service.process_document_per_page(file_path_a)
                         for page in page_results:
                             extracted = parse_llm_json(
                                 await self._llm_invoke_with_retry(
-                                    template_service.build_extraction_prompt(extraction_template_a, page["text"])
+                                    template_service.build_extraction_prompt(sub_template_a, page["text"])
                                 )
                             )
                             results_a.append(extracted)
                             logger.info(f"文档A 第{page['page']}页提取完成: {len(extracted)}个字段")
+                    logger.info(f"文档A 共提取 {len(results_a)} 个样品")
 
-                    logger.info(f"文档A ({doc_type}) 共提取 {len(results_a)} 个样品")
-
-                elif doc_type == merge_rule.get("doc_type_b") and sub_template_b:
-                    # doc_type_b（光分布）：整体处理
+            # files[1] → sub_template_b（整体处理）
+            if len(files) > 1:
+                file_path_b = files[1].get("file_path", "")
+                if file_path_b:
                     mode_b = sub_template_b.get("extraction_mode", settings.DOC_PROCESS_MODE)
                     if mode_b == "vlm":
                         from services.vlm_service import vlm_service
-
-                        logger.info(f"VLM处理文档B: {file_path} (类型: {doc_type})")
-                        result_b = await vlm_service.extract_from_image(file_path, sub_template_b)
+                        logger.info(f"VLM处理文档B: {file_path_b}")
+                        result_b = await vlm_service.extract_from_image(file_path_b, sub_template_b)
                     else:
-                        logger.info(f"OCR处理文档B: {file_path} (类型: {doc_type})")
-                        ocr_result = await ocr_service.process_document(file_path)
+                        logger.info(f"OCR处理文档B: {file_path_b}")
+                        ocr_result = await ocr_service.process_document(file_path_b)
                         result_b = parse_llm_json(
                             await self._llm_invoke_with_retry(
                                 template_service.build_extraction_prompt(sub_template_b, ocr_result["text"])
                             )
                         )
-                    logger.info(f"文档B ({doc_type}) 提取完成: {len(result_b)}个字段")
+                    logger.info(f"文档B 提取完成: {len(result_b)}个字段")
 
-            # 合并结果：每个 doc_type_a 样品 + 同一份 doc_type_b 数据
+            # 合并结果
             if results_a:
                 extraction_results = [
                     {
@@ -516,7 +482,6 @@ class OCRWorkflow:
                     for i, result_a in enumerate(results_a)
                 ]
             else:
-                # 无 doc_type_a 时，仅返回 doc_type_b
                 extraction_results = [{"sample_index": 1, "data": result_b or {}}]
 
             processing_time = self._elapsed(processing_start)
@@ -524,9 +489,9 @@ class OCRWorkflow:
 
             return build_merge_success(
                 document_id=document_id,
-                template_id=template_id,
-                template_name=template.get("name", ""),
-                document_type=template.get("code", ""),
+                template_id=sub_template_a_id,
+                template_name=sub_template_a.get("name", ""),
+                document_type=sub_template_a.get("code", ""),
                 extraction_results=extraction_results,
                 results_a=results_a,
                 result_b=result_b,
@@ -537,63 +502,6 @@ class OCRWorkflow:
             logger.error(f"合并处理失败: {e}")
             err_msg = WorkflowError.extract_message(e)
             return build_error(document_id, err_msg, self._elapsed(processing_start))
-
-    async def process_auto(
-        self,
-        document_id: str,
-        files: list,  # [{file_path, doc_type?}, ...]
-        template_id: str,
-        tenant_id: str,
-    ) -> Dict[str, Any]:
-        """统一处理入口，自动根据模板的 process_mode 选择处理方式
-
-        这是推荐的处理入口，会根据模板配置自动选择：
-        - single 模式：调用 process_with_template()
-        - merge 模式：调用 process_merge()
-
-        Args:
-            document_id: 文档ID
-            files: 文件列表，每项包含 file_path 和可选的 doc_type
-                   单文档模式: [{"file_path": "xxx"}]
-                   合并模式: [{"file_path": "xxx", "doc_type": "积分球"}, ...]
-            template_id: 模板ID
-            tenant_id: 租户ID
-        """
-        try:
-            template = await template_service.get_template(template_id)
-            if not template:
-                return build_error(document_id, f"模板不存在: {template_id}")
-
-            process_mode = template.get("process_mode", "single")
-            logger.info(f"统一处理入口: 模板={template.get('name')}, 模式={process_mode}, 文件数={len(files)}")
-
-            if process_mode == "merge":
-                return await self.process_merge(
-                    document_id=document_id,
-                    files=files,
-                    template_id=template_id,
-                    tenant_id=tenant_id,
-                )
-
-            # 单文档模式
-            if not files:
-                return build_error(document_id, "文件列表为空")
-
-            file_path = files[0].get("file_path")
-            if not file_path:
-                return build_error(document_id, "文件路径为空")
-
-            return await self.process_with_template(
-                document_id=document_id,
-                file_path=file_path,
-                template_id=template_id,
-                tenant_id=tenant_id,
-            )
-
-        except Exception as e:
-            logger.error(f"统一处理入口失败: {e}")
-            err_msg = WorkflowError.extract_message(e)
-            return build_error(document_id, err_msg)
 
     async def extract_with_prompt(
         self,

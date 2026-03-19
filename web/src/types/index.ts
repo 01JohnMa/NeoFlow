@@ -28,7 +28,6 @@ export interface AdminTemplate {
   name: string
   code: string
   description: string | null
-  process_mode: 'single' | 'merge'
   required_doc_count: number
   sort_order: number
   is_active: boolean
@@ -162,13 +161,10 @@ export interface ExtractionResultResponse {
 // ============ Batch types ============
 
 export interface BatchProcessItem {
-  type: 'single' | 'merge'
-  document_id?: string       // single 时必填
-  document_id_a?: string     // merge 时必填
-  doc_type_a?: string        // merge 时必填
-  document_id_b?: string     // merge 时必填
-  doc_type_b?: string        // merge 时必填
+  document_id: string
   template_id: string
+  paired_document_id?: string
+  paired_template_id?: string
 }
 
 export interface BatchJobItemStatus {

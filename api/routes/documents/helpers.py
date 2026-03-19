@@ -10,6 +10,8 @@ from fastapi import UploadFile
 from loguru import logger
 
 from config.settings import settings
+from services.supabase_service import supabase_service
+from services.template_service import template_service
 
 
 async def save_upload_file(file: UploadFile, destination: str) -> int:
@@ -107,7 +109,6 @@ async def push_to_feishu(
         log_prefix: 日志前缀（如 "[job=xxx]"）
     """
     from services.feishu_service import feishu_service
-    from services.template_service import template_service
 
     bitable_token = template.get("feishu_bitable_token")
     table_id = template.get("feishu_table_id")
@@ -152,13 +153,11 @@ async def handle_processing_success(
     source_file_path: Optional[str] = None,
 ) -> None:
     """处理成功时的统一逻辑"""
-    from services.supabase_service import supabase_service
-    from services.template_service import template_service
-
     await supabase_service.save_extraction_result(
         document_id=document_id,
         document_type=result.get("document_type") or result.get("template_name", "未知"),
-        extraction_data=result["extraction_data"]
+        extraction_data=result["extraction_data"],
+        template_id=template_id,
     )
     logger.info(f"提取结果已保存: {document_id}")
 
@@ -216,8 +215,6 @@ async def handle_processing_success(
 
 async def handle_processing_failure(document_id: str, error_message: str) -> None:
     """处理失败时的统一逻辑"""
-    from services.supabase_service import supabase_service
-
     await supabase_service.update_document_status(
         document_id, "failed", error_message=error_message
     )
@@ -226,8 +223,6 @@ async def handle_processing_failure(document_id: str, error_message: str) -> Non
 
 async def handle_processing_exception(document_id: str, exception: Exception) -> None:
     """处理异常时的统一逻辑"""
-    from services.supabase_service import supabase_service
-
     logger.error(f"后台任务异常: {exception}")
     try:
         await supabase_service.update_document_status(document_id, "failed", str(exception))
