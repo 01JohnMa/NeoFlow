@@ -19,6 +19,7 @@ class UpdateTemplateConfigRequest(BaseModel):
     feishu_bitable_token: Optional[str] = None
     feishu_table_id: Optional[str] = None
     auto_approve: Optional[bool] = None
+    push_attachment: Optional[bool] = None
     extraction_mode: Optional[str] = None  # 'ocr_llm' 或 'vlm'
 
 
