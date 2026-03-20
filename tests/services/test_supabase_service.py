@@ -5,6 +5,8 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from datetime import datetime
 
+from loguru import logger
+
 from services.supabase_service import SupabaseService
 
 
@@ -17,6 +19,23 @@ def svc():
 
 
 # ============ _validate_and_fix_date ============
+
+class TestLoggingSafety:
+    """异常日志稳定性"""
+
+    @pytest.mark.asyncio
+    async def test_create_document_logs_exception_with_braces_without_secondary_error(self, svc):
+        """创建文档失败时，异常消息含大括号也不会触发日志二次报错"""
+        svc._client.table.side_effect = Exception(
+            "{'code': 'PGRST204', 'message': \"Column push_attachment does not exist\"}"
+        )
+
+        with patch.object(logger, "error") as mock_logger_error:
+            with pytest.raises(Exception, match="PGRST204"):
+                await svc.create_document({"id": "doc-001", "push_attachment": True})
+
+        mock_logger_error.assert_called_once()
+
 
 class TestValidateAndFixDate:
     """日期格式校验与修复"""

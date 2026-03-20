@@ -111,21 +111,19 @@ ON CONFLICT (template_id, field_key) DO NOTHING;
 -- ############################################################
 
 -- 4.1 积分球测试模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order, target_table) VALUES
-    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 2, TRUE, 1, 'integrating_sphere_reports')
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 2, TRUE, 1)
 ON CONFLICT (id) DO UPDATE SET
     required_doc_count = EXCLUDED.required_doc_count,
     is_active          = EXCLUDED.is_active,
-    sort_order         = EXCLUDED.sort_order,
-    target_table       = EXCLUDED.target_table;
+    sort_order         = EXCLUDED.sort_order;
 
 -- 4.2 光分布测试模板（子模板：负责光分布字段提取）
-INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order, target_table) VALUES
-    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 1, TRUE, 2, 'light_distribution_reports')
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 1, TRUE, 2)
 ON CONFLICT (id) DO UPDATE SET
-    is_active    = EXCLUDED.is_active,
-    sort_order   = EXCLUDED.sort_order,
-    target_table = EXCLUDED.target_table;
+    is_active  = EXCLUDED.is_active,
+    sort_order = EXCLUDED.sort_order;
 
 
 -- ############################################################

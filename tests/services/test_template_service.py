@@ -2,7 +2,9 @@
 """TemplateService 单元测试 — 使用 mock Supabase client，不依赖真实数据库"""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from loguru import logger
 
 from tests.conftest import (
     TEMPLATE_ID, FIELD_ID, EXAMPLE_ID, TENANT_ID,
@@ -32,6 +34,22 @@ def _chain(client, data=None, count=None):
     chain = client.table.return_value
     chain.execute.return_value = result
     return chain, result
+
+
+class TestLogSafety:
+
+    @pytest.mark.asyncio
+    async def test_update_template_config_logs_exception_with_braces_without_secondary_error(self, svc, mock_supabase_client):
+        """模板配置更新失败时，异常消息含大括号也不会触发日志二次报错"""
+        mock_supabase_client.table.side_effect = Exception(
+            "{'code': 'PGRST204', 'message': \"Column push_attachment does not exist\"}"
+        )
+
+        with patch.object(logger, "error") as mock_logger_error:
+            with pytest.raises(Exception, match="PGRST204"):
+                await svc.update_template_config(TEMPLATE_ID, {"push_attachment": True})
+
+        mock_logger_error.assert_called_once()
 
 
 # ============ get_tenant_templates ============
@@ -373,6 +391,41 @@ class TestReorderFields:
         """空排序列表不报错"""
         result = await svc.reorder_fields(TEMPLATE_ID, [])
         assert result is True
+
+
+# ============ merge_extraction_results ============
+
+# ============ 管理端模板配置 ==========
+
+class TestAdminTemplateConfig:
+
+    @pytest.mark.asyncio
+    async def test_get_admin_templates_selects_push_attachment(self, svc, mock_supabase_client):
+        """管理端模板列表查询应包含 push_attachment 字段"""
+        chain, _ = _chain(mock_supabase_client, data=[{**MOCK_TEMPLATE, "push_attachment": True}])
+        result = await svc.get_admin_templates(TENANT_ID)
+        assert result[0]["push_attachment"] is True
+        select_arg = chain.select.call_args.args[0]
+        assert "push_attachment" in select_arg
+
+    @pytest.mark.asyncio
+    async def test_update_template_config_updates_push_attachment(self, svc, mock_supabase_client):
+        """更新模板配置时应写入并回读 push_attachment"""
+        chain = mock_supabase_client.table.return_value
+        chain.update.return_value = chain
+        chain.eq.return_value = chain
+        chain.select.return_value = chain
+        chain.execute.side_effect = [
+            MagicMock(data=[]),
+            MagicMock(data=[{**MOCK_TEMPLATE, "push_attachment": False}]),
+        ]
+
+        result = await svc.update_template_config(TEMPLATE_ID, {"push_attachment": False})
+
+        assert result["push_attachment"] is False
+        chain.update.assert_called_once_with({"push_attachment": False})
+        select_calls = [call.args[0] for call in chain.select.call_args_list]
+        assert any("push_attachment" in call for call in select_calls)
 
 
 # ============ merge_extraction_results ============

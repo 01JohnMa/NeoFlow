@@ -108,16 +108,7 @@ DROP POLICY IF EXISTS "管理员可以查看所有光分布报告" ON light_dist
 CREATE POLICY "管理员可以查看所有光分布报告" ON light_distribution_reports
     FOR ALL USING ((auth.jwt() -> 'app_metadata' ->> 'is_admin')::boolean = true);
 
--- 6. 更新 target_table 指向新表
-UPDATE document_templates
-    SET target_table = 'integrating_sphere_reports'
-    WHERE code IN ('integrating_sphere', '积分球测试');
-
-UPDATE document_templates
-    SET target_table = 'light_distribution_reports'
-    WHERE code IN ('light_distribution', '光分布测试');
-
--- 7. 通知 PostgREST 刷新 schema 缓存
+-- 6. 通知 PostgREST 刷新 schema 缓存
 SELECT pg_notify('pgrst', 'reload schema');
 
 SELECT '008: integrating_sphere_reports + light_distribution_reports 创建完成' AS message;

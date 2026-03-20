@@ -154,11 +154,11 @@ async def validate_document(
                         )
                         logger.info(f"配对文档均已审核，合并推送完成: {document_id} + {paired_id}")
                     else:
-                        logger.warning(f"合并模板不存在: {merge_template_id}，跳过推送")
+                        logger.bind(merge_template_id=merge_template_id).warning("合并模板不存在，跳过推送")
                 except Exception as feishu_error:
-                    logger.warning(f"合并推送失败（不影响审核结果）: {feishu_error}")
+                    logger.bind(document_id=document_id, paired_id=paired_id).opt(exception=feishu_error).warning("合并推送失败，不影响审核结果")
             else:
-                logger.info(f"配对文档 {paired_id} 尚未审核（状态: {paired_status}），等待对方完成后推送")
+                logger.bind(paired_id=paired_id, paired_status=paired_status).info("配对文档尚未审核，等待对方完成后推送")
         else:
             # 普通单文档，走原有推送逻辑
             if template:
@@ -171,9 +171,9 @@ async def validate_document(
                         source_file_path=document.get("file_path", ""),
                     )
                 except Exception as feishu_error:
-                    logger.warning(f"飞书推送失败（不影响审核结果）: {feishu_error}")
+                    logger.bind(document_id=document_id).opt(exception=feishu_error).warning("飞书推送失败，不影响审核结果")
             else:
-                logger.info(f"模板未配置飞书，跳过推送: {document_id}")
+                logger.bind(document_id=document_id).info("模板未配置飞书，跳过推送")
         
         return {
             "success": True,
@@ -184,7 +184,7 @@ async def validate_document(
     except (DocumentNotFoundError, DocumentTypeError, ProcessingError):
         raise
     except Exception as e:
-        logger.error(f"审核失败: {e}")
+        logger.bind(document_id=document_id).opt(exception=e).error("审核失败")
         raise ProcessingError(f"审核失败: {str(e)}")
 
 
@@ -235,7 +235,7 @@ async def rename_document(
     except (ValidationError, DocumentNotFoundError):
         raise
     except Exception as e:
-        logger.error(f"重命名失败: {e}")
+        logger.bind(document_id=document_id).opt(exception=e).error("重命名失败")
         raise ProcessingError(f"重命名失败: {str(e)}")
 
 
@@ -280,5 +280,5 @@ async def reject_document(
     except DocumentNotFoundError:
         raise
     except Exception as e:
-        logger.error(f"打回失败: {e}")
+        logger.bind(document_id=document_id).opt(exception=e).error("打回失败")
         raise ProcessingError(f"打回失败: {str(e)}")

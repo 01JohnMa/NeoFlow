@@ -547,7 +547,7 @@ class TemplateService(SupabaseClientMixin):
             query = self._get_client().table("document_templates").select(
                 "id, tenant_id, name, code, description, "
                 "required_doc_count, sort_order, is_active, auto_approve, "
-                "extraction_mode, feishu_bitable_token, feishu_table_id"
+                "push_attachment, extraction_mode, feishu_bitable_token, feishu_table_id"
             )
             if tenant_id:
                 query = query.eq("tenant_id", tenant_id)
@@ -581,7 +581,7 @@ class TemplateService(SupabaseClientMixin):
             ).eq("id", template_id).execute()
             return fresh.data[0] if fresh.data else {}
         except Exception as e:
-            logger.error(f"更新模板配置失败: {e}")
+            logger.bind(template_id=template_id, payload_keys=sorted(payload.keys())).opt(exception=e).error("更新模板配置失败")
             raise
     
     # ============ Merge 模式支持 ============

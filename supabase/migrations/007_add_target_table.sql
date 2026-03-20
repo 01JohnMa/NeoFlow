@@ -22,14 +22,14 @@ UPDATE document_templates SET target_table = 'sampling_forms'
 UPDATE document_templates SET target_table = 'packagings'
     WHERE code = 'packaging';
 
+UPDATE document_templates SET target_table = 'integrating_sphere_reports'
+    WHERE code IN ('integrating_sphere', '积分球测试');
+
+UPDATE document_templates SET target_table = 'light_distribution_reports'
+    WHERE code IN ('light_distribution', '光分布测试');
+
 UPDATE document_templates SET target_table = 'lighting_reports'
-    WHERE code IN (
-        'integrating_sphere',
-        'light_distribution',
-        'lighting_combined',
-        '积分球测试',
-        '光分布测试'
-    );
+    WHERE code IN ('lighting_combined');
 
 -- 2. documents 配对字段
 --    paired_document_id: merge 模式中 A 指向 B，B 指向 A（多样品时 B 指向第一个 A）

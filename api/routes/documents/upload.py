@@ -83,7 +83,7 @@ async def upload_document(
             logger.info(f"文档已保存到数据库: {document_id}, 用户: {user.user_id}")
         except Exception as e:
             # 数据库保存失败时，清理已上传的文件并抛出错误
-            logger.error(f"数据库保存失败: {e}")
+            logger.bind(document_id=document_id, user_id=user.user_id).opt(exception=e).error("数据库保存失败")
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"已清理上传文件: {file_path}")
@@ -102,5 +102,5 @@ async def upload_document(
     except (FileTypeError, FileSizeError):
         raise
     except Exception as e:
-        logger.error(f"上传失败: {e}")
+        logger.opt(exception=e).error("上传失败")
         raise ProcessingError(f"上传失败: {str(e)}")

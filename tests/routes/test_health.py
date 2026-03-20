@@ -1,8 +1,11 @@
 # tests/routes/test_health.py
 """健康检查路由测试 — GET /api/health、/api/health/ocr、/api/health/config"""
 
+import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+from fastapi import HTTPException
 
 
 class TestHealthCheck:
@@ -110,6 +113,50 @@ class TestOcrHealth:
             resp = client.get("/api/health/ocr")
         data = resp.json()
         assert data["status"] == "not_initialized"
+
+
+class TestHttpExceptionHandler:
+    """HTTP 异常处理器"""
+
+    @pytest.mark.asyncio
+    async def test_handles_dict_detail_with_braces(self):
+        """detail 为 dict 时也应正常返回 4xx 而非日志二次报错"""
+        from api.main import http_exception_handler
+
+        response = await http_exception_handler(
+            MagicMock(),
+            HTTPException(
+                status_code=400,
+                detail={"code": "PGRST204", "message": "Column 'push_attachment' does not exist"},
+            ),
+        )
+
+        assert response.status_code == 400
+        assert json.loads(response.body) == {
+            "error": {"code": "PGRST204", "message": "Column 'push_attachment' does not exist"},
+            "code": "HTTP_ERROR",
+            "status_code": 400,
+        }
+
+
+class TestGeneralExceptionHandler:
+    """全局异常处理器"""
+
+    @pytest.mark.asyncio
+    async def test_handles_exception_message_with_braces(self):
+        """异常消息包含大括号时也应正常返回 500"""
+        from api.main import general_exception_handler
+
+        response = await general_exception_handler(
+            MagicMock(),
+            Exception("{'code': 'PGRST204', 'message': \"Column 'push_attachment' does not exist\"}"),
+        )
+
+        assert response.status_code == 500
+        assert json.loads(response.body) == {
+            "error": "内部服务器错误",
+            "code": "INTERNAL_ERROR",
+        }
 
 
 class TestConfigCheck:

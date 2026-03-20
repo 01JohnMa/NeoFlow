@@ -230,7 +230,7 @@ class SupabaseService:
             result = self.client.table("documents").insert(data).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"创建文档失败: {type(e).__name__}: {e}, data_keys={list(data.keys())}")
+            logger.bind(data_keys=sorted(data.keys())).opt(exception=e).error("创建文档失败")
             raise
     
     async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
