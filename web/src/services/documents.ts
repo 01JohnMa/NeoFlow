@@ -15,6 +15,7 @@ export const documentsService = {
     file: File,
     options?: {
       templateId?: string
+      customPushName?: string
       onProgress?: (progress: number) => void
     }
   ): Promise<UploadResponse> {
@@ -22,6 +23,9 @@ export const documentsService = {
     formData.append('file', file)
     if (options?.templateId) {
       formData.append('template_id', options.templateId)
+    }
+    if (options?.customPushName?.trim()) {
+      formData.append('custom_push_name', options.customPushName.trim())
     }
 
     const response = await api.post<UploadResponse>('/documents/upload', formData, {
@@ -155,31 +159,6 @@ export const documentsService = {
     const response = await api.put(`/documents/${documentId}/rename`, {
       display_name: displayName,
     })
-    return response.data
-  },
-
-  // Submit merge job (异步提交，立即返回 job_id)
-  async submitMergeJob(
-    templateId: string,
-    files: Array<{ file_path: string; doc_type: string }>
-  ): Promise<{ job_id: string; status: string }> {
-    const response = await api.post<{ job_id: string; status: string }>(
-      '/documents/process-merge',
-      { template_id: templateId, files }
-    )
-    return response.data
-  },
-
-  // Get merge job status (轮询用)
-  async getJobStatus(jobId: string): Promise<{
-    job_id: string
-    status: 'pending' | 'processing' | 'completed' | 'failed'
-    stage: string
-    progress: number
-    document_ids: string[]
-    error: string | null
-  }> {
-    const response = await api.get(`/documents/jobs/${jobId}`)
     return response.data
   },
 

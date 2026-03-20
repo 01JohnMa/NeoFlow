@@ -81,7 +81,8 @@ export interface Document {
   user_id: string | null
   file_name: string
   original_file_name: string | null
-  display_name: string | null  // 规范化显示名称
+  display_name: string | null
+  custom_push_name: string | null
   file_path: string
   file_size: number | null
   file_type: string | null

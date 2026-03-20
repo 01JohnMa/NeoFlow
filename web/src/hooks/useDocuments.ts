@@ -60,13 +60,14 @@ export function useUploadDocument() {
   const { setUploadProgress, removeUploadProgress } = useUploadStore()
 
   return useMutation({
-    mutationFn: async ({ file, templateId }: { file: File; templateId?: string }) => {
+    mutationFn: async ({ file, templateId, customPushName }: { file: File; templateId?: string; customPushName?: string }) => {
       const tempId = `upload-${Date.now()}`
       setUploadProgress(tempId, 0)
 
       try {
         const result = await documentsService.upload(file, {
           templateId,
+          customPushName,
           onProgress: (progress) => setUploadProgress(tempId, progress)
         })
         removeUploadProgress(tempId)

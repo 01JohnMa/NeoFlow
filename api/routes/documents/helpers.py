@@ -97,16 +97,18 @@ async def push_to_feishu(
     source_file_path: Optional[str | list] = None,
     log_prefix: str = "",
     extra_template: Optional[dict] = None,
+    custom_push_name: Optional[str] = None,
 ) -> None:
     """
     统一飞书推送逻辑：构建 field_mapping → 生成文件名 → 上传附件 → push_by_template
 
-    文件名规则：{模板名}_YYYYMMDD_HHmmss
-    - single：{template.name}_20260319_031245
-    - merge：{template.name}+{extra_template.name}_20260319_031245
+    文件名优先级：
+    1. custom_push_name（用户上传时指定）
+    2. 默认：{模板名}_YYYYMMDD_HHmmss，merge 时为 {模板A名}+{模板B名}_YYYYMMDD_HHmmss
 
     Args:
         source_file_path: 单个文件路径（str）或多个文件路径列表（list），merge 时传 [fp_a, fp_b]
+        custom_push_name: 用户自定义的飞书推送文件名，优先于默认生成规则
     """
     from services.feishu_service import feishu_service
 
@@ -126,12 +128,15 @@ async def push_to_feishu(
 
     push_data = {**extraction_data}
 
-    # 统一文件名：{模板名}_YYYYMMDD_HHmmss，merge 时拼接两个模板名
-    template_name = str(template.get("name") or "文档")
-    if extra_template:
-        template_name = f"{template_name}+{extra_template.get('name', '')}"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_name_for_push = f"{template_name}_{timestamp}"
+    # 文件名优先使用用户自定义，否则按模板名+时间戳规则生成
+    if custom_push_name and custom_push_name.strip():
+        file_name_for_push = custom_push_name.strip()
+    else:
+        template_name = str(template.get("name") or "文档")
+        if extra_template:
+            template_name = f"{template_name}+{extra_template.get('name', '')}"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name_for_push = f"{template_name}_{timestamp}"
 
     if "file_name" not in field_mapping:
         field_mapping["file_name"] = "文件名"
@@ -167,6 +172,7 @@ async def handle_processing_success(
     generate_display_name: bool = True,
     auto_approve: bool = False,
     source_file_path: Optional[str] = None,
+    custom_push_name: Optional[str] = None,
 ) -> None:
     """处理成功时的统一逻辑"""
     await supabase_service.save_extraction_result(
@@ -222,6 +228,7 @@ async def handle_processing_success(
                     display_name=display_name,
                     document_id=document_id,
                     source_file_path=source_file_path,
+                    custom_push_name=custom_push_name,
                 )
             else:
                 logger.info(f"auto_approve 单模板模板未配置飞书，跳过推送: {document_id}")

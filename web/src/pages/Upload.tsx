@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useUploadDocument, useProcessDocument, useUploadMultiple } from '@/hooks/useDocuments'
+import { useUploadDocument, useProcessDocument } from '@/hooks/useDocuments'
 import documentsService from '@/services/documents'
 import { useCamera } from '@/hooks/useCamera'
 import { useProfile } from '@/hooks/useProfile'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn, formatFileSize } from '@/lib/utils'
 import {
@@ -51,7 +52,6 @@ export function Upload() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadMutation = useUploadDocument()
   const processMutation = useProcessDocument()
-  const uploadMultipleMutation = useUploadMultiple()
   const { tenantName, tenantCode, templates, isLoading: profileLoading } = useProfile()
 
   // ============ 数据驱动：根据模板数据自动判断上传模式 ============
@@ -80,12 +80,16 @@ export function Upload() {
   const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)
   // single 模式：用户选中的模板 ID（单模板时自动选中）
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  // single 模式：自定义飞书推送文件名（可选）
+  const [singleCustomPushName, setSingleCustomPushName] = useState('')
 
   // ============ 批量模式状态 ============
   const [activeTab, setActiveTab] = useState<ActiveTab>('default')
   const [batchFiles, setBatchFiles] = useState<UploadedFile[]>([])
   const [batchSingleAssignments, setBatchSingleAssignments] = useState<Record<string, string>>({})
   const [batchMergePairs, setBatchMergePairs] = useState<MergePair[]>([])
+  // 批量模式：自定义推送文件名，按 fileId 或 pairId 维护
+  const [batchCustomPushNames, setBatchCustomPushNames] = useState<Record<string, string>>({})
   const [batchPhase, setBatchPhase] = useState<'idle' | 'uploading' | 'processing'>('idle')
   const [batchProgress, setBatchProgress] = useState(0)
   const batchFileInputRef = useRef<HTMLInputElement>(null)
@@ -195,7 +199,8 @@ export function Upload() {
       setUploadError(null)
       const result = await uploadMutation.mutateAsync({
         file: selectedFile,
-        templateId: selectedTemplateId || undefined
+        templateId: selectedTemplateId || undefined,
+        customPushName: singleCustomPushName.trim() || undefined,
       })
       setUploadedDocId(result.document_id)
 
@@ -214,6 +219,7 @@ export function Upload() {
     setPreview(null)
     setUploadError(null)
     setUploadedDocId(null)
+    setSingleCustomPushName('')
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -261,11 +267,20 @@ export function Upload() {
       delete next[fileId]
       return next
     })
+    setBatchCustomPushNames(prev => {
+      const next = { ...prev }
+      delete next[fileId]
+      // 同时清理因该文件被移除而间接失效的配对自定义名称
+      batchMergePairs
+        .filter(p => p.fileA?.id === fileId || p.fileB?.id === fileId)
+        .forEach(p => delete next[p.id])
+      return next
+    })
     // 移除包含该文件的配对
     setBatchMergePairs(prev =>
       prev.filter(p => p.fileA?.id !== fileId && p.fileB?.id !== fileId)
     )
-  }, [])
+  }, [batchMergePairs])
 
   // 计算未配对的文件（排除已分配为 merge 的文件）
   const pairedFileIds = useMemo(() => {
@@ -309,9 +324,18 @@ export function Upload() {
       const allFiles = batchFiles.filter(f => !f.documentId)
       const uploadResults: Record<string, { document_id: string; file_path: string }> = {}
 
+      // 构建 fileId → customPushName 映射：merge pair 的 A 文件取对应 pair 的自定义名
+      const fileCustomPushNameMap: Record<string, string> = { ...batchCustomPushNames }
+      for (const pair of batchMergePairs) {
+        if (pair.fileA && batchCustomPushNames[pair.id]) {
+          fileCustomPushNameMap[pair.fileA.id] = batchCustomPushNames[pair.id]
+        }
+      }
+
       for (let i = 0; i < allFiles.length; i++) {
         const f = allFiles[i]
         const result = await documentsService.upload(f.file, {
+          customPushName: fileCustomPushNameMap[f.id] || undefined,
           onProgress: (p) => {
             const totalProgress = Math.round(((i + p / 100) / allFiles.length) * 20)
             setBatchProgress(totalProgress)
@@ -395,14 +419,14 @@ export function Upload() {
     setBatchFiles([])
     setBatchSingleAssignments({})
     setBatchMergePairs([])
+    setBatchCustomPushNames({})
     setBatchPhase('idle')
     setBatchProgress(0)
     setUploadError(null)
     stopBatchTimer()
   }
 
-  const isUploading = uploadMutation.isPending || processMutation.isPending ||
-                      uploadMultipleMutation.isPending || batchPhase !== 'idle'
+  const isUploading = uploadMutation.isPending || processMutation.isPending || batchPhase !== 'idle'
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fadeIn">
@@ -616,6 +640,21 @@ export function Upload() {
               )}
             </div>
 
+            {/* 自定义推送文件名 */}
+            <div className="mt-4 space-y-1.5">
+              <Label className="text-sm text-text-secondary">
+                飞书推送文件名（可选）
+              </Label>
+              <Input
+                value={singleCustomPushName}
+                onChange={e => setSingleCustomPushName(e.target.value)}
+                placeholder="留空则自动生成：模板名_日期时间"
+                maxLength={100}
+                disabled={isUploading}
+                className="text-sm"
+              />
+            </div>
+
             {/* Error */}
             {uploadError && (
               <div className="mt-4 flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
@@ -697,58 +736,74 @@ export function Upload() {
                     <div
                       key={f.id}
                       className={cn(
-                        'flex items-center gap-3 p-3 rounded-lg border',
+                        'p-3 rounded-lg border space-y-2',
                         pairedFileIds.has(f.id)
                           ? 'bg-accent-400/5 border-accent-400/30'
                           : 'bg-bg-secondary border-border-default'
                       )}
                     >
-                      <div className="w-10 h-10 rounded bg-bg-hover flex items-center justify-center flex-shrink-0">
-                        {f.preview ? (
-                          <img src={f.preview} alt="" className="w-full h-full object-cover rounded" />
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded bg-bg-hover flex items-center justify-center flex-shrink-0">
+                          {f.preview ? (
+                            <img src={f.preview} alt="" className="w-full h-full object-cover rounded" />
+                          ) : (
+                            <FileText className="h-5 w-5 text-text-muted" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-text-primary truncate">{f.file.name}</p>
+                          <p className="text-xs text-text-muted">{formatFileSize(f.file.size)}</p>
+                        </div>
+                        {pairedFileIds.has(f.id) ? (
+                          <Badge variant="outline" className="text-accent-400 border-accent-400 text-xs flex-shrink-0">
+                            已配对
+                          </Badge>
                         ) : (
-                          <FileText className="h-5 w-5 text-text-muted" />
+                          <select
+                            value={batchSingleAssignments[f.id] || ''}
+                            onChange={e => {
+                              const val = e.target.value
+                              setBatchSingleAssignments(prev => {
+                                if (!val) {
+                                  const next = { ...prev }
+                                  delete next[f.id]
+                                  return next
+                                }
+                                return { ...prev, [f.id]: val }
+                              })
+                            }}
+                            className="w-36 rounded-md border border-border-default bg-bg-primary px-2 py-1 text-xs flex-shrink-0"
+                          >
+                            <option value="">选择模板...</option>
+                            {singleTemplates.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        )}
+                        {batchPhase === 'idle' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-text-muted hover:text-error-500 flex-shrink-0"
+                            onClick={() => removeBatchFile(f.id)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-text-primary truncate">{f.file.name}</p>
-                        <p className="text-xs text-text-muted">{formatFileSize(f.file.size)}</p>
-                      </div>
-                      {pairedFileIds.has(f.id) ? (
-                        <Badge variant="outline" className="text-accent-400 border-accent-400 text-xs flex-shrink-0">
-                          已配对
-                        </Badge>
-                      ) : (
-                        <select
-                          value={batchSingleAssignments[f.id] || ''}
-                          onChange={e => {
-                            const val = e.target.value
-                            setBatchSingleAssignments(prev => {
-                              if (!val) {
-                                const next = { ...prev }
-                                delete next[f.id]
-                                return next
-                              }
-                              return { ...prev, [f.id]: val }
-                            })
-                          }}
-                          className="w-36 rounded-md border border-border-default bg-bg-primary px-2 py-1 text-xs flex-shrink-0"
-                        >
-                          <option value="">选择模板...</option>
-                          {singleTemplates.map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </select>
-                      )}
-                      {batchPhase === 'idle' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-text-muted hover:text-error-500 flex-shrink-0"
-                          onClick={() => removeBatchFile(f.id)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                      {/* single 任务的自定义推送文件名（已配对文件无需填写，在配对项处填写） */}
+                      {!pairedFileIds.has(f.id) && batchSingleAssignments[f.id] && (
+                        <Input
+                          value={batchCustomPushNames[f.id] || ''}
+                          onChange={e => setBatchCustomPushNames(prev => ({
+                            ...prev,
+                            [f.id]: e.target.value,
+                          }))}
+                          placeholder="飞书推送文件名（可选）"
+                          maxLength={100}
+                          disabled={batchPhase !== 'idle'}
+                          className="text-xs h-7"
+                        />
                       )}
                     </div>
                   ))}
@@ -762,8 +817,40 @@ export function Upload() {
                   unpairedFiles={unpairedBatchFiles.filter(f => !batchSingleAssignments[f.id])}
                   pairs={batchMergePairs}
                   onCreatePair={(pair) => setBatchMergePairs(prev => [...prev, pair])}
-                  onRemovePair={(pairId) => setBatchMergePairs(prev => prev.filter(p => p.id !== pairId))}
+                  onRemovePair={(pairId) => {
+                    setBatchMergePairs(prev => prev.filter(p => p.id !== pairId))
+                    setBatchCustomPushNames(prev => {
+                      const next = { ...prev }
+                      delete next[pairId]
+                      return next
+                    })
+                  }}
                 />
+              )}
+
+              {/* Merge 配对任务的自定义推送文件名 */}
+              {batchMergePairs.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-text-secondary">配对任务推送文件名（可选）</Label>
+                  {batchMergePairs.map(pair => (
+                    <div key={pair.id} className="flex items-center gap-2">
+                      <span className="text-xs text-text-muted flex-shrink-0 w-28 truncate">
+                        {pair.fileA?.file.name?.split('.')[0] ?? '文件A'}+{pair.fileB?.file.name?.split('.')[0] ?? '文件B'}
+                      </span>
+                      <Input
+                        value={batchCustomPushNames[pair.id] || ''}
+                        onChange={e => setBatchCustomPushNames(prev => ({
+                          ...prev,
+                          [pair.id]: e.target.value,
+                        }))}
+                        placeholder="飞书推送文件名（可选）"
+                        maxLength={100}
+                        disabled={batchPhase !== 'idle'}
+                        className="text-xs h-7 flex-1"
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
 
               {/* 任务统计 */}
