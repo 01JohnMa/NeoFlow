@@ -581,7 +581,7 @@ class TemplateService(SupabaseClientMixin):
             ).eq("id", template_id).execute()
             return fresh.data[0] if fresh.data else {}
         except Exception as e:
-            logger.bind(template_id=template_id, payload_keys=sorted(payload.keys())).opt(exception=e).error("更新模板配置失败")
+            logger.error("更新模板配置失败: {}", e)
             raise
     
     # ============ Merge 模式支持 ============

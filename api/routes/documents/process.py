@@ -17,7 +17,17 @@ from agents.workflow import ocr_workflow
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.jobs import create_job, update_job, get_job
-from .helpers import push_to_feishu, handle_processing_success, handle_processing_failure, handle_processing_exception
+from .helpers import (
+    push_to_feishu,
+    handle_processing_success,
+    handle_processing_failure,
+    handle_processing_exception,
+)
+
+# 向后兼容旧测试/旧调用入口
+_handle_processing_success = handle_processing_success
+_handle_processing_failure = handle_processing_failure
+_handle_processing_exception = handle_processing_exception
 
 
 # ============ 请求模型 ============
@@ -104,7 +114,7 @@ async def process_document(
                     if template:
                         auto_approve = bool(template.get("auto_approve", False))
 
-                    await handle_processing_success(
+                    await _handle_processing_success(
                         document_id=document_id,
                         result=result,
                         template_id=template_id or (template.get("id") if template else None),
@@ -193,13 +203,13 @@ async def process_document_task(
                 custom_push_name=custom_push_name,
             )
         else:
-            await handle_processing_failure(
+            await _handle_processing_failure(
                 document_id,
                 result.get("error", "处理失败")
             )
 
     except Exception as e:
-        await handle_processing_exception(document_id, e)
+        await _handle_processing_exception(document_id, e)
 
 
 @router.post("/process-text")
@@ -351,13 +361,13 @@ async def process_document_with_template_task(
                 custom_push_name=custom_push_name,
             )
         else:
-            await handle_processing_failure(
+            await _handle_processing_failure(
                 document_id,
                 result.get("error", "处理失败")
             )
             
     except Exception as e:
-        await handle_processing_exception(document_id, e)
+        await _handle_processing_exception(document_id, e)
 
 
 @router.get("/jobs/{job_id}")
