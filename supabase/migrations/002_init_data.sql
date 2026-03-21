@@ -25,18 +25,18 @@ ON CONFLICT (code) DO NOTHING;
 -- ############################################################
 
 -- 2.1 检测报告模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', '检测报告', 'inspection_report', '产品质量检测报告', 'single', 1, TRUE, 1)
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', '检测报告', 'inspection_report', '产品质量检测报告', 1, TRUE, 1)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 2.2 快递单模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, push_attachment, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', '快递单', 'express', '外部机构寄达文件快递单', 'single', 1, FALSE, TRUE, 2)
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, push_attachment, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', '快递单', 'express', '外部机构寄达文件快递单', 1, FALSE, TRUE, 2)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 2.3 抽样单模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', '抽样单', 'sampling', '市场监督抽样单', 'single', 1, TRUE, 3)
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', '抽样单', 'sampling', '市场监督抽样单', 1, TRUE, 3)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 
@@ -110,19 +110,17 @@ ON CONFLICT (template_id, field_key) DO NOTHING;
 -- PART 4: 照明事业部模板
 -- ############################################################
 
--- 4.1 积分球测试模板（合并主模板：负责逐页提取积分球多样品 + 合并光分布数据 + 推送飞书）
--- 使用 ON CONFLICT (id) DO UPDATE 确保已存在记录也能被正确更新（process_mode/is_active 等关键字段）
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 'merge', 2, TRUE, 1)
+-- 4.1 积分球测试模板
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 2, TRUE, 1)
 ON CONFLICT (id) DO UPDATE SET
-    process_mode       = EXCLUDED.process_mode,
     required_doc_count = EXCLUDED.required_doc_count,
     is_active          = EXCLUDED.is_active,
     sort_order         = EXCLUDED.sort_order;
 
--- 4.2 光分布测试模板（子模板：负责光分布字段提取，结果合并到积分球主模板记录中）
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 'single', 1, TRUE, 2)
+-- 4.2 光分布测试模板（子模板：负责光分布字段提取）
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 1, TRUE, 2)
 ON CONFLICT (id) DO UPDATE SET
     is_active  = EXCLUDED.is_active,
     sort_order = EXCLUDED.sort_order;
@@ -132,13 +130,8 @@ ON CONFLICT (id) DO UPDATE SET
 -- PART 5: 照明事业部模板字段
 -- ############################################################
 
--- 5.1 积分球测试字段（22个：3个光分布扩展 + 14个积分球 + 5个光分布，均由此主模板负责飞书推送）
+-- 5.1 积分球测试字段（14个：纯积分球字段）
 INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order, source_doc_type) VALUES
-    -- 光分布扩展（3个，sort_order=0）
-    ('b0000000-0000-0000-0000-000000000010', 'c0_180', 'C0/180', 'C0/180', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000010', 'c90_270', 'C90/270', 'C90/270', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000010', 'avg_beam_angle', '平均光束角', '平均光束角', 'text', FALSE, 0, NULL),
-    -- 来自积分球（14个）
     ('b0000000-0000-0000-0000-000000000010', 'sample_model', '样品型号', '样品型号', 'text', FALSE, 1, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'chromaticity_x', '色品坐标X', '色品坐标X', 'text', FALSE, 2, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'chromaticity_y', '色品坐标Y', '色品坐标Y', 'text', FALSE, 3, '积分球'),
@@ -152,21 +145,14 @@ INSERT INTO template_fields (template_id, field_key, field_label, feishu_column,
     ('b0000000-0000-0000-0000-000000000010', 'luminous_flux_sphere', '光通量(积分球)', '光通量(积分球)', 'text', FALSE, 11, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'luminous_efficacy_sphere', '光效(积分球)', '光效(积分球)', 'text', FALSE, 12, '积分球'),
     ('b0000000-0000-0000-0000-000000000010', 'rf', 'Rf', 'Rf', 'text', FALSE, 13, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'rg', 'Rg', 'Rg', 'text', FALSE, 14, '积分球'),
-    -- 来自光分布（5个，此处仅用于 Feishu 推送，提取由光分布子模板负责）
-    ('b0000000-0000-0000-0000-000000000010', 'lamp_specification', '灯具规格', '灯具规格', 'text', FALSE, 15, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'power', '功率', '功率', 'text', FALSE, 16, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'luminous_flux', '光通量(光分布)', '光通量(光分布)', 'text', FALSE, 17, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'luminous_efficacy', '光效(光分布)', '光效(光分布)', 'text', FALSE, 18, '光分布'),
-    ('b0000000-0000-0000-0000-000000000010', 'peak_intensity', '峰值光强', '峰值光强', 'text', FALSE, 19, '光分布')
+    ('b0000000-0000-0000-0000-000000000010', 'rg', 'Rg', 'Rg', 'text', FALSE, 14, '积分球')
 ON CONFLICT (template_id, field_key) DO NOTHING;
 
 -- 积分球测试：提取提示
 UPDATE template_fields
 SET extraction_hint = '仅数值，不带单位'
 WHERE template_id = 'b0000000-0000-0000-0000-000000000010'
-  AND field_key IN ('cct', 'luminous_efficacy_sphere', 'luminous_flux_sphere', 'power_sphere', 'sdcm',
-                    'c0_180', 'c90_270', 'avg_beam_angle');
+  AND field_key IN ('cct', 'luminous_efficacy_sphere', 'luminous_flux_sphere', 'power_sphere', 'sdcm');
 
 UPDATE template_fields
 SET extraction_hint = '将duv字段提取结果科学记数法转换为小数'
@@ -194,17 +180,8 @@ WHERE template_id = 'b0000000-0000-0000-0000-000000000011'
 
 
 -- ############################################################
--- PART 6: 照明事业部合并规则
+-- PART 6: 照明事业部合并规则（已废弃，template_merge_rules 表已在 009 migration 中删除）
 -- ############################################################
--- 积分球测试作为合并主模板：自引用为 sub_a（提取时按 source_doc_type 过滤为积分球14字段），光分布为 sub_b
-
-INSERT INTO template_merge_rules (template_id, doc_type_a, doc_type_b, sub_template_a_id, sub_template_b_id) VALUES
-    ('b0000000-0000-0000-0000-000000000010', '积分球', '光分布', 'b0000000-0000-0000-0000-000000000010', 'b0000000-0000-0000-0000-000000000011')
-ON CONFLICT (template_id) DO UPDATE SET
-    doc_type_a        = EXCLUDED.doc_type_a,
-    doc_type_b        = EXCLUDED.doc_type_b,
-    sub_template_a_id = EXCLUDED.sub_template_a_id,
-    sub_template_b_id = EXCLUDED.sub_template_b_id;
 
 
 -- ############################################################

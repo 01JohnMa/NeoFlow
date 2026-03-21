@@ -4,7 +4,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict
-from loguru import logger
 
 from services.template_service import template_service
 from services.schema_sync_service import SchemaError
@@ -20,6 +19,8 @@ class UpdateTemplateConfigRequest(BaseModel):
     feishu_bitable_token: Optional[str] = None
     feishu_table_id: Optional[str] = None
     auto_approve: Optional[bool] = None
+    push_attachment: Optional[bool] = None
+    extraction_mode: Optional[str] = None  # 'ocr_llm' 或 'vlm'
 
 
 class CreateFieldRequest(BaseModel):

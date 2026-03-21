@@ -2,10 +2,11 @@
 """Supabase 数据库服务 - 本地部署版"""
 
 import re
-from typing import Optional, Dict, Any, List
 from datetime import datetime
-from supabase import create_client, Client
+from typing import Optional, Dict, Any, List
+
 from loguru import logger
+from supabase import create_client, Client
 
 from config.settings import settings
 from constants.document_types import DocumentTypeTable, DOC_TYPE_TABLE_MAP
@@ -199,17 +200,28 @@ class SupabaseService:
         )
     
     def get_table_name(self, document_type: str) -> Optional[str]:
-        """
-        根据文档类型获取表名
-        
-        Args:
-            document_type: 文档类型（支持中文和英文）
-            
-        Returns:
-            表名，如果类型不存在则返回 None
-        """
+        """根据文档类型获取表名（支持中文和英文）"""
         return self.TABLE_MAP.get(document_type)
-    
+
+    def resolve_table_name(
+        self,
+        template_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        统一解析业务表名。
+
+        查找顺序：
+        1. 若提供 template_id，查询 document_templates.target_table（优先）
+        2. fallback 到 TABLE_MAP 静态映射（兼容旧数据）
+        """
+        if template_id:
+            row = self.client.table("document_templates").select("target_table").eq("id", template_id).execute()
+            target = (row.data[0].get("target_table") or "") if row.data else ""
+            if target:
+                return target
+        return self.TABLE_MAP.get(document_type) if document_type else None
+
     # ============ 文档操作 ============
     
     async def create_document(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -218,7 +230,7 @@ class SupabaseService:
             result = self.client.table("documents").insert(data).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"创建文档失败: {type(e).__name__}: {e}, data_keys={list(data.keys())}")
+            logger.error("创建文档失败: {}", e)
             raise
     
     async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
@@ -447,33 +459,21 @@ class SupabaseService:
     # ============ 通用保存方法 ============
     
     async def save_extraction_result(
-        self, 
-        document_id: str, 
-        document_type: str, 
-        extraction_data: Dict[str, Any]
+        self,
+        document_id: str,
+        document_type: str,
+        extraction_data: Dict[str, Any],
+        template_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """根据文档类型保存提取结果（使用 TABLE_MAP 解耦）"""
-        # 通过 TABLE_MAP 查找对应的表名
-        table_name = self.TABLE_MAP.get(document_type)
+        """根据文档类型保存提取结果（优先 template_id → target_table，fallback TABLE_MAP）。"""
+        table_name = self.resolve_table_name(template_id=template_id, document_type=document_type)
         if not table_name:
-            logger.warning(f"未知文档类型: {document_type}")
+            logger.error(
+                f"未知文档类型: {document_type}，无法保存提取结果。"
+                f"document_id={document_id}, fields={list(extraction_data.keys())}"
+            )
             return None
-        
-        # 根据表名调用对应的保存方法
-        save_methods = {
-            "inspection_reports": self.save_inspection_report,
-            "expresses": self.save_express,
-            "sampling_forms": self.save_sampling_form,
-            "lighting_reports": self.save_lighting_report,
-            "packagings": self.save_packaging,
-        }
-        
-        save_method = save_methods.get(table_name)
-        if save_method:
-            return await save_method(document_id, extraction_data)
-        
-        logger.warning(f"未找到表 {table_name} 的保存方法")
-        return None
+        return await self._save_to_table(table_name, document_id, extraction_data)
     
     async def get_extraction_result(
         self, 
@@ -572,25 +572,23 @@ class SupabaseService:
         Returns:
             规范化的显示名称
         """
+        _INSPECTION_TYPES = {"inspection_report", "检测报告"}
+        _EXPRESS_TYPES = {"快递单", "express"}
+        _SAMPLING_TYPES = {"抽样单", "sampling_form", "sampling"}
+
         def clean_name(name: Optional[str], max_len: int = 20) -> str:
-            """清理名称，移除特殊字符并截断"""
             if not name:
                 return ""
-            # 移除常见的无意义前缀
             prefixes = ["微信图片_", "IMG_", "Screenshot_", "image_"]
             for prefix in prefixes:
                 if name.startswith(prefix):
                     name = name[len(prefix):]
-            # 移除文件扩展名
             name = name.rsplit('.', 1)[0] if '.' in name else name
-            # 移除特殊字符
             name = ''.join(c for c in name if c.isalnum() or c in '-_')
             return name[:max_len] if len(name) > max_len else name
-        
+
         try:
-            # 检测报告
-            if document_type in ["inspection_report", "检测报告"]:
-                # 检测报告: 报告_{样品名称}_{规格型号}_{抽样日期}
+            if document_type in _INSPECTION_TYPES:
                 sample_name = clean_name(extraction_data.get("sample_name"))
                 specification_model = clean_name(extraction_data.get("specification_model"))
                 sampling_date = extraction_data.get("sampling_date", "")
@@ -601,20 +599,16 @@ class SupabaseService:
                     if sampling_date:
                         name_parts.append(sampling_date)
                     return "_".join(name_parts)
-                    
-            elif document_type in ["快递单", "express"]:
-                # 快递单: 快递_{快递单号}_{收件人}
+
+            elif document_type in _EXPRESS_TYPES:
                 tracking = clean_name(extraction_data.get("tracking_number"), max_len=15)
                 recipient = clean_name(extraction_data.get("recipient"), max_len=10)
                 if tracking:
-                    if recipient:
-                        return f"快递_{tracking}_{recipient}"
-                    return f"快递_{tracking}"
+                    return f"快递_{tracking}_{recipient}" if recipient else f"快递_{tracking}"
                 elif recipient:
                     return f"快递_{recipient}"
-                    
-            # 抽样单（支持所有别名，注意模板 code 是 sampling）
-            elif document_type in ["抽样单", "sampling_form", "sampling"]:
+
+            elif document_type in _SAMPLING_TYPES:
                 # 抽样单: 抽样_{产品名称}_{省份城市}
                 product = clean_name(extraction_data.get("product_name"))
                 province = extraction_data.get("sampled_province", "")

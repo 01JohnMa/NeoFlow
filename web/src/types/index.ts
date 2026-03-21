@@ -28,11 +28,12 @@ export interface AdminTemplate {
   name: string
   code: string
   description: string | null
-  process_mode: 'single' | 'merge'
   required_doc_count: number
   sort_order: number
   is_active: boolean
   auto_approve: boolean
+  push_attachment: boolean
+  extraction_mode: 'ocr_llm' | 'vlm'
   feishu_bitable_token: string | null
   feishu_table_id: string | null
 }
@@ -63,6 +64,8 @@ export interface UpdateTemplateConfigPayload {
   feishu_bitable_token?: string
   feishu_table_id?: string
   auto_approve?: boolean
+  push_attachment?: boolean
+  extraction_mode?: 'ocr_llm' | 'vlm'
 }
 
 export interface ReorderItem {
@@ -78,7 +81,8 @@ export interface Document {
   user_id: string | null
   file_name: string
   original_file_name: string | null
-  display_name: string | null  // 规范化显示名称
+  display_name: string | null
+  custom_push_name: string | null
   file_path: string
   file_size: number | null
   file_type: string | null
@@ -155,6 +159,35 @@ export interface ExtractionResultResponse {
   is_validated: boolean
   review_hint_fields?: ReviewHintField[]
   template_fields: TemplateFieldForDetail[]
+}
+
+// ============ Batch types ============
+
+export interface BatchProcessItem {
+  document_id: string
+  template_id: string
+  paired_document_id?: string
+  paired_template_id?: string
+}
+
+export interface BatchJobItemStatus {
+  index: number
+  type: 'single' | 'merge'
+  document_ids: string[]
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  error?: string
+}
+
+export interface BatchJobStatus {
+  job_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  stage: string
+  progress: number
+  document_ids: string[]
+  error: string | null
+  items?: BatchJobItemStatus[]
+  total?: number
+  completed_count?: number
 }
 
 

@@ -22,6 +22,7 @@ async def upload_document(
     file: UploadFile = File(...),
     template_id: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
+    custom_push_name: Optional[str] = Form(None),
     user: CurrentUser = Depends(get_current_user)
 ):
     """
@@ -55,6 +56,11 @@ async def upload_document(
             os.remove(file_path)
             raise FileSizeError(settings.MAX_FILE_SIZE / 1024 / 1024)
         
+        # 清洗自定义推送文件名：去两端空格，空串视为 None
+        cleaned_push_name = custom_push_name.strip() if custom_push_name else None
+        if cleaned_push_name and len(cleaned_push_name) > 100:
+            cleaned_push_name = cleaned_push_name[:100]
+
         # 创建数据库记录
         document_data = {
             "id": document_id,
@@ -68,7 +74,8 @@ async def upload_document(
             "mime_type": file.content_type,
             "status": "uploaded",
             "template_id": template_id,
-            "tenant_id": user.tenant_id
+            "tenant_id": user.tenant_id,
+            "custom_push_name": cleaned_push_name or None,
         }
         
         try:
@@ -76,7 +83,7 @@ async def upload_document(
             logger.info(f"文档已保存到数据库: {document_id}, 用户: {user.user_id}")
         except Exception as e:
             # 数据库保存失败时，清理已上传的文件并抛出错误
-            logger.error(f"数据库保存失败: {e}")
+            logger.bind(document_id=document_id, user_id=user.user_id).opt(exception=e).error("数据库保存失败")
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"已清理上传文件: {file_path}")
@@ -95,5 +102,5 @@ async def upload_document(
     except (FileTypeError, FileSizeError):
         raise
     except Exception as e:
-        logger.error(f"上传失败: {e}")
+        logger.opt(exception=e).error("上传失败")
         raise ProcessingError(f"上传失败: {str(e)}")

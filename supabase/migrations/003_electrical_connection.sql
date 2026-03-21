@@ -79,8 +79,8 @@ ON CONFLICT (code) DO NOTHING;
 -- ############################################################
 
 -- feishu_bitable_token / feishu_table_id 待配置后更新
-INSERT INTO document_templates (id, tenant_id, name, code, description, process_mode, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000020', 'a0000000-0000-0000-0000-000000000003', '包装', 'packaging', '包装盒产品信息', 'single', 1, TRUE, 1)
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000020', 'a0000000-0000-0000-0000-000000000003', '包装', 'packaging', '包装盒产品信息', 1, TRUE, 1)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 

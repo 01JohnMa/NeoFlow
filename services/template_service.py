@@ -8,9 +8,10 @@ from loguru import logger
 
 from config.settings import settings
 from constants.document_types import DOC_TYPE_TABLE_MAP
+from services.base import SupabaseClientMixin, build_field_table, build_examples_section
 
 
-class TemplateService:
+class TemplateService(SupabaseClientMixin):
     """模板服务封装"""
     
     _instance: Optional['TemplateService'] = None
@@ -42,13 +43,6 @@ class TemplateService:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def _get_client(self):
-        """获取 Supabase 客户端"""
-        if self._client is None:
-            from services.supabase_service import supabase_service
-            self._client = supabase_service.client
-        return self._client
-    
     # ============ 模板操作 ============
     
     async def get_tenant_templates(
@@ -68,7 +62,7 @@ class TemplateService:
         """
         try:
             query = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, process_mode, required_doc_count, sort_order"
+                "id, tenant_id, name, code, description, required_doc_count, sort_order"
             ).eq("tenant_id", tenant_id)
             
             if active_only:
@@ -173,7 +167,7 @@ class TemplateService:
     
     async def get_template_with_details(self, template_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取模板完整信息（含字段、示例、合并规则）
+        获取模板完整信息（含字段、示例）
         
         Args:
             template_id: 模板ID
@@ -185,9 +179,8 @@ class TemplateService:
             Exception: 数据库查询异常（向上抛出，让调用者处理）
         """
         try:
-            # 注意：template_merge_rules 有多个外键关系，需要明确指定使用 template_id 外键
             result = self._get_client().table("document_templates").select(
-                "*, template_fields(*), template_examples(*), template_merge_rules!template_merge_rules_template_id_fkey(*)"
+                "*, template_fields(*), template_examples(*)"
             ).eq("id", template_id).execute()
             
             if not result.data:
@@ -267,28 +260,6 @@ class TemplateService:
             logger.error(f"获取模板示例失败: {e}")
             return []
     
-    # ============ 合并规则操作 ============
-    
-    async def get_merge_rule(self, template_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取模板的合并规则
-        
-        Args:
-            template_id: 模板ID
-            
-        Returns:
-            合并规则
-        """
-        try:
-            result = self._get_client().table("template_merge_rules").select(
-                "*, sub_template_a:sub_template_a_id(*), sub_template_b:sub_template_b_id(*)"
-            ).eq("template_id", template_id).execute()
-            
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取合并规则失败: {e}")
-            return None
-    
     # ============ 动态 Prompt 构建 ============
     
     def build_extraction_prompt(
@@ -308,44 +279,11 @@ class TemplateService:
         """
         # 1. 构建字段列表
         fields = template.get("template_fields", [])
-        field_lines = []
-        for i, field in enumerate(fields, 1):
-            field_key = field.get("field_key", "")
-            field_label = field.get("field_label", "")
-            field_type = field.get("field_type", "text")
-            extraction_hint = field.get("extraction_hint", "")
-            
-            type_hint = ""
-            if field_type == "date":
-                type_hint = "（日期格式：YYYY-MM-DD）"
-            elif field_type == "number":
-                type_hint = "（数值类型）"
-            
-            hint = f"{type_hint} {extraction_hint}".strip()
-            field_lines.append(f"| {i} | {field_label} | {field_key} | {hint}")
-        
-        field_list = "| 序号 | 字段含义 | JSON键名 | 说明 |\n|------|----------|----------|------|\n" + "\n".join(field_lines)
+        field_list = build_field_table(fields)
         
         # 2. 构建示例部分
         examples = template.get("template_examples", [])
-        examples_section = ""
-        
-        if examples:
-            examples_section = "**参考示例：**\n"
-            for i, ex in enumerate(examples, 1):
-                example_input = ex.get("example_input", "").strip()
-                example_output = ex.get("example_output", {})
-                
-                # 格式化输出
-                if isinstance(example_output, str):
-                    try:
-                        example_output = json.loads(example_output)
-                    except:
-                        pass
-                
-                output_str = json.dumps(example_output, ensure_ascii=False)
-                
-                examples_section += f"\n示例{i}输入文本片段：\n{example_input}\n\n示例{i}输出：\n{output_str}\n"
+        examples_section = build_examples_section(examples)
         
         # 3. 组装完整 Prompt
         prompt = self.EXTRACTION_PROMPT_TEMPLATE.format(
@@ -607,9 +545,9 @@ class TemplateService:
         """
         try:
             query = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, process_mode, "
+                "id, tenant_id, name, code, description, "
                 "required_doc_count, sort_order, is_active, auto_approve, "
-                "feishu_bitable_token, feishu_table_id"
+                "push_attachment, extraction_mode, feishu_bitable_token, feishu_table_id"
             )
             if tenant_id:
                 query = query.eq("tenant_id", tenant_id)
@@ -622,14 +560,14 @@ class TemplateService:
 
     async def update_template_config(self, template_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        更新模板的飞书配置和自动审批开关
+        更新模板配置（飞书推送、自动审批、提取引擎等）
         
         Args:
             template_id: 模板ID
-            data: 包含 feishu_bitable_token, feishu_table_id, auto_approve 的字典
+            data: 包含 feishu_bitable_token, feishu_table_id, auto_approve, extraction_mode 的字典
         """
         try:
-            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve"}
+            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve", "extraction_mode", "push_attachment"}
             payload = {k: v for k, v in data.items() if k in allowed_keys}
             if not payload:
                 return {}
@@ -637,82 +575,16 @@ class TemplateService:
             # 先更新，再显式回读，避免 PostgREST 返回最小化响应导致前端拿到空对象
             self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
             fresh = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, process_mode, required_doc_count, "
-                "sort_order, is_active, auto_approve, feishu_bitable_token, feishu_table_id"
+                "id, tenant_id, name, code, description, required_doc_count, "
+                "sort_order, is_active, auto_approve, push_attachment, extraction_mode, "
+                "feishu_bitable_token, feishu_table_id"
             ).eq("id", template_id).execute()
             return fresh.data[0] if fresh.data else {}
         except Exception as e:
-            logger.error(f"更新模板配置失败: {e}")
+            logger.error("更新模板配置失败: {}", e)
             raise
     
     # ============ Merge 模式支持 ============
-    
-    async def get_merge_template_info(self, template_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取 merge 模式模板的完整信息（包含子模板）
-        
-        Args:
-            template_id: 合并模板ID
-            
-        Returns:
-            合并模板信息，包含子模板 A 和 B 的完整配置
-        """
-        try:
-            logger.debug(f"开始获取合并模板信息: {template_id}")
-            
-            # 获取主模板
-            template = await self.get_template_with_details(template_id)
-            if not template:
-                logger.warning(f"主模板不存在: {template_id}")
-                return None
-            
-            logger.debug(f"主模板获取成功: {template.get('name')}, process_mode={template.get('process_mode')}")
-            
-            if template.get("process_mode") != "merge":
-                return template
-            
-            # 获取合并规则（优先走独立查询，避免结构不一致）
-            merge_rule = await self.get_merge_rule(template_id)
-            if not merge_rule:
-                merge_rules = template.get("template_merge_rules")
-                merge_rules_type = type(merge_rules).__name__
-                if isinstance(merge_rules, dict):
-                    merge_rules = list(merge_rules.values())
-                logger.debug(
-                    f"合并规则类型: {merge_rules_type}, "
-                    f"数量: {len(merge_rules) if isinstance(merge_rules, list) else 0}"
-                )
-
-                if not merge_rules:
-                    logger.warning(f"模板 {template_id} 没有合并规则")
-                    return template
-
-                if not isinstance(merge_rules, list):
-                    logger.warning(
-                        f"模板 {template_id} 合并规则结构异常: {merge_rules_type}"
-                    )
-                    return template
-
-                merge_rule = merge_rules[0]
-            sub_a_id = merge_rule.get("sub_template_a_id")
-            sub_b_id = merge_rule.get("sub_template_b_id")
-            logger.debug(f"子模板ID: A={sub_a_id}, B={sub_b_id}")
-            
-            # 获取子模板详情
-            if sub_a_id:
-                template["sub_template_a"] = await self.get_template_with_details(sub_a_id)
-                logger.debug(f"子模板A获取: {'成功' if template.get('sub_template_a') else '失败'}")
-            
-            if sub_b_id:
-                template["sub_template_b"] = await self.get_template_with_details(sub_b_id)
-                logger.debug(f"子模板B获取: {'成功' if template.get('sub_template_b') else '失败'}")
-            
-            return template
-        except Exception as e:
-            logger.error(f"获取合并模板信息失败: {type(e).__name__}: {e}")
-            import traceback
-            logger.error(f"堆栈: {traceback.format_exc()}")
-            return None
     
     def merge_extraction_results(
         self, 

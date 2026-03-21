@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from loguru import logger
 import os
 
+from api.exceptions import AppException
 from config.settings import settings
 from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
@@ -45,7 +46,7 @@ async def lifespan(app: FastAPI):
             await ocr_service.initialize()
             logger.info("✓ OCR服务初始化成功")
         except Exception as e:
-            logger.warning(f"⚠ OCR服务初始化失败（可稍后重试）: {e}")
+            logger.opt(exception=e).warning("OCR服务初始化失败，可稍后重试")
     else:
         logger.warning("⚠ OCR服务已禁用（OCR_ENABLED=false）")
     
@@ -54,7 +55,7 @@ async def lifespan(app: FastAPI):
         await supabase_service.initialize()
         logger.info("✓ Supabase服务初始化成功")
     except Exception as e:
-        logger.warning(f"⚠ Supabase服务初始化失败（请检查配置）: {e}")
+        logger.opt(exception=e).warning("Supabase服务初始化失败，请检查配置")
     
     logger.info("=" * 50)
     logger.info(f"✓ {settings.APP_NAME} 启动完成")
@@ -97,14 +98,10 @@ app.include_router(tenants_router, prefix="/api", tags=["租户管理"])
 app.include_router(admin_router, prefix="/api", tags=["管理员配置"])
 
 
-# 全局异常处理
-from api.exceptions import AppException
-
-
 @app.exception_handler(AppException)
 async def app_exception_handler(request, exc: AppException):
     """处理业务异常 - 返回统一格式"""
-    logger.warning(f"业务异常 [{exc.code}]: {exc.detail}")
+    logger.bind(app_code=exc.code, status_code=exc.status_code).warning("业务异常")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -118,7 +115,7 @@ async def app_exception_handler(request, exc: AppException):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """处理 HTTP 异常"""
-    logger.error(f"HTTP异常: {exc.status_code} - {exc.detail}")
+    logger.bind(status_code=exc.status_code).warning("HTTP异常")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -132,13 +129,12 @@ async def http_exception_handler(request, exc):
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """处理未捕获异常"""
-    logger.error(f"未处理异常: {str(exc)}", exc_info=True)
+    logger.opt(exception=exc).error("未处理异常")
     return JSONResponse(
         status_code=500,
         content={
             "error": "内部服务器错误",
             "code": "INTERNAL_ERROR",
-            "detail": str(exc)
         }
     )
 

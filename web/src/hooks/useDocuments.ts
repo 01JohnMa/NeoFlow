@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { documentsService } from '@/services/documents'
 import { useUploadStore } from '@/store/useStore'
-import type { DocumentStatus } from '@/types'
+import type { DocumentStatus, BatchProcessItem } from '@/types'
 
 // Query keys
 export const documentKeys = {
@@ -60,13 +60,14 @@ export function useUploadDocument() {
   const { setUploadProgress, removeUploadProgress } = useUploadStore()
 
   return useMutation({
-    mutationFn: async ({ file, templateId }: { file: File; templateId?: string }) => {
+    mutationFn: async ({ file, templateId, customPushName }: { file: File; templateId?: string; customPushName?: string }) => {
       const tempId = `upload-${Date.now()}`
       setUploadProgress(tempId, 0)
 
       try {
         const result = await documentsService.upload(file, {
           templateId,
+          customPushName,
           onProgress: (progress) => setUploadProgress(tempId, progress)
         })
         removeUploadProgress(tempId)
@@ -250,5 +251,16 @@ export function useUploadMultiple() {
   })
 }
 
+// Batch process mutation
+export function useBatchProcess() {
+  const queryClient = useQueryClient()
 
-
+  return useMutation({
+    mutationFn: async (items: BatchProcessItem[]) => {
+      return documentsService.submitBatchProcess(items)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
+    },
+  })
+}

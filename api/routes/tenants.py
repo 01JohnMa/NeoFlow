@@ -8,7 +8,7 @@ from loguru import logger
 
 from services.tenant_service import tenant_service
 from services.template_service import template_service
-from api.dependencies.auth import get_current_user, get_optional_user, CurrentUser, invalidate_profile_cache
+from api.dependencies.auth import get_current_user, CurrentUser, invalidate_profile_cache
 
 router = APIRouter(prefix="/tenants", tags=["租户管理"])
 
@@ -29,18 +29,7 @@ class TemplateResponse(BaseModel):
     name: str
     code: str
     description: Optional[str] = None
-    process_mode: str = "single"
     required_doc_count: int = 1
-
-
-class MergeRuleResponse(BaseModel):
-    """合并规则响应"""
-    id: str
-    template_id: str
-    doc_type_a: str
-    doc_type_b: str
-    sub_template_a_id: Optional[str] = None
-    sub_template_b_id: Optional[str] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -144,7 +133,7 @@ async def update_my_profile(
         }
     except Exception as e:
         logger.error(f"更新用户 profile 失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="更新失败，请稍后重试")
 
 
 @router.get("/me/templates", response_model=List[TemplateResponse])
@@ -178,32 +167,3 @@ async def get_my_template_detail(
     return template
 
 
-@router.get("/me/merge-rules", response_model=List[MergeRuleResponse])
-async def get_my_merge_rules(user: CurrentUser = Depends(get_current_user)):
-    """
-    获取当前用户所属租户的合并规则列表
-    
-    用于前端 merge 模式上传页面，了解每个合并模板需要哪些文档类型
-    """
-    if not user.tenant_id:
-        return []
-    
-    # 获取该租户的所有 merge 模式模板
-    templates = await template_service.get_tenant_templates(user.tenant_id)
-    merge_templates = [t for t in templates if t.get("process_mode") == "merge"]
-    
-    # 获取每个 merge 模板的合并规则
-    rules = []
-    for template in merge_templates:
-        rule = await template_service.get_merge_rule(template["id"])
-        if rule:
-            rules.append(MergeRuleResponse(
-                id=rule.get("id"),
-                template_id=template["id"],
-                doc_type_a=rule.get("doc_type_a", ""),
-                doc_type_b=rule.get("doc_type_b", ""),
-                sub_template_a_id=rule.get("sub_template_a_id"),
-                sub_template_b_id=rule.get("sub_template_b_id"),
-            ))
-    
-    return rules

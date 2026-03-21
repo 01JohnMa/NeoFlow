@@ -5,6 +5,8 @@ import type {
   ProcessResponse,
   DocumentListResponse,
   ExtractionResultResponse,
+  BatchProcessItem,
+  BatchJobStatus,
 } from '@/types'
 
 export const documentsService = {
@@ -13,6 +15,7 @@ export const documentsService = {
     file: File,
     options?: {
       templateId?: string
+      customPushName?: string
       onProgress?: (progress: number) => void
     }
   ): Promise<UploadResponse> {
@@ -20,6 +23,9 @@ export const documentsService = {
     formData.append('file', file)
     if (options?.templateId) {
       formData.append('template_id', options.templateId)
+    }
+    if (options?.customPushName?.trim()) {
+      formData.append('custom_push_name', options.customPushName.trim())
     }
 
     const response = await api.post<UploadResponse>('/documents/upload', formData, {
@@ -156,31 +162,6 @@ export const documentsService = {
     return response.data
   },
 
-  // Submit merge job (异步提交，立即返回 job_id)
-  async submitMergeJob(
-    templateId: string,
-    files: Array<{ file_path: string; doc_type: string }>
-  ): Promise<{ job_id: string; status: string }> {
-    const response = await api.post<{ job_id: string; status: string }>(
-      '/documents/process-merge',
-      { template_id: templateId, files }
-    )
-    return response.data
-  },
-
-  // Get merge job status (轮询用)
-  async getJobStatus(jobId: string): Promise<{
-    job_id: string
-    status: 'pending' | 'processing' | 'completed' | 'failed'
-    stage: string
-    progress: number
-    document_ids: string[]
-    error: string | null
-  }> {
-    const response = await api.get(`/documents/jobs/${jobId}`)
-    return response.data
-  },
-
   // Upload multiple files for merge mode
   async uploadMultiple(
     files: Array<{ file: File; docType: string }>,
@@ -219,6 +200,23 @@ export const documentsService = {
     }
 
     return results
+  },
+
+  // Submit batch process job (异步提交，立即返回 job_id)
+  async submitBatchProcess(
+    items: BatchProcessItem[]
+  ): Promise<{ job_id: string; status: string }> {
+    const response = await api.post<{ job_id: string; status: string }>(
+      '/documents/batch-process',
+      { items }
+    )
+    return response.data
+  },
+
+  // Get batch job status (轮询用，兼容普通 job 和 batch job)
+  async getBatchJobStatus(jobId: string): Promise<BatchJobStatus> {
+    const response = await api.get<BatchJobStatus>(`/documents/jobs/${jobId}`)
+    return response.data
   },
 }
 

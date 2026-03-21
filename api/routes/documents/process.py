@@ -3,31 +3,34 @@
 
 from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel
 from loguru import logger
-import asyncio
 import uuid
 import os
 
 from config.settings import settings
 from services.supabase_service import supabase_service
 from services.template_service import template_service
-from services.feishu_service import feishu_service
 from agents.workflow import ocr_workflow
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.jobs import create_job, update_job, get_job
+from .helpers import (
+    push_to_feishu,
+    handle_processing_success,
+    handle_processing_failure,
+    handle_processing_exception,
+)
+
+# 向后兼容旧测试/旧调用入口
+_handle_processing_success = handle_processing_success
+_handle_processing_failure = handle_processing_failure
+_handle_processing_exception = handle_processing_exception
 
 
 # ============ 请求模型 ============
-
-class MergeFileInfo(BaseModel):
-    """Merge 模式文件信息"""
-    file_path: str
-    doc_type: str  # 如 "积分球" 或 "光分布"
-
 
 class ProcessWithTemplateRequest(BaseModel):
     """模板化处理请求"""
@@ -35,148 +38,8 @@ class ProcessWithTemplateRequest(BaseModel):
     sync: bool = False
 
 
-class ProcessMergeRequest(BaseModel):
-    """合并模式处理请求"""
-    template_id: str
-    files: List[MergeFileInfo]
-
 router = APIRouter()
 
-
-# ============ 后台任务辅助函数 ============
-
-async def _handle_processing_success(
-    document_id: str,
-    result: dict,
-    template_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-    generate_display_name: bool = True,
-    auto_approve: bool = False,
-    source_file_path: Optional[str] = None,
-) -> None:
-    """处理成功时的统一逻辑
-    
-    Args:
-        document_id: 文档ID
-        result: 工作流处理结果
-        template_id: 模板ID（可选）
-        tenant_id: 租户ID（可选）
-        generate_display_name: 是否生成显示名称
-    """
-    # 1. 保存提取结果到对应的表
-    await supabase_service.save_extraction_result(
-        document_id=document_id,
-        document_type=result.get("document_type") or result.get("template_name", "未知"),
-        extraction_data=result["extraction_data"]
-    )
-    logger.info(f"提取结果已保存: {document_id}")
-    
-    # 2. 生成规范化显示名称（可选）
-    display_name = None
-    if generate_display_name:
-        display_name = supabase_service.generate_display_name(
-            document_type=result.get("document_type") or result.get("template_name"),
-            extraction_data=result["extraction_data"]
-        )
-    
-    # 3. 更新文档状态
-    # auto_approve=True 时直接标记完成，跳过人工审核
-    doc_status = "completed" if auto_approve else "pending_review"
-    update_data = {
-        "status": doc_status,
-        "document_type": result.get("document_type") or result.get("template_name"),
-        "template_id": template_id,
-        "tenant_id": tenant_id,
-        "ocr_text": result.get("ocr_text", ""),
-        "ocr_confidence": result.get("ocr_confidence"),
-        "processed_at": datetime.now().isoformat(),
-        "error_message": None
-    }
-    if display_name:
-        update_data["display_name"] = display_name
-    
-    await supabase_service.update_document(document_id, update_data)
-    logger.info(
-        f"后台处理完成: {document_id}, 状态: {doc_status}"
-        + (f", 显示名称: {display_name}" if display_name else "")
-    )
-
-    # 4. auto_approve 时自动推送飞书（单模板流程）
-    if auto_approve:
-        try:
-            template = None
-            # 优先按模板ID查询（模板化处理）
-            if template_id:
-                template = await template_service.get_template_with_details(template_id)
-            # 自动分类流程：按租户 + 文档类型(code/name)回查模板
-            elif tenant_id and (result.get("document_type") or result.get("template_name")):
-                template = await template_service.get_template_by_code(
-                    tenant_id,
-                    result.get("document_type") or result.get("template_name")
-                )
-
-            bitable_token = template.get("feishu_bitable_token") if template else None
-            table_id = template.get("feishu_table_id") if template else None
-
-            if template and bitable_token and table_id:
-                field_mapping = template_service.build_field_mapping(template)
-                push_data = {**result.get("extraction_data", {})}
-
-                file_name_for_push = (
-                    (display_name or "").strip()
-                    or str(result.get("document_type") or result.get("template_name") or "").strip()
-                    or document_id
-                )
-                if file_name_for_push:
-                    if "file_name" not in field_mapping:
-                        field_mapping["file_name"] = "文件名"
-                    push_data["file_name"] = file_name_for_push
-
-                # 模板开启附件推送且存在源文件时，上传附件到飞书
-                if template.get("push_attachment", True) and source_file_path and os.path.exists(source_file_path):
-                    file_token = await feishu_service._upload_file_to_feishu(source_file_path, bitable_token)
-                    if file_token:
-                        push_data["attachment"] = [{"file_token": file_token}]
-                        field_mapping["attachment"] = "附件"
-
-                success = await feishu_service.push_by_template(
-                    push_data,
-                    field_mapping,
-                    bitable_token,
-                    table_id
-                )
-                if success:
-                    logger.info(f"auto_approve 单模板飞书推送成功: {document_id}")
-                else:
-                    logger.warning(f"auto_approve 单模板飞书推送失败: {document_id}")
-            else:
-                logger.info(f"auto_approve 单模板模板未配置飞书，跳过推送: {document_id}")
-        except Exception as feishu_error:
-            logger.warning(f"auto_approve 单模板飞书推送失败（不影响结果）: {feishu_error}")
-
-
-async def _handle_processing_failure(
-    document_id: str,
-    error_message: str
-) -> None:
-    """处理失败时的统一逻辑"""
-    await supabase_service.update_document_status(
-        document_id, "failed",
-        error_message=error_message
-    )
-    logger.error(f"后台处理失败: {document_id} - {error_message}")
-
-
-async def _handle_processing_exception(
-    document_id: str,
-    exception: Exception
-) -> None:
-    """处理异常时的统一逻辑"""
-    logger.error(f"后台任务异常: {exception}")
-    try:
-        await supabase_service.update_document_status(document_id, "failed", str(exception))
-    except:
-        pass
 
 
 @router.post("/{document_id}/process")
@@ -258,7 +121,8 @@ async def process_document(
                         tenant_id=tenant_id,
                         generate_display_name=True,
                         auto_approve=auto_approve,
-                        source_file_path=file_path
+                        source_file_path=file_path,
+                        custom_push_name=document.get("custom_push_name") if document else None,
                     )
                 except Exception as e:
                     logger.warning(f"保存结果到数据库失败: {e}")
@@ -271,14 +135,15 @@ async def process_document(
                 document_id=document_id,
                 file_path=file_path,
                 template_id=template_id,
-                tenant_id=tenant_id
+                tenant_id=tenant_id,
+                custom_push_name=document.get("custom_push_name") if document else None,
             )
             
             # 更新状态
             try:
                 await supabase_service.update_document_status(document_id, "processing")
-            except:
-                pass
+            except Exception as status_err:
+                logger.warning(f"更新处理状态失败: {status_err}")
             
             return {
                 "document_id": document_id,
@@ -296,19 +161,13 @@ async def process_document(
 
 
 async def process_document_task(
-    document_id: str, 
+    document_id: str,
     file_path: str,
     template_id: Optional[str] = None,
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = None,
+    custom_push_name: Optional[str] = None,
 ):
-    """后台处理任务
-    
-    Args:
-        document_id: 文档ID
-        file_path: 文件路径
-        template_id: 模板ID（可选，有则使用模板化处理）
-        tenant_id: 租户ID（可选）
-    """
+    """后台处理任务"""
     try:
         logger.info(f"开始后台处理: {document_id}, 模板: {template_id or '无(自动分类)'}")
         
@@ -333,21 +192,22 @@ async def process_document_task(
             if template:
                 auto_approve = bool(template.get("auto_approve", False))
 
-            await _handle_processing_success(
+            await handle_processing_success(
                 document_id=document_id,
                 result=result,
                 template_id=template_id or (template.get("id") if template else None),
                 tenant_id=tenant_id,
                 generate_display_name=True,
                 auto_approve=auto_approve,
-                source_file_path=file_path
+                source_file_path=file_path,
+                custom_push_name=custom_push_name,
             )
         else:
             await _handle_processing_failure(
-                document_id, 
+                document_id,
                 result.get("error", "处理失败")
             )
-            
+
     except Exception as e:
         await _handle_processing_exception(document_id, e)
 
@@ -418,6 +278,7 @@ async def process_document_with_template(
             raise HTTPException(status_code=403, detail="无权使用此模板")
         
         auto_approve = bool(template.get("auto_approve", False))
+        custom_push_name = document.get("custom_push_name")
 
         if request.sync:
             # 同步处理
@@ -427,7 +288,7 @@ async def process_document_with_template(
                 template_id=request.template_id,
                 tenant_id=user.tenant_id
             )
-            
+
             # 保存结果
             if result["success"] and result.get("extraction_data"):
                 await _save_template_extraction_result(
@@ -436,9 +297,10 @@ async def process_document_with_template(
                     result=result,
                     user=user,
                     file_path=file_path,
-                    auto_approve=auto_approve
+                    auto_approve=auto_approve,
+                    custom_push_name=custom_push_name,
                 )
-            
+
             return result
         else:
             # 异步处理
@@ -448,17 +310,18 @@ async def process_document_with_template(
                 file_path=file_path,
                 template_id=request.template_id,
                 tenant_id=user.tenant_id,
-                auto_approve=auto_approve
+                auto_approve=auto_approve,
+                custom_push_name=custom_push_name,
             )
             
             await supabase_service.update_document_status(document_id, "processing")
             
-            return {
+            return JSONResponse(status_code=202, content={
                 "document_id": document_id,
                 "template_id": request.template_id,
                 "status": "processing",
                 "message": "文档处理已开始（后台任务）"
-            }
+            })
         
     except (DocumentNotFoundError, FileNotFoundError, HTTPException):
         raise
@@ -468,97 +331,43 @@ async def process_document_with_template(
 
 
 async def process_document_with_template_task(
-    document_id: str, 
+    document_id: str,
     file_path: str,
     template_id: str,
     tenant_id: str,
-    auto_approve: bool = False
+    auto_approve: bool = False,
+    custom_push_name: Optional[str] = None,
 ):
     """模板化处理后台任务"""
     try:
         logger.info(f"开始模板化后台处理: {document_id}, 模板: {template_id}")
-        
+
         result = await ocr_workflow.process_with_template(
             document_id=document_id,
             file_path=file_path,
             template_id=template_id,
             tenant_id=tenant_id
         )
-        
+
         if result["success"] and result.get("extraction_data"):
-            await _handle_processing_success(
+            await handle_processing_success(
                 document_id=document_id,
                 result=result,
                 template_id=template_id,
                 tenant_id=tenant_id,
-                generate_display_name=False,  # 模板化处理不生成显示名称
+                generate_display_name=False,
                 auto_approve=auto_approve,
-                source_file_path=file_path
+                source_file_path=file_path,
+                custom_push_name=custom_push_name,
             )
         else:
             await _handle_processing_failure(
-                document_id, 
+                document_id,
                 result.get("error", "处理失败")
             )
             
     except Exception as e:
         await _handle_processing_exception(document_id, e)
-
-
-@router.post("/process-merge")
-async def process_merge_documents(
-    request: ProcessMergeRequest,
-    user: CurrentUser = Depends(get_current_user)
-):
-    """
-    合并模式处理（异步）：立即返回 job_id，后台执行 OCR + LLM + 保存
-
-    前端拿到 job_id 后轮询 GET /documents/jobs/{job_id} 获取进度。
-
-    - **template_id**: 合并模板ID（process_mode='merge'）
-    - **files**: 文件列表，每项包含 file_path 和 doc_type
-    """
-    if not user.tenant_id:
-        raise HTTPException(status_code=400, detail="请先选择所属部门")
-
-    if not request.files:
-        raise HTTPException(status_code=400, detail="请提供至少一个文件")
-
-    # 前置校验（快速失败，不进入后台任务）
-    template = await template_service.get_template_by_code(user.tenant_id, request.template_id)
-    if not template:
-        try:
-            template = await template_service.get_template_with_details(request.template_id)
-        except Exception:
-            template = None
-    if not template:
-        raise HTTPException(status_code=404, detail="模板不存在")
-
-    if template.get("process_mode") != "merge":
-        raise HTTPException(status_code=400, detail="此模板不支持合并模式")
-
-    if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
-        raise HTTPException(status_code=403, detail="无权使用此模板")
-
-    # 验证文件存在并收集原始文档 ID
-    files = []
-    source_doc_ids = []
-    for file_info in request.files:
-        if not os.path.exists(file_info.file_path):
-            raise HTTPException(status_code=404, detail=f"文件不存在: {file_info.file_path}")
-        files.append({"file_path": file_info.file_path, "doc_type": file_info.doc_type})
-        source_doc = await supabase_service.get_document_by_file_path(file_info.file_path)
-        if source_doc:
-            source_doc_ids.append(source_doc["id"])
-
-    # 创建 Job 并在后台运行
-    job_id = create_job()
-    asyncio.create_task(
-        _run_merge_job(job_id, files, source_doc_ids, template, user)
-    )
-    logger.info(f"合并任务已提交: job_id={job_id}, 文件数={len(files)}")
-
-    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "pending"})
 
 
 @router.get("/jobs/{job_id}")
@@ -584,120 +393,6 @@ async def get_merge_job_status(
     return job
 
 
-async def _run_merge_job(
-    job_id: str,
-    files: list,
-    source_doc_ids: list,
-    template: dict,
-    user: CurrentUser,
-):
-    """后台合并任务：OCR → LLM → 保存 → 推送飞书"""
-    created_doc_ids: list = []
-    try:
-        template_uuid = template.get("id")
-        template_name = template.get("name", "照明综合报告")
-        auto_approve = template.get("auto_approve", False)
-
-        # 阶段1：OCR + LLM 提取（耗时主体）
-        update_job(job_id, "ocr")
-        result = await ocr_workflow.process_merge(
-            document_id=str(uuid.uuid4()),
-            files=files,
-            template_id=template_uuid,
-            tenant_id=user.tenant_id,
-        )
-
-        if not result.get("success"):
-            error_msg = result.get("error", "合并处理失败")
-            logger.error(f"[job={job_id}] 合并处理失败: {error_msg}")
-            update_job(job_id, "failed", error=error_msg)
-            return
-
-        extraction_results = result.get("extraction_results", [])
-        if not extraction_results:
-            update_job(job_id, "failed", error="未提取到有效字段，请检查模板与文档类型")
-            return
-
-        sample_count = len(extraction_results)
-        logger.info(f"[job={job_id}] 提取完成，共 {sample_count} 个样品")
-
-        # 阶段2：保存结果
-        update_job(job_id, "saving")
-
-        for sample_result in extraction_results:
-            sample_index = sample_result.get("sample_index", 1)
-            sample_data = sample_result.get("data", {})
-            if not sample_data:
-                continue
-
-            doc_id = str(uuid.uuid4())
-            created_doc_ids.append(doc_id)
-
-            base_display_name = supabase_service.generate_display_name(
-                document_type=template_name,
-                extraction_data=sample_data,
-            )
-            display_name = (
-                f"{base_display_name}_样品{sample_index}" if sample_count > 1 else base_display_name
-            )
-            doc_status = "completed" if auto_approve else "pending_review"
-
-            doc_data = {
-                "id": doc_id,
-                "user_id": user.user_id,
-                "tenant_id": user.tenant_id,
-                "template_id": template_uuid,
-                "document_type": template_name,
-                "status": doc_status,
-                "display_name": display_name,
-                "original_file_name": display_name,
-                "file_name": f"merged_{doc_id}",
-                "file_path": "",
-                "source_document_ids": source_doc_ids,
-                "ocr_confidence": result.get("ocr_confidence"),
-                "processed_at": datetime.now().isoformat(),
-            }
-            await supabase_service.create_document(doc_data)
-            await supabase_service.save_extraction_result(
-                document_id=doc_id,
-                document_type=template_name,
-                extraction_data=sample_data,
-            )
-            logger.info(f"[job={job_id}] 样品{sample_index} 已保存: {doc_id}")
-
-            if auto_approve:
-                try:
-                    _bitable_token = template.get("feishu_bitable_token")
-                    _table_id = template.get("feishu_table_id")
-                    if _bitable_token and _table_id:
-                        _field_mapping = template_service.build_field_mapping(template)
-                        _push_data = {**sample_data, "file_name": display_name}
-                        if "file_name" not in _field_mapping:
-                            _field_mapping["file_name"] = "文件名"
-                        await feishu_service.push_by_template(
-                            _push_data, _field_mapping, _bitable_token, _table_id
-                        )
-                        logger.info(f"[job={job_id}] 样品{sample_index} 飞书推送成功")
-                    else:
-                        logger.info(f"[job={job_id}] 样品{sample_index} 模板未配置飞书，跳过")
-                except Exception as feishu_error:
-                    logger.warning(f"[job={job_id}] 飞书推送失败（不影响结果）: {feishu_error}")
-
-        # 完成
-        update_job(job_id, "completed", document_ids=created_doc_ids)
-        logger.info(f"[job={job_id}] 任务完成，document_ids={created_doc_ids}")
-
-    except Exception as e:
-        logger.error(f"[job={job_id}] 后台任务异常: {e}")
-        # 清理已创建的文档记录
-        for doc_id in created_doc_ids:
-            try:
-                await supabase_service.update_document_status(doc_id, "failed", str(e))
-            except Exception:
-                pass
-        update_job(job_id, "failed", error=str(e))
-
-
 async def _save_template_extraction_result(
     document_id: str,
     template: dict,
@@ -705,17 +400,19 @@ async def _save_template_extraction_result(
     user: CurrentUser,
     file_path: Optional[str] = None,
     auto_approve: bool = False,
+    custom_push_name: Optional[str] = None,
 ):
     """保存模板化提取结果"""
     try:
-        await _handle_processing_success(
+        await handle_processing_success(
             document_id=document_id,
             result=result,
             template_id=template.get("id"),
             tenant_id=user.tenant_id,
             generate_display_name=False,
             auto_approve=auto_approve,
-            source_file_path=file_path
+            source_file_path=file_path,
+            custom_push_name=custom_push_name,
         )
     except Exception as e:
         logger.error(f"保存模板提取结果失败: {e}")

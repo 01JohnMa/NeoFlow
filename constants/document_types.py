@@ -13,7 +13,9 @@ class DocumentTypeTable:
     INSPECTION_REPORT = "inspection_reports"
     EXPRESS = "expresses"
     SAMPLING_FORM = "sampling_forms"
-    LIGHTING_REPORT = "lighting_reports"
+    LIGHTING_REPORT = "lighting_reports"          # 保留，兼容历史数据
+    INTEGRATING_SPHERE = "integrating_sphere_reports"
+    LIGHT_DISTRIBUTION = "light_distribution_reports"
     PACKAGING = "packagings"
 
 
@@ -32,13 +34,16 @@ DOC_TYPE_TABLE_MAP = {
     "sampling_form": DocumentTypeTable.SAMPLING_FORM,
     "抽样单": DocumentTypeTable.SAMPLING_FORM,
     
-    # 照明综合报告（保留旧别名兼容历史数据）
+    # 照明综合报告（旧别名，兼容历史数据，不再写入新数据）
     "lighting_combined": DocumentTypeTable.LIGHTING_REPORT,
     "照明综合报告": DocumentTypeTable.LIGHTING_REPORT,
     "照明综合": DocumentTypeTable.LIGHTING_REPORT,
-    # 积分球测试（合并主模板，新结构）
-    "integrating_sphere": DocumentTypeTable.LIGHTING_REPORT,
-    "积分球测试": DocumentTypeTable.LIGHTING_REPORT,
+    # 积分球测试（独立表）
+    "integrating_sphere": DocumentTypeTable.INTEGRATING_SPHERE,
+    "积分球测试": DocumentTypeTable.INTEGRATING_SPHERE,
+    # 光分布测试（独立表）
+    "light_distribution": DocumentTypeTable.LIGHT_DISTRIBUTION,
+    "光分布测试": DocumentTypeTable.LIGHT_DISTRIBUTION,
 
     # 包装（电连接事业部）
     "packaging": DocumentTypeTable.PACKAGING,

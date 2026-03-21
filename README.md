@@ -1,13 +1,13 @@
 # NeoFlow - 智能 OCR-LLM 文档平台
 
-基于 PaddleOCR + LangGraph + LLM 的智能文档识别系统，支持测试单、快递单、抽样单等多类型文档的 OCR 识别与结构化提取。
+基于 PaddleOCR + LangGraph + LLM 的智能文档识别系统，支持检测报告、快递单、抽样单等多类型文档的 OCR 识别与结构化提取。
 
 ## 技术栈
 
 | 层级 | 技术选型 |
 |------|----------|
-| **后端** | FastAPI + LangGraph + PaddleOCR + LLM (GPT-4o/Claude) |
-| **前端** | React + TypeScript + Tailwind CSS + shadcn/ui |
+| **后端** | FastAPI + LangGraph + PaddleOCR + LLM (DeepSeek/GPT-4o/Claude) |
+| **前端** | React + TypeScript + Vite + Tailwind CSS + shadcn/ui |
 | **数据库** | Supabase (PostgreSQL + Auth + Storage) |
 | **OCR模型** | PP-OCRv5 (PaddlePaddle) |
 | **AI Agent** | LangGraph 工作流编排 |
@@ -16,11 +16,13 @@
 
 - **文档上传** - 支持 PDF、图片批量上传
 - **OCR 识别** - PP-OCRv5 高精度文字识别
-- **智能提取** - LLM 结构化字段提取（测试单、快递单、抽样单）
+- **智能提取** - LLM 结构化字段提取（检测报告、快递单、抽样单等）
+- **模板化管理** - 按模板定义字段、自动同步数据库列、飞书多维表格映射
+- **合并模式** - 多文件合并处理（如积分球+光分布 → 照明综合报告）
 - **人工审核** - 识别结果校验与修正
 - **数据存储** - Supabase 持久化存储
-- **飞书同步** - 审核后自动推送到飞书多维表格
-- **多租户** - 基于 Supabase RLS 的用户权限隔离
+- **飞书同步** - 审核后自动推送到飞书多维表格（按模板配置）
+- **多租户** - 基于 Supabase RLS 的部门/租户权限隔离
 
 ## 快速启动
 
@@ -44,7 +46,8 @@ docker restart supabase-storage
 
 ```bash
 # 在仓库根目录执行
-copy env.example.txt .env
+# Windows: copy env.example.txt .env
+# Linux/Mac: cp env.example.txt .env
 # 编辑 .env 后启动
 docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
 ```
@@ -61,7 +64,8 @@ docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
 pip install -r requirements.txt
 
 # 配置环境变量
-copy env.example.txt .env
+# Windows: copy env.example.txt .env
+# Linux/Mac: cp env.example.txt .env
 # 编辑 .env 填入 LLM_API_KEY、SUPABASE_*
 
 # 启动服务
@@ -89,65 +93,86 @@ npm run dev
 ## 项目结构
 
 ```
-ocr_agentic_system/
+neoflow/
 ├── api/                        # FastAPI 应用层
 │   ├── main.py                # 应用入口
+│   ├── jobs.py                # 合并任务状态管理
+│   ├── dependencies/          # 依赖注入（auth 等）
 │   └── routes/
-│       ├── documents.py       # 文档处理路由 (upload/process/query/review)
+│       ├── documents/         # 文档路由（子模块）
+│       │   ├── upload.py      # 上传
+│       │   ├── process.py     # 处理（含 process-with-template、process-merge）
+│       │   ├── query.py       # 查询
+│       │   ├── review.py     # 审核
+│       │   ├── helpers.py    # 辅助函数（飞书推送等）
+│       │   └── schemas.py    # 请求/响应模型
+│       ├── admin.py           # 管理员配置（模板、部门、示例）
+│       ├── tenants.py         # 租户/部门管理
 │       └── health.py          # 健康检查
 │
-├── web/                        # React 前端
+├── web/                        # React 前端 (Vite)
 │   ├── src/
-│   │   ├── components/        # 组件
-│   │   │   ├── ui/           # 基础UI (shadcn/ui)
-│   │   │   └── layout/       # 布局组件
-│   │   ├── pages/            # 页面
-│   │   │   ├── Login.tsx     # 登录
-│   │   │   ├── Register.tsx  # 注册
-│   │   │   ├── Dashboard.tsx # 仪表盘
-│   │   │   ├── Upload.tsx    # 上传
-│   │   │   ├── Documents.tsx # 文档列表
-│   │   │   └── DocumentDetail.tsx # 文档详情/审核
-│   │   ├── hooks/            # 自定义 Hooks
-│   │   ├── services/         # API 服务
-│   │   ├── store/            # 状态管理
-│   │   └── lib/              # 工具库
+│   │   ├── components/        # 组件（ui/、layout/）
+│   │   ├── pages/             # 页面
+│   │   │   ├── Login.tsx      # 登录
+│   │   │   ├── Dashboard.tsx  # 仪表盘
+│   │   │   ├── Upload.tsx     # 上传（单文件/合并/相机）
+│   │   │   ├── Documents.tsx  # 文档列表
+│   │   │   ├── DocumentDetail.tsx # 文档详情/审核
+│   │   │   ├── AdminConfig.tsx    # 管理配置入口
+│   │   │   ├── AdminFeishuTab.tsx # 飞书配置
+│   │   │   ├── AdminFieldsTab.tsx # 模板字段
+│   │   │   └── AdminExamplesTab.tsx # 示例管理
+│   │   ├── hooks/             # 自定义 Hooks
+│   │   ├── services/          # API 服务
+│   │   ├── store/             # 状态管理
+│   │   └── lib/               # 工具库
 │   └── vite.config.ts
 │
 ├── agents/                     # LangGraph 智能体
-│   └── workflow.py            # OCR 处理工作流
+│   ├── workflow.py            # OCR 处理工作流
+│   ├── json_cleaner.py        # JSON 清洗
+│   └── result_builder.py      # 结果构建
 │
 ├── config/                     # 配置
 │   ├── settings.py            # 应用配置
 │   └── prompts.py             # LLM Prompt 配置
 │
 ├── services/                   # 业务服务
+│   ├── base.py                # 基类（SupabaseClientMixin、build_field_table）
 │   ├── ocr_service.py         # OCR 服务
 │   ├── supabase_service.py    # 数据库服务
-│   └── feishu_service.py      # 飞书推送服务
+│   ├── template_service.py    # 模板服务
+│   ├── tenant_service.py       # 租户服务
+│   ├── feishu_service.py       # 飞书推送服务
+│   ├── schema_sync_service.py # 模板字段与数据库列同步
+│   └── vlm_service.py         # 多模态 VLM 服务（可选）
 │
-├── model/                      # PaddleOCR 模型
-│   ├── PP-OCRv5_server_det_infer/   # 文本检测
-│   ├── PP-OCRv5_server_rec_infer/   # 文本识别
-│   ├── PP-LCNet_x1_0_textline_ori_infer/  # 文本行方向
-│   └── PP-LCNet_x1_0_doc_ori_infer/ # 文档方向
+├── constants/                  # 常量
+│   └── document_types.py      # 文档类型定义
+│
+├── model/                      # PaddleOCR 模型（需自行下载）
+│   ├── PP-OCRv5_server_det_infer/
+│   ├── PP-OCRv5_server_rec_infer/
+│   ├── PP-LCNet_x1_0_textline_ori_infer/
+│   └── PP-LCNet_x1_0_doc_ori_infer/
 │
 ├── supabase/                   # Supabase 本地部署
 │   ├── docker-compose.yml     # Docker 编排
-│   ├── kong.yml               # Kong 网关
 │   ├── migrations/            # 数据库迁移
 │   └── .env                   # 环境变量
 │
-├── .cursor/                    # Cursor IDE 配置
-│   └── commands/              # 自定义命令 (UI/UX Pro Max)
-│
-├── .shared/                    # 共享资源
-│   └── ui-ux-pro-max/         # UI/UX 设计系统
+├── tests/                      # 测试
+│   ├── conftest.py            # pytest 配置
+│   ├── routes/                # 路由测试
+│   ├── services/              # 服务测试
+│   └── agents/                # 智能体测试
 │
 ├── uploads/                    # 上传文件目录
 ├── logs/                       # 日志目录
 ├── requirements.txt            # Python 依赖
-└── package.json               # 前端依赖
+├── env.example.txt             # 环境变量示例
+└── docker-compose.prod.yml     # 生产部署编排
 ```
 
 ## API 接口
@@ -158,8 +183,19 @@ ocr_agentic_system/
 # 上传文档
 POST /api/documents/upload
 
-# 处理文档 (OCR + LLM 提取)
-POST /api/documents/{id}/process
+# 处理文档（自动分类或按文档关联模板）
+POST /api/documents/{id}/process?sync=false
+
+# 按指定模板处理
+POST /api/documents/{id}/process-with-template
+Body: { "template_id": "xxx", "sync": false }
+
+# 合并模式（多文件 → 单模板多样品）
+POST /api/documents/process-merge
+Body: { "template_id": "xxx", "files": [{ "file_path": "...", "doc_type": "积分球" }, ...] }
+
+# 查询合并任务状态
+GET /api/documents/jobs/{job_id}
 
 # 获取结果
 GET /api/documents/{id}/result
@@ -177,44 +213,53 @@ PUT /api/documents/{id}/reject
 DELETE /api/documents/{id}
 ```
 
-### 认证
+### 租户与认证
+
+认证由 Supabase Auth 提供（JWT）。用户需在个人设置中选择所属部门（tenant_id）后才能处理文档。
 
 ```bash
-# 用户注册
-POST /api/auth/register
+# 获取租户/部门列表
+GET /api/tenants
+```
 
-# 用户登录
-POST /api/auth/login
+### 管理员配置
+
+```bash
+# 模板、部门、示例等配置接口（需管理员权限）
+# 详见 /docs
 ```
 
 ## 环境变量
 
 ```env
-# .env 文件
+# .env 文件（可复制 env.example.txt）
 
-# LLM 配置
-LLM_API_KEY=your-api-key
-LLM_BASE_URL=https://api.openai.com/v1  # 或其他 LLM API
-LLM_MODEL=gpt-4o
-
-# Supabase 配置
+# Supabase（与 supabase/.env 一致）
 SUPABASE_URL=http://localhost:8000
 SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_KEY=your-service-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-key
 
-# 飞书配置 (可选)
+# LLM 配置（默认 DeepSeek）
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL_ID=deepseek-chat
+
+# 飞书配置（可选，推送目标按模板在 Supabase 中配置）
 FEISHU_APP_ID=your-app-id
 FEISHU_APP_SECRET=your-app-secret
-FEISHU_PUSH_ENABLED=true
-# 以下两项为检测报告多维表格地址，仅作迁移参考
-# 运行前请在 Supabase 中执行一次 UPDATE，见下方说明
-FEISHU_BITABLE_APP_TOKEN=your-inspection-report-app-token
-FEISHU_BITABLE_TABLE_ID=your-inspection-report-table-id
+FEISHU_PUSH_ENABLED=false
+
+# 文档处理模式：ocr_llm（默认）| vlm
+DOC_PROCESS_MODE=ocr_llm
+
+# VLM 配置（DOC_PROCESS_MODE=vlm 时生效）
+VLM_API_KEY=
+VLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+VLM_MODEL_ID=qwen3.5-plus
 ```
 
-> 各模板（检测报告、抽样单、照明综合报告）的飞书目标表格已统一在
-> `supabase/migrations/002_init_data.sql` 中配置，无需额外手动操作。
-> `FEISHU_BITABLE_APP_TOKEN` 和 `FEISHU_BITABLE_TABLE_ID` 环境变量已废弃，可忽略。
+> 各模板的飞书目标表格（feishu_bitable_token、feishu_table_id）在
+> `supabase/migrations/002_init_data.sql` 及管理后台中配置，无需环境变量。
 
 ## UI/UX Pro Max
 
@@ -259,13 +304,30 @@ python3 .shared/ui-ux-pro-max/scripts/search.py "dashboard layout" --stack html-
 | 2026-01-08 | feat | 飞书多维表格推送服务 |
 | 2026-01-13 | refactor | 路由拆分、异常体系重构 |
 | 2026-01-13 | feat | pending_review 强制审核流程 |
+| 2026-03 | feat | 模板化管理、合并模式、多部门配置 |
+| 2026-03 | feat | VLM 多模态提取模式、process-with-template 返回 202 |
+| 2026-03 | refactor | 代码质量优化：飞书推送统一、权限检查复用、auth 中间件、安全加固、死代码清理、过长函数拆分、服务层装饰器、共享基类 |
+
+## 代码规范
+
+项目遵循 [.cursor/rules/code-simplifier.mdc](.cursor/rules/code-simplifier.mdc) 原则：保持功能不变的前提下提升可读性与可维护性，避免嵌套三元、冗余抽象，优先显式逻辑。
+
+## 测试
+
+```bash
+# 运行全部测试
+pytest -v
+
+# 运行指定模块
+pytest tests/routes/ -v
+pytest tests/services/ -v
+```
 
 ## 相关文档
 
-- [项目结构详解](./STRUCTURE.md)
-- [项目构建经验总结](./项目构建经验总结.md)
-- [实施方案](./实施方案_V2.md)
 - [Supabase 部署指南](./supabase/README.md)
+- [生产部署说明](./deploy/REDEPLOY_WITH_NEW_CODE.md)
+- [代码质量优化计划](./.cursor/plans/代码质量优化计划_f9149055.plan.md)
 
 ## License
 

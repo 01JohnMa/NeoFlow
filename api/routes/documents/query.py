@@ -10,17 +10,10 @@ import os
 from services.supabase_service import supabase_service
 from services.template_service import template_service
 from api.dependencies.auth import get_current_user, CurrentUser
-from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AuthenticationError
-from .helpers import parse_allowed_values
+from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError
+from .helpers import parse_allowed_values, raise_auth_or_processing_error
 
 router = APIRouter()
-
-
-def _is_auth_error(error: Exception) -> bool:
-    """检测是否为认证/授权相关错误（token 过期等）"""
-    error_str = str(error).lower()
-    auth_keywords = ['jwt', 'token', '401', '502', 'expired', 'invalid', 'unauthorized']
-    return any(keyword in error_str for keyword in auth_keywords)
 
 
 @router.get("/{document_id}/status")
@@ -73,10 +66,7 @@ async def get_document_status(
     except DocumentNotFoundError:
         raise
     except Exception as e:
-        if _is_auth_error(e):
-            logger.warning(f"Token 认证失败，需要重新登录: {e}")
-            raise AuthenticationError("登录已过期，请重新登录")
-        raise ProcessingError(f"获取状态失败: {str(e)}")
+        raise_auth_or_processing_error(e, "获取状态失败")
 
 
 def _check_document_access(document: dict, user: CurrentUser, document_id: str):
@@ -127,9 +117,12 @@ async def get_extraction_result(
         
         document_type = document.get("document_type")
         doc_status = document.get("status")
-        
-        # 表映射关系（使用 supabase_service 的方法）
-        table_name = supabase_service.get_table_name(document_type) if document_type else None
+
+        # 优先用 template_id 查 target_table，fallback 到 TABLE_MAP
+        table_name = supabase_service.resolve_table_name(
+            template_id=document.get("template_id"),
+            document_type=document_type,
+        )
         
         # 如果文档正在处理中或尚未有类型
         if not document_type:
@@ -182,9 +175,8 @@ async def get_extraction_result(
         else:
             result = None
         
-        # 按 document_type 查询
+        # 按 document_type 查询（复用上面已解析的 table_name）
         if result is None:
-            table_name = supabase_service.get_table_name(document_type)
             if table_name:
                 result_query = supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
                 result = result_query.data[0] if result_query.data else None
@@ -260,10 +252,7 @@ async def get_extraction_result(
     except (DocumentNotFoundError, HTTPException):
         raise
     except Exception as e:
-        if _is_auth_error(e):
-            logger.warning(f"Token 认证失败，需要重新登录: {e}")
-            raise AuthenticationError("登录已过期，请重新登录")
-        raise ProcessingError(f"获取结果失败: {str(e)}")
+        raise_auth_or_processing_error(e, "获取结果失败")
 
 
 @router.get("/{document_id}/download")
@@ -298,10 +287,7 @@ async def download_document(
     except (DocumentNotFoundError, FileNotFoundError):
         raise
     except Exception as e:
-        if _is_auth_error(e):
-            logger.warning(f"Token 认证失败，需要重新登录: {e}")
-            raise AuthenticationError("登录已过期，请重新登录")
-        raise ProcessingError(f"下载失败: {str(e)}")
+        raise_auth_or_processing_error(e, "下载失败")
 
 
 @router.get("/")
@@ -368,11 +354,8 @@ async def list_documents(
         }
         
     except Exception as e:
-        if _is_auth_error(e):
-            logger.warning(f"Token 认证失败，需要重新登录: {e}")
-            raise AuthenticationError("登录已过期，请重新登录")
         logger.error(f"查询文档失败: {e}")
-        raise ProcessingError(f"查询失败: {str(e)}")
+        raise_auth_or_processing_error(e, "查询失败")
 
 
 @router.delete("/{document_id}")
@@ -410,7 +393,4 @@ async def delete_document(
     except DocumentNotFoundError:
         raise
     except Exception as e:
-        if _is_auth_error(e):
-            logger.warning(f"Token 认证失败，需要重新登录: {e}")
-            raise AuthenticationError("登录已过期，请重新登录")
-        raise ProcessingError(f"删除失败: {str(e)}")
+        raise_auth_or_processing_error(e, "删除失败")
