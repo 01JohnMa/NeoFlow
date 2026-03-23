@@ -2,6 +2,8 @@
 
 因 SVN 已不可用，需要先把**最新代码**弄到服务器，再在服务器上删旧镜像、用新代码重新构建并启动。数据库卷可保留，用户数据不丢。
 
+> **需「重建数据库结构且仅迁移 `auth.users` / `profiles`」时**：见 [PRODUCTION_DEPLOY_AND_USER_MIGRATION.md](./PRODUCTION_DEPLOY_AND_USER_MIGRATION.md)。
+
 ---
 
 ## 一、把最新代码弄到服务器（三选一）
