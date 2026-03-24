@@ -12,13 +12,9 @@ interface LightingGroup {
 interface BatchMergePairingProps {
   groups: LightingGroup[]
   groupErrors?: Record<string, string[]>
-  groupCustomPushNames?: Record<string, string>
-  groupEffectivePushNames?: Record<string, string>
   disabled?: boolean
   onAddGroup: () => void
   onUpdateGroupFile: (groupId: string, slotKey: 'sphereFile' | 'distributionFile', file: File | null) => void
-  onUpdateGroupCustomPushName: (groupId: string, value: string) => void
-  onApplyGroupRecommendedName: (groupId: string) => void
   onRemoveGroup: (groupId: string) => void
 }
 
@@ -70,13 +66,9 @@ function toCompositeGroups(groups: LightingGroup[]): CompositeGroup[] {
 export function BatchMergePairing({
   groups,
   groupErrors = {},
-  groupCustomPushNames = {},
-  groupEffectivePushNames = {},
   disabled = false,
   onAddGroup,
   onUpdateGroupFile,
-  onUpdateGroupCustomPushName,
-  onApplyGroupRecommendedName,
   onRemoveGroup,
 }: BatchMergePairingProps) {
   return (
@@ -84,8 +76,6 @@ export function BatchMergePairing({
       scenario={lightingScenario}
       groups={toCompositeGroups(groups)}
       groupErrors={groupErrors}
-      groupCustomPushNames={groupCustomPushNames}
-      groupEffectivePushNames={groupEffectivePushNames}
       disabled={disabled}
       showTemplateSelector={false}
       onAddGroup={onAddGroup}
@@ -93,8 +83,6 @@ export function BatchMergePairing({
         // legacy wrapper keeps template mapping fixed for old callers
       }}
       onUpdateGroupFile={(groupId, slotKey, file) => onUpdateGroupFile(groupId, slotKey as SlotKey, file)}
-      onUpdateGroupCustomPushName={onUpdateGroupCustomPushName}
-      onApplyGroupRecommendedName={onApplyGroupRecommendedName}
       onRemoveGroup={onRemoveGroup}
     />
   )

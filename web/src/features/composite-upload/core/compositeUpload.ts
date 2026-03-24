@@ -76,6 +76,25 @@ export function createEmptyCompositeGroup(scenario: CompositeScenarioConfig): Co
   }
 }
 
+/** 新增分组时复用第一组在各槽位已选的文档类型（未出现的槽位保持空分组默认 null） */
+export function createEmptyCompositeGroupSeededFromFirst(
+  scenario: CompositeScenarioConfig,
+  firstGroup: CompositeGroup,
+): CompositeGroup {
+  const base = createEmptyCompositeGroup(scenario)
+  const keys = getConfiguredSlotKeys(scenario)
+
+  return {
+    ...base,
+    templateSelections: Object.fromEntries(
+      keys.map((slotKey) => {
+        const fromFirst = firstGroup.templateSelections[slotKey]
+        return [slotKey, fromFirst !== undefined ? fromFirst : base.templateSelections[slotKey]]
+      }),
+    ),
+  }
+}
+
 export function summarizeCompositeGroups(
   groups: CompositeGroup[],
   scenario: CompositeScenarioConfig,

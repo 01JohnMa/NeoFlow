@@ -3,16 +3,18 @@ import { useNavigate } from 'react-router-dom'
 import documentsService from '@/services/documents'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { CompositeGroupEditor } from '@/features/composite-upload/components/CompositeGroupEditor'
 import {
   buildCompositeBatchPayload,
   createEmptyCompositeGroup,
+  createEmptyCompositeGroupSeededFromFirst,
   getDefaultCompositeGroupPushName,
   getSubmittableCompositeGroups,
   getSubmittableCompositeUploadFiles,
   isCompositeFileUsedInOtherGroups,
   validateCompositeGroups,
-  summarizeCompositeGroups,
 } from '@/features/composite-upload/core/compositeUpload'
 import type { CompositeGroup, CompositeScenarioConfig, CompositeSlotKey, CompositeUploadedFile } from '@/features/composite-upload/core/types'
 import {
@@ -124,10 +126,6 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
     )))
   }, [createCompositeUploadedFile, groups])
 
-  const batchSummary = useMemo(
-    () => summarizeCompositeGroups(groups, scenario),
-    [groups, scenario],
-  )
   const batchValidation = useMemo(
     () => validateCompositeGroups(groups, scenario),
     [groups, scenario],
@@ -287,66 +285,92 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <CompositeGroupEditor
-          scenario={scenario}
-          groups={groups}
-          groupErrors={batchValidation.groupErrors}
-          groupCustomPushNames={groupCustomPushNames}
-          groupEffectivePushNames={groupEffectivePushNames}
-          disabled={batchPhase !== 'idle'}
-          onAddGroup={() => setGroups(prev => [...prev, createEmptyCompositeGroup(scenario)])}
-          onUpdateGroupTemplateSelection={(groupId, slotKey, templateId) => {
-            setGroups(prev => prev.map(group => (
-              group.id === groupId
-                ? {
-                    ...group,
-                    templateSelections: {
-                      ...group.templateSelections,
-                      [slotKey]: templateId,
-                    },
-                  }
-                : group
-            )))
-          }}
-          onUpdateGroupFile={handleGroupFileChange}
-          onUpdateGroupCustomPushName={(groupId, value) => {
-            setGroupCustomPushNames(prev => ({
+        <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(300px,22rem)] lg:items-start">
+          <CompositeGroupEditor
+            scenario={scenario}
+            groups={groups}
+            groupErrors={batchValidation.groupErrors}
+            disabled={batchPhase !== 'idle'}
+            onAddGroup={() => setGroups(prev => [
               ...prev,
-              [groupId]: value,
-            }))
-          }}
-          onApplyGroupRecommendedName={(groupId) => {
-            const targetGroup = groups.find(group => group.id === groupId)
-            const defaultName = targetGroup ? getDefaultCompositeGroupPushName(targetGroup, scenario) : ''
-            setGroupCustomPushNames(prev => ({
-              ...prev,
-              [groupId]: defaultName,
-            }))
-          }}
-          onRemoveGroup={(groupId) => {
-            setGroups(prev => {
-              const next = prev.filter(group => group.id !== groupId)
-              return next.length > 0 ? next : [createEmptyCompositeGroup(scenario)]
-            })
-            setGroupCustomPushNames(prev => {
-              const next = { ...prev }
-              delete next[groupId]
-              return next
-            })
-          }}
-        />
+              createEmptyCompositeGroupSeededFromFirst(scenario, prev[0]),
+            ])}
+            onUpdateGroupTemplateSelection={(groupId, slotKey, templateId) => {
+              setGroups(prev => prev.map(group => (
+                group.id === groupId
+                  ? {
+                      ...group,
+                      templateSelections: {
+                        ...group.templateSelections,
+                        [slotKey]: templateId,
+                      },
+                    }
+                  : group
+              )))
+            }}
+            onUpdateGroupFile={handleGroupFileChange}
+            onRemoveGroup={(groupId) => {
+              setGroups(prev => {
+                const next = prev.filter(group => group.id !== groupId)
+                return next.length > 0 ? next : [createEmptyCompositeGroup(scenario)]
+              })
+              setGroupCustomPushNames(prev => {
+                const next = { ...prev }
+                delete next[groupId]
+                return next
+              })
+            }}
+          />
 
-        <div className="rounded-lg border border-border-default bg-bg-secondary/50 p-3 text-sm text-text-secondary">
-          <div>任务摘要</div>
-          <div className="mt-1 text-text-muted">
-            完整组 {batchSummary.complete} / 部分组 {batchSummary.partial} / 空组 {batchSummary.empty} / 共 {batchSummary.totalTasks} 项任务
+          <div className="rounded-lg border border-border-default bg-bg-secondary/40 p-4 lg:min-w-0" aria-label="推送文件名侧栏">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm font-medium text-text-primary">推送文件名</Label>
+              <span className="text-xs text-text-muted">按分组命名</span>
+            </div>
+            <div className="mt-3 space-y-3">
+              {groups.map((group, index) => {
+                const recommendedName = groupEffectivePushNames[group.id] || ''
+
+                return (
+                  <div key={`${group.id}-push-name`} className="space-y-2 rounded-md border border-border-default/70 bg-bg-primary p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-text-secondary">分组 {index + 1}</span>
+                      {batchPhase === 'idle' && recommendedName && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-[11px] text-text-muted"
+                          onClick={() => {
+                            setGroupCustomPushNames(prev => ({
+                              ...prev,
+                              [group.id]: recommendedName,
+                            }))
+                          }}
+                        >
+                          使用推荐名
+                        </Button>
+                      )}
+                    </div>
+                    <Input
+                      value={groupCustomPushNames[group.id] || ''}
+                      onChange={(e) => {
+                        const { value } = e.target
+                        setGroupCustomPushNames(prev => ({
+                          ...prev,
+                          [group.id]: value,
+                        }))
+                      }}
+                      placeholder={recommendedName || '请先在该组上传文件'}
+                      maxLength={100}
+                      disabled={batchPhase !== 'idle'}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div className="mt-1 text-text-muted">
-            当前可提交 {batchValidation.validTaskCount} 项，实际将上传 {submittableFiles.length} 个组内文件。
-          </div>
-          {batchSummary.totalTasks > scenario.maxGroups && (
-            <div className="mt-1 text-error-500">当前任务数已超过上限。</div>
-          )}
         </div>
 
         {batchValidation.globalErrors.length > 0 && (

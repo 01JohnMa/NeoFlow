@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCompositeBatchPayload,
   createEmptyCompositeGroup,
+  createEmptyCompositeGroupSeededFromFirst,
   getDefaultCompositeGroupPushName,
   getSubmittableCompositeGroups,
   getSubmittableCompositeUploadFiles,
@@ -97,6 +98,23 @@ describe('composite upload core', () => {
         slotA: null,
         slotB: null,
       },
+    })
+  })
+
+  it('新增分组时从第一组复制各槽位的文档类型选择', () => {
+    const scenario = createScenario()
+    const first = createGroup('g1', {
+      templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
+    })
+    const seeded = createEmptyCompositeGroupSeededFromFirst(scenario, first)
+
+    expect(seeded.templateSelections).toEqual({
+      slotA: 'tpl-a',
+      slotB: 'tpl-b',
+    })
+    expect(seeded.documents).toEqual({
+      slotA: null,
+      slotB: null,
     })
   })
 

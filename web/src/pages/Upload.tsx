@@ -37,7 +37,7 @@ export function Upload() {
   const showTabs = Boolean(tenantCode) && availableTabs.length > 1
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-fadeIn">
+    <div className="mx-auto w-full max-w-6xl space-y-6 px-4 sm:px-6 animate-fadeIn">
       <div>
         <h2 className="text-2xl font-bold text-text-primary">上传文档</h2>
         <p className="text-text-secondary mt-1">

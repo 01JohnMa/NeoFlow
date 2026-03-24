@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatFileSize } from '@/lib/utils'
 import type { CompositeGroup, CompositeScenarioConfig, CompositeSlotKey, CompositeUploadedFile } from '@/features/composite-upload/core/types'
@@ -16,15 +15,11 @@ interface CompositeGroupEditorProps {
   scenario: CompositeScenarioConfig
   groups: CompositeGroup[]
   groupErrors?: Record<string, string[]>
-  groupCustomPushNames?: Record<string, string>
-  groupEffectivePushNames?: Record<string, string>
   disabled?: boolean
   showTemplateSelector?: boolean
   onAddGroup: () => void
   onUpdateGroupTemplateSelection: (groupId: string, slotKey: CompositeSlotKey, templateId: string | null) => void
   onUpdateGroupFile: (groupId: string, slotKey: CompositeSlotKey, file: File | null) => void
-  onUpdateGroupCustomPushName: (groupId: string, value: string) => void
-  onApplyGroupRecommendedName: (groupId: string) => void
   onRemoveGroup: (groupId: string) => void
 }
 
@@ -157,26 +152,15 @@ export function CompositeGroupEditor({
   scenario,
   groups,
   groupErrors = {},
-  groupCustomPushNames = {},
-  groupEffectivePushNames = {},
   disabled = false,
   showTemplateSelector = true,
   onAddGroup,
   onUpdateGroupTemplateSelection,
   onUpdateGroupFile,
-  onUpdateGroupCustomPushName,
-  onApplyGroupRecommendedName,
   onRemoveGroup,
 }: CompositeGroupEditorProps) {
   return (
     <div className="space-y-3">
-      <div>
-        <Label className="text-sm font-medium text-text-secondary">组合分组</Label>
-        <p className="mt-1 text-xs text-text-muted">
-          按组上传多个关联文档，为每个槽位选择文档类型。单组支持单文件处理或双文件合并处理。
-        </p>
-      </div>
-
       {groups.map((group, index) => {
         const status = getGroupStatus(group, scenario)
         const statusMeta = getGroupStatusMeta(status)
@@ -185,7 +169,7 @@ export function CompositeGroupEditor({
         return (
           <div
             key={group.id}
-            className="space-y-3 rounded-lg border border-border-default bg-bg-primary p-3"
+            className="space-y-4 rounded-lg border border-border-default bg-bg-primary p-4"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -205,7 +189,7 @@ export function CompositeGroupEditor({
               </Button>
             </div>
 
-            <div className={`grid gap-2.5 ${scenario.slotDefinitions.length > 1 ? 'md:grid-cols-2' : ''}`}>
+            <div className={`grid gap-4 ${scenario.slotDefinitions.length > 1 ? 'lg:grid-cols-2' : ''}`}>
               {scenario.slotDefinitions.map(slot => (
                 <FileSlot
                   key={`${group.id}-${slot.slotKey}`}
@@ -220,34 +204,6 @@ export function CompositeGroupEditor({
                   onClear={() => onUpdateGroupFile(group.id, slot.slotKey, null)}
                 />
               ))}
-            </div>
-
-            <div className="space-y-2 rounded-md border border-border-default/70 p-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <Label className="text-xs text-text-secondary">当前组自定义文件名</Label>
-                {!disabled && groupEffectivePushNames[group.id] && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-1.5 text-[11px] text-text-muted"
-                    onClick={() => onApplyGroupRecommendedName(group.id)}
-                  >
-                    使用推荐文件名
-                  </Button>
-                )}
-              </div>
-              <Input
-                value={groupCustomPushNames[group.id] || ''}
-                onChange={(e) => onUpdateGroupCustomPushName(group.id, e.target.value)}
-                placeholder={groupEffectivePushNames[group.id] || '请先在该组上传文件'}
-                maxLength={100}
-                disabled={disabled}
-                className="h-8 text-xs"
-              />
-              <div className="text-[11px] text-text-muted">
-                实际生效名称：{groupEffectivePushNames[group.id] || '未生成'}
-              </div>
             </div>
 
             {errors.length > 0 && (
