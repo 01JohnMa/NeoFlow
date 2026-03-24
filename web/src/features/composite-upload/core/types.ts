@@ -11,6 +11,7 @@ export interface CompositeUploadedFile {
 export interface CompositeGroup {
   id: string
   documents: Record<CompositeSlotKey, CompositeUploadedFile | null>
+  templateSelections: Record<CompositeSlotKey, string | null>
 }
 
 export interface CompositeScenarioSlotDefinition {
@@ -19,6 +20,12 @@ export interface CompositeScenarioSlotDefinition {
   templateCode?: string
   templateId?: string
   required: boolean
+}
+
+export interface CompositeTemplateOption {
+  id: string
+  name: string
+  code: string
 }
 
 export type CompositePushNameStrategy = 'slotA-first' | 'slotB-first' | 'first-available'
@@ -30,6 +37,7 @@ export interface CompositeScenarioConfig {
   enabled: boolean
   maxGroups: number
   slotDefinitions: CompositeScenarioSlotDefinition[]
+  templateOptions: CompositeTemplateOption[]
   pushNameStrategy: CompositePushNameStrategy
 }
 

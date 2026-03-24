@@ -19,7 +19,9 @@ interface CompositeGroupEditorProps {
   groupCustomPushNames?: Record<string, string>
   groupEffectivePushNames?: Record<string, string>
   disabled?: boolean
+  showTemplateSelector?: boolean
   onAddGroup: () => void
+  onUpdateGroupTemplateSelection: (groupId: string, slotKey: CompositeSlotKey, templateId: string | null) => void
   onUpdateGroupFile: (groupId: string, slotKey: CompositeSlotKey, file: File | null) => void
   onUpdateGroupCustomPushName: (groupId: string, value: string) => void
   onApplyGroupRecommendedName: (groupId: string) => void
@@ -59,19 +61,27 @@ function getGroupStatusMeta(status: GroupStatus) {
 
 function FileSlot({
   title,
+  templateValue,
+  templateOptions,
   file,
   disabled,
+  showTemplateSelector,
+  onTemplateChange,
   onSelect,
   onClear,
 }: {
   title: string
+  templateValue: string | null
+  templateOptions: CompositeScenarioConfig['templateOptions']
   file: CompositeUploadedFile | null
   disabled: boolean
+  showTemplateSelector: boolean
+  onTemplateChange: (templateId: string | null) => void
   onSelect: (file: File | null) => void
   onClear: () => void
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <Label className="text-xs text-text-secondary">{title}</Label>
         {file && (
@@ -87,6 +97,22 @@ function FileSlot({
           </Button>
         )}
       </div>
+
+      {showTemplateSelector && (
+        <select
+          value={templateValue || ''}
+          disabled={disabled}
+          onChange={(event) => onTemplateChange(event.target.value || null)}
+          className="h-8 w-full rounded-md border border-border-default bg-bg-primary px-2.5 text-xs text-text-primary"
+        >
+          <option value="">选择文档类型...</option>
+          {templateOptions.map(option => (
+            <option key={option.id} value={option.id}>
+              {option.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <label className="block cursor-pointer">
         <input
@@ -134,7 +160,9 @@ export function CompositeGroupEditor({
   groupCustomPushNames = {},
   groupEffectivePushNames = {},
   disabled = false,
+  showTemplateSelector = true,
   onAddGroup,
+  onUpdateGroupTemplateSelection,
   onUpdateGroupFile,
   onUpdateGroupCustomPushName,
   onApplyGroupRecommendedName,
@@ -145,7 +173,7 @@ export function CompositeGroupEditor({
       <div>
         <Label className="text-sm font-medium text-text-secondary">组合分组</Label>
         <p className="mt-1 text-xs text-text-muted">
-          按组上传多个关联文档，点击已上传文件可直接替换。
+          按组上传多个关联文档，为每个槽位选择文档类型。单组支持单文件处理或双文件合并处理。
         </p>
       </div>
 
@@ -182,8 +210,12 @@ export function CompositeGroupEditor({
                 <FileSlot
                   key={`${group.id}-${slot.slotKey}`}
                   title={slot.label}
+                  templateValue={group.templateSelections[slot.slotKey] || slot.templateId || null}
+                  templateOptions={scenario.templateOptions}
                   file={group.documents[slot.slotKey]}
                   disabled={disabled}
+                  showTemplateSelector={showTemplateSelector}
+                  onTemplateChange={(templateId) => onUpdateGroupTemplateSelection(group.id, slot.slotKey, templateId)}
                   onSelect={(file) => onUpdateGroupFile(group.id, slot.slotKey, file)}
                   onClear={() => onUpdateGroupFile(group.id, slot.slotKey, null)}
                 />

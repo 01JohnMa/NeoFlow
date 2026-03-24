@@ -35,12 +35,20 @@ const lightingScenario: CompositeScenarioConfig = {
       slotKey: 'distributionFile',
       label: '光分布',
       required: false,
+      templateId: 'light_distribution',
+      templateCode: 'light_distribution',
     },
     {
       slotKey: 'sphereFile',
       label: '积分球',
       required: false,
+      templateId: 'integrating_sphere',
+      templateCode: 'integrating_sphere',
     },
+  ],
+  templateOptions: [
+    { id: 'light_distribution', name: '光分布', code: 'light_distribution' },
+    { id: 'integrating_sphere', name: '积分球', code: 'integrating_sphere' },
   ],
   pushNameStrategy: 'slotA-first',
 }
@@ -51,6 +59,10 @@ function toCompositeGroups(groups: LightingGroup[]): CompositeGroup[] {
     documents: {
       distributionFile: group.distributionFile,
       sphereFile: group.sphereFile,
+    },
+    templateSelections: {
+      distributionFile: 'light_distribution',
+      sphereFile: 'integrating_sphere',
     },
   }))
 }
@@ -75,7 +87,11 @@ export function BatchMergePairing({
       groupCustomPushNames={groupCustomPushNames}
       groupEffectivePushNames={groupEffectivePushNames}
       disabled={disabled}
+      showTemplateSelector={false}
       onAddGroup={onAddGroup}
+      onUpdateGroupTemplateSelection={() => {
+        // legacy wrapper keeps template mapping fixed for old callers
+      }}
       onUpdateGroupFile={(groupId, slotKey, file) => onUpdateGroupFile(groupId, slotKey as SlotKey, file)}
       onUpdateGroupCustomPushName={onUpdateGroupCustomPushName}
       onApplyGroupRecommendedName={onApplyGroupRecommendedName}

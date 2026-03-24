@@ -44,6 +44,13 @@ export function resolveLightingScenario(templates: Template[]): CompositeScenari
     enabled: true,
     maxGroups: LIGHTING_MAX_GROUPS,
     slotDefinitions,
+    templateOptions: templates
+      .filter(template => template.is_active !== false)
+      .map(template => ({
+        id: template.id,
+        name: template.name,
+        code: template.code,
+      })),
     pushNameStrategy: 'slotB-first',
   }
 }

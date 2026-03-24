@@ -34,38 +34,49 @@ function createNativeFile(name: string, lastModified: number = 1710000000000): F
   })
 }
 
-function createGroup(id: string, documents?: Partial<Record<'slotA' | 'slotB', CompositeUploadedFile>>): CompositeGroup {
+function createGroup(
+  id: string,
+  options?: {
+    documents?: Partial<Record<'slotA' | 'slotB', CompositeUploadedFile>>
+    templateSelections?: Partial<Record<'slotA' | 'slotB', string | null>>
+  },
+): CompositeGroup {
   return {
     id,
     documents: {
-      slotA: documents?.slotA ?? null,
-      slotB: documents?.slotB ?? null,
+      slotA: options?.documents?.slotA ?? null,
+      slotB: options?.documents?.slotB ?? null,
+    },
+    templateSelections: {
+      slotA: options?.templateSelections?.slotA ?? null,
+      slotB: options?.templateSelections?.slotB ?? null,
     },
   }
 }
 
 function createScenario(overrides?: Partial<CompositeScenarioConfig>): CompositeScenarioConfig {
   return {
-    scenarioKey: 'lighting_pair',
-    displayName: '照明分组上传',
-    description: '按组上传双文档',
+    scenarioKey: 'generic_batch',
+    displayName: '批量处理',
+    description: '按组上传文档',
     enabled: true,
     maxGroups: 5,
     slotDefinitions: [
       {
         slotKey: 'slotA',
-        label: '积分球',
-        templateCode: 'integrating_sphere',
-        templateId: 'sphere-tpl',
+        label: '文档 A',
         required: false,
       },
       {
         slotKey: 'slotB',
-        label: '光分布',
-        templateCode: 'light_distribution',
-        templateId: 'distribution-tpl',
+        label: '文档 B',
         required: false,
       },
+    ],
+    templateOptions: [
+      { id: 'tpl-a', name: '模板 A', code: 'template_a' },
+      { id: 'tpl-b', name: '模板 B', code: 'template_b' },
+      { id: 'tpl-c', name: '模板 C', code: 'template_c' },
     ],
     pushNameStrategy: 'slotB-first',
     ...overrides,
@@ -73,12 +84,16 @@ function createScenario(overrides?: Partial<CompositeScenarioConfig>): Composite
 }
 
 describe('composite upload core', () => {
-  it('创建空分组时包含场景定义的全部槽位', () => {
+  it('创建空分组时包含场景定义的全部槽位和模板选择状态', () => {
     const scenario = createScenario()
 
     expect(createEmptyCompositeGroup(scenario)).toEqual({
       id: expect.stringMatching(/^composite-group-/),
       documents: {
+        slotA: null,
+        slotB: null,
+      },
+      templateSelections: {
         slotA: null,
         slotB: null,
       },
@@ -88,9 +103,15 @@ describe('composite upload core', () => {
   it('按场景策略汇总分组状态与任务总数', () => {
     const scenario = createScenario()
     const groups = [
-      createGroup('g1', { slotA: createFile('a1', '积分球A.pdf'), slotB: createFile('b1', '光分布A.pdf') }),
-      createGroup('g2', { slotA: createFile('a2', '积分球B.pdf') }),
-      createGroup('g3', { slotB: createFile('b3', '光分布C.pdf') }),
+      createGroup('g1', {
+        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
+      }),
+      createGroup('g2', {
+        documents: { slotA: createFile('a2', '文档A2.pdf') },
+        templateSelections: { slotA: 'tpl-c' },
+      }),
+      createGroup('g3', { documents: { slotB: createFile('b3', '文档B3.pdf') } }),
       createGroup('g4'),
     ]
 
@@ -102,31 +123,32 @@ describe('composite upload core', () => {
     })
   })
 
-  it('缺少槽位模板时返回分组级校验错误', () => {
-    const scenario = createScenario({
-      slotDefinitions: [
-        {
-          slotKey: 'slotA',
-          label: '积分球',
-          templateCode: 'integrating_sphere',
-          templateId: 'sphere-tpl',
-          required: false,
-        },
-      ],
-    })
-    const groups = [createGroup('g1', { slotA: createFile('a1', '积分球A.pdf'), slotB: createFile('b1', '光分布A.pdf') })]
+  it('文件已上传但未选择模板时返回分组级校验错误', () => {
+    const scenario = createScenario()
+    const groups = [
+      createGroup('g1', {
+        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        templateSelections: { slotA: 'tpl-a' },
+      }),
+    ]
 
     const result = validateCompositeGroups(groups, scenario)
 
     expect(result.canSubmit).toBe(false)
-    expect(result.groupErrors.g1).toContain('缺少“slotB”对应模板，当前分组无法提交该槽位文件')
+    expect(result.groupErrors.g1).toContain('请为“文档 B”选择文档类型后再提交')
   })
 
-  it('根据已上传文档构建 single 与 merge 批处理项，并按组映射推送名', () => {
+  it('根据组内已选择模板构建 single 与 merge 批处理项，并按组映射推送名', () => {
     const scenario = createScenario()
     const groups = [
-      createGroup('g1', { slotA: createFile('a1', '积分球A.pdf'), slotB: createFile('b1', '光分布A.pdf') }),
-      createGroup('g2', { slotB: createFile('b2', '光分布B.pdf') }),
+      createGroup('g1', {
+        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
+      }),
+      createGroup('g2', {
+        documents: { slotB: createFile('b2', '文档B2.pdf') },
+        templateSelections: { slotB: 'tpl-c' },
+      }),
     ]
 
     const result = buildCompositeBatchPayload({
@@ -146,14 +168,14 @@ describe('composite upload core', () => {
     expect(result.items).toEqual([
       {
         document_id: 'doc-a1',
-        template_id: 'sphere-tpl',
+        template_id: 'tpl-a',
         paired_document_id: 'doc-b1',
-        paired_template_id: 'distribution-tpl',
+        paired_template_id: 'tpl-b',
         custom_push_name: '组一推送名',
       },
       {
         document_id: 'doc-b2',
-        template_id: 'distribution-tpl',
+        template_id: 'tpl-c',
         custom_push_name: '组二推送名',
       },
     ])
@@ -168,19 +190,26 @@ describe('composite upload core', () => {
     const scenario = createScenario()
 
     expect(getDefaultCompositeGroupPushName(createGroup('g1', {
-      slotA: createFile('a1', '积分球文件.pdf'),
-      slotB: createFile('b1', '光分布文件.pdf'),
-    }), scenario)).toBe('光分布文件')
+      documents: {
+        slotA: createFile('a1', '文档A.pdf'),
+        slotB: createFile('b1', '文档B.pdf'),
+      },
+      templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
+    }), scenario)).toBe('文档B')
 
     expect(getDefaultCompositeGroupPushName(createGroup('g2', {
-      slotA: createFile('a2', '仅积分球文件.pdf'),
-    }), scenario)).toBe('仅积分球文件')
+      documents: { slotA: createFile('a2', '仅文档A.pdf') },
+      templateSelections: { slotA: 'tpl-a' },
+    }), scenario)).toBe('仅文档A')
   })
 
   it('检测跨分组重复文件占用', () => {
     const duplicatedFile = createNativeFile('重复文件.pdf')
     const groups = [
-      createGroup('g1', { slotA: { id: 'f1', file: duplicatedFile, preview: null } }),
+      createGroup('g1', {
+        documents: { slotA: { id: 'f1', file: duplicatedFile, preview: null } },
+        templateSelections: { slotA: 'tpl-a' },
+      }),
       createGroup('g2'),
     ]
 
@@ -192,9 +221,17 @@ describe('composite upload core', () => {
   it('仅返回可提交分组涉及的文件', () => {
     const scenario = createScenario()
     const groups = [
-      createGroup('g1', { slotA: createFile('a1', '积分球A.pdf'), slotB: createFile('b1', '光分布A.pdf') }),
-      createGroup('g2', { slotB: createFile('b2', '光分布B.pdf') }),
-      createGroup('g3'),
+      createGroup('g1', {
+        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
+      }),
+      createGroup('g2', {
+        documents: { slotB: createFile('b2', '文档B2.pdf') },
+        templateSelections: { slotB: 'tpl-c' },
+      }),
+      createGroup('g3', {
+        documents: { slotA: createFile('a3', '文档A3.pdf') },
+      }),
     ]
 
     expect(getSubmittableCompositeGroups(groups, scenario).map(group => group.id)).toEqual(['g1', 'g2'])

@@ -230,7 +230,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
       })
 
       if (items.length === 0) {
-        throw new Error('没有可提交的有效任务，请检查分组和模板配置')
+        throw new Error('没有可提交的有效任务，请检查分组和文档类型选择')
       }
 
       const { job_id } = await documentsService.submitBatchProcess(items)
@@ -295,6 +295,19 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
           groupEffectivePushNames={groupEffectivePushNames}
           disabled={batchPhase !== 'idle'}
           onAddGroup={() => setGroups(prev => [...prev, createEmptyCompositeGroup(scenario)])}
+          onUpdateGroupTemplateSelection={(groupId, slotKey, templateId) => {
+            setGroups(prev => prev.map(group => (
+              group.id === groupId
+                ? {
+                    ...group,
+                    templateSelections: {
+                      ...group.templateSelections,
+                      [slotKey]: templateId,
+                    },
+                  }
+                : group
+            )))
+          }}
           onUpdateGroupFile={handleGroupFileChange}
           onUpdateGroupCustomPushName={(groupId, value) => {
             setGroupCustomPushNames(prev => ({

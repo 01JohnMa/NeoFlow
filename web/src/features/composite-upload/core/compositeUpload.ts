@@ -4,6 +4,7 @@ import type {
   CompositeGroupStatusSummary,
   CompositeGroupValidationResult,
   CompositeScenarioConfig,
+  CompositeScenarioSlotDefinition,
   CompositeSlotKey,
   CompositeUploadedFile,
 } from './types'
@@ -29,15 +30,48 @@ function getFilledSlotEntries(group: CompositeGroup, scenario: CompositeScenario
     .filter((entry): entry is [CompositeSlotKey, CompositeUploadedFile] => Boolean(entry[1]))
 }
 
+function getSlotDefinition(
+  scenario: CompositeScenarioConfig,
+  slotKey: CompositeSlotKey,
+): CompositeScenarioSlotDefinition | undefined {
+  return scenario.slotDefinitions.find(slot => slot.slotKey === slotKey)
+}
+
+function getEffectiveTemplateId(
+  group: CompositeGroup,
+  scenario: CompositeScenarioConfig,
+  slotKey: CompositeSlotKey,
+): string | null {
+  const selectedTemplateId = group.templateSelections[slotKey]
+  if (selectedTemplateId) {
+    return selectedTemplateId
+  }
+
+  return getSlotDefinition(scenario, slotKey)?.templateId || null
+}
+
+function isAvailableTemplateSelection(scenario: CompositeScenarioConfig, templateId: string): boolean {
+  if (scenario.templateOptions.length === 0) {
+    return true
+  }
+
+  return scenario.templateOptions.some(option => option.id === templateId)
+}
+
 export function getUploadedFileIdentity(file: CompositeUploadedFile): string {
   return [file.file.name, file.file.size, file.file.lastModified, file.file.type].join('::')
 }
 
 export function createEmptyCompositeGroup(scenario: CompositeScenarioConfig): CompositeGroup {
+  const configuredSlotKeys = getConfiguredSlotKeys(scenario)
+
   return {
     id: `composite-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     documents: Object.fromEntries(
-      getConfiguredSlotKeys(scenario).map(slotKey => [slotKey, null])
+      configuredSlotKeys.map(slotKey => [slotKey, null]),
+    ),
+    templateSelections: Object.fromEntries(
+      configuredSlotKeys.map(slotKey => [slotKey, null]),
     ),
   }
 }
@@ -146,8 +180,14 @@ export function validateCompositeGroups(
       const file = group.documents[slotDefinition.slotKey]
       if (!file) return
 
-      if (!slotDefinition.templateId) {
-        errors.push(`缺少“${slotDefinition.slotKey}”对应模板，当前分组无法提交该槽位文件`)
+      const effectiveTemplateId = getEffectiveTemplateId(group, scenario, slotDefinition.slotKey)
+      if (!effectiveTemplateId) {
+        errors.push(`请为“${slotDefinition.label}”选择文档类型后再提交`)
+        return
+      }
+
+      if (!isAvailableTemplateSelection(scenario, effectiveTemplateId)) {
+        errors.push(`“${slotDefinition.label}”选择的文档类型已不可用，请重新选择`)
       }
     })
 
@@ -240,17 +280,17 @@ export function buildCompositeBatchPayload(params: {
     if (filledEntries.length >= 2) {
       const [primarySlotKey, primaryFile] = filledEntries[0]
       const [pairedSlotKey, pairedFile] = filledEntries[1]
-      const primaryTemplate = params.scenario.slotDefinitions.find(slot => slot.slotKey === primarySlotKey)
-      const pairedTemplate = params.scenario.slotDefinitions.find(slot => slot.slotKey === pairedSlotKey)
+      const primaryTemplateId = getEffectiveTemplateId(group, params.scenario, primarySlotKey)
+      const pairedTemplateId = getEffectiveTemplateId(group, params.scenario, pairedSlotKey)
       const primaryDocumentId = getDocumentId(primaryFile)
       const pairedDocumentId = getDocumentId(pairedFile)
 
-      if (primaryDocumentId && pairedDocumentId && primaryTemplate?.templateId && pairedTemplate?.templateId) {
+      if (primaryDocumentId && pairedDocumentId && primaryTemplateId && pairedTemplateId) {
         items.push({
           document_id: primaryDocumentId,
-          template_id: primaryTemplate.templateId,
+          template_id: primaryTemplateId,
           paired_document_id: pairedDocumentId,
-          paired_template_id: pairedTemplate.templateId,
+          paired_template_id: pairedTemplateId,
           custom_push_name: customPushName || undefined,
         })
       }
@@ -260,13 +300,13 @@ export function buildCompositeBatchPayload(params: {
 
     if (filledEntries.length === 1) {
       const [slotKey, file] = filledEntries[0]
-      const template = params.scenario.slotDefinitions.find(slot => slot.slotKey === slotKey)
+      const templateId = getEffectiveTemplateId(group, params.scenario, slotKey)
       const documentId = getDocumentId(file)
 
-      if (documentId && template?.templateId) {
+      if (documentId && templateId) {
         items.push({
           document_id: documentId,
-          template_id: template.templateId,
+          template_id: templateId,
           custom_push_name: customPushName || undefined,
         })
       }

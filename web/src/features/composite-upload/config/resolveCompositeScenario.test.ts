@@ -25,51 +25,66 @@ describe('resolveUploadCapabilities', () => {
     expect(result.compositeScenarios).toEqual([])
   })
 
-  it('有激活模板时启用单文件上传，并基于模板解析照明双文档场景', () => {
+  it('有激活模板时启用单文件上传，并暴露通用批处理场景', () => {
     const result = resolveUploadCapabilities({
-      tenantCode: 'lighting',
+      tenantCode: 'quality',
       templates: [
-        createTemplate({ id: 'sphere-tpl', code: 'integrating_sphere', name: '积分球模板' }),
-        createTemplate({ id: 'distribution-tpl', code: 'light_distribution', name: '光分布模板' }),
-        createTemplate({ id: 'other-tpl', code: 'other_template', name: '其他模板' }),
+        createTemplate({ id: 'tpl-a', code: 'integrating_sphere', name: '积分球模板' }),
+        createTemplate({ id: 'tpl-b', code: 'light_distribution', name: '光分布模板' }),
+        createTemplate({ id: 'tpl-c', code: 'other_template', name: '其他模板' }),
       ],
     })
 
     expect(result.uploadMode).toBe('single')
     expect(result.canUseSingleUpload).toBe(true)
+    expect(result.canUseCompositeUpload).toBe(true)
     expect(result.singleTemplates.map(template => template.id)).toEqual([
-      'sphere-tpl',
-      'distribution-tpl',
-      'other-tpl',
+      'tpl-a',
+      'tpl-b',
+      'tpl-c',
     ])
     expect(result.compositeScenarios).toHaveLength(1)
     expect(result.compositeScenarios[0]).toMatchObject({
-      scenarioKey: 'lighting_pair',
-      displayName: '照明分组上传',
+      scenarioKey: 'generic_batch',
+      displayName: '批量处理',
       enabled: true,
       maxGroups: 5,
       slotDefinitions: [
-        { slotKey: 'slotA', label: '积分球', templateId: 'sphere-tpl' },
-        { slotKey: 'slotB', label: '光分布', templateId: 'distribution-tpl' },
+        { slotKey: 'slotA', label: '文档 A' },
+        { slotKey: 'slotB', label: '文档 B' },
+      ],
+      templateOptions: [
+        { id: 'tpl-a', name: '积分球模板', code: 'integrating_sphere' },
+        { id: 'tpl-b', name: '光分布模板', code: 'light_distribution' },
+        { id: 'tpl-c', name: '其他模板', code: 'other_template' },
       ],
     })
   })
 
-  it('模板不全时场景仍可见，但只有已配置槽位可提交', () => {
+  it('只有一个模板时仍暴露通用批处理场景，供用户做单文件批处理', () => {
     const result = resolveUploadCapabilities({
-      tenantCode: 'lighting',
-      templates: [createTemplate({ id: 'distribution-tpl', code: 'light_distribution', name: '光分布模板' })],
+      tenantCode: 'quality',
+      templates: [createTemplate({ id: 'tpl-only', code: 'quality_report', name: '质量报告模板' })],
     })
 
     expect(result.compositeScenarios).toHaveLength(1)
-    expect(result.compositeScenarios[0].enabled).toBe(true)
     expect(result.compositeScenarios[0].slotDefinitions).toEqual([
       {
-        slotKey: 'slotB',
-        label: '光分布',
-        templateCode: 'light_distribution',
-        templateId: 'distribution-tpl',
+        slotKey: 'slotA',
+        label: '文档 A',
         required: false,
+      },
+      {
+        slotKey: 'slotB',
+        label: '文档 B',
+        required: false,
+      },
+    ])
+    expect(result.compositeScenarios[0].templateOptions).toEqual([
+      {
+        id: 'tpl-only',
+        name: '质量报告模板',
+        code: 'quality_report',
       },
     ])
   })
