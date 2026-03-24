@@ -168,6 +168,7 @@ export interface BatchProcessItem {
   template_id: string
   paired_document_id?: string
   paired_template_id?: string
+  custom_push_name?: string
 }
 
 export interface BatchJobItemStatus {

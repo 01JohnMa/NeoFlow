@@ -3,7 +3,8 @@
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from fastapi.testclient import TestClient
+
+# TestClient 惰性导入：纯单元测试（不拉起 app）可不装 fastapi 也能收集 conftest
 
 
 # ============ 用户 fixtures ============
@@ -101,6 +102,7 @@ def client(app, mock_user):
     TestClient，已覆盖 get_current_user 依赖为普通用户。
     路由测试中如需其他角色，可在测试内再次 override。
     """
+    from fastapi.testclient import TestClient
     from api.dependencies.auth import get_current_user
     app.dependency_overrides[get_current_user] = lambda: mock_user
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -111,6 +113,7 @@ def client(app, mock_user):
 @pytest.fixture
 def admin_client(app, mock_admin):
     """TestClient，已覆盖 get_current_user 依赖为租户管理员"""
+    from fastapi.testclient import TestClient
     from api.dependencies.auth import get_current_user
     app.dependency_overrides[get_current_user] = lambda: mock_admin
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -121,6 +124,7 @@ def admin_client(app, mock_admin):
 @pytest.fixture
 def super_admin_client(app, mock_super_admin):
     """TestClient，已覆盖 get_current_user 依赖为超级管理员"""
+    from fastapi.testclient import TestClient
     from api.dependencies.auth import get_current_user
     app.dependency_overrides[get_current_user] = lambda: mock_super_admin
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -131,6 +135,7 @@ def super_admin_client(app, mock_super_admin):
 @pytest.fixture
 def unauth_client(app):
     """TestClient，不覆盖认证依赖（模拟未登录请求）"""
+    from fastapi.testclient import TestClient
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 

@@ -115,7 +115,13 @@ async def app_exception_handler(request, exc: AppException):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """处理 HTTP 异常"""
-    logger.bind(status_code=exc.status_code).warning("HTTP异常")
+    # 记录 detail 便于生产排障（401/403 仍可能含敏感信息，按需收敛）
+    if exc.status_code in (401, 403):
+        logger.bind(status_code=exc.status_code).warning("HTTP异常")
+    else:
+        logger.bind(status_code=exc.status_code).warning(
+            "HTTP异常 detail={}", exc.detail
+        )
     return JSONResponse(
         status_code=exc.status_code,
         content={

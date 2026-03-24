@@ -32,6 +32,7 @@ class BatchItem(BaseModel):
     template_id: str
     paired_template_id: Optional[str] = None
     paired_document_id: Optional[str] = None
+    custom_push_name: Optional[str] = None
 
     @validator("paired_document_id")
     def validate_pair(cls, v, values):
@@ -154,7 +155,7 @@ async def _process_single_item(
             generate_display_name=True,
             auto_approve=auto_approve,
             source_file_path=file_path,
-            custom_push_name=doc.get("custom_push_name") if doc else None,
+            custom_push_name=item.custom_push_name or (doc.get("custom_push_name") if doc else None),
         )
         update_batch_item(job_id, idx, "completed", document_ids=[item.document_id])
     else:
@@ -223,7 +224,7 @@ async def _process_merge_item(
     created_doc_ids = []
 
     if auto_approve:
-        custom_push_name = doc_a.get("custom_push_name") if doc_a else None
+        custom_push_name = item.custom_push_name or (doc_a.get("custom_push_name") if doc_a else None)
         sample_count = len(extraction_results)
         for sample_result in extraction_results:
             sample_index = sample_result.get("sample_index", 1)
