@@ -59,7 +59,7 @@ class SchemaSyncService(SupabaseClientMixin):
             self._columns_cache.pop(table_name, None)
         logger.debug(f"列名缓存已失效: {table_name}")
 
-    def get_columns(self, table_name: str) -> Set[str]:
+    async def get_columns(self, table_name: str) -> Set[str]:
         """
         获取结果表的实际物理列名集合（带本地缓存）。
 
@@ -71,7 +71,7 @@ class SchemaSyncService(SupabaseClientMixin):
                 return self._columns_cache[table_name]
 
         try:
-            data = self._execute_rpc_jsonb(
+            data = await self._execute_rpc_jsonb(
                 "get_result_table_columns", {"p_table": table_name}
             )
 
@@ -218,12 +218,14 @@ class SchemaSyncService(SupabaseClientMixin):
             )
         return out
 
-    def _execute_rpc_jsonb(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_rpc_jsonb(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行返回 JSONB 的 RPC，并统一处理 execute() 正常返回与「异常体即结果」的情况。
         """
         try:
-            result = self._get_client().rpc(func_name, params).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().rpc(func_name, params).execute()
+            )
             data = self._parse_rpc_response(result.data)
             if data == {} and result.data is not None:
                 logger.warning(
@@ -239,13 +241,13 @@ class SchemaSyncService(SupabaseClientMixin):
                 return body
             raise
 
-    def _call_ddl_rpc(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _call_ddl_rpc(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行 DDL 类 RPC 并返回解析后的结果 dict"""
-        return self._execute_rpc_jsonb(func_name, params)
+        return await self._execute_rpc_jsonb(func_name, params)
 
     # ── DDL 操作 ──────────────────────────────────────────────────────
 
-    def add_column(self, table_name: str, field_key: str) -> None:
+    async def add_column(self, table_name: str, field_key: str) -> None:
         """
         向结果表新增 TEXT 列。
 
@@ -254,7 +256,7 @@ class SchemaSyncService(SupabaseClientMixin):
         """
         logger.info(f"DDL ADD COLUMN: {table_name}.{field_key}")
         try:
-            data = self._call_ddl_rpc("add_result_column", {
+            data = await self._call_ddl_rpc("add_result_column", {
                 "p_table": table_name,
                 "p_column": field_key,
                 "p_col_type": "TEXT",
@@ -268,7 +270,7 @@ class SchemaSyncService(SupabaseClientMixin):
         except Exception as e:
             raise SchemaError(f"新增列 {field_key} 时遇到异常: {e}")
 
-    def rename_column(self, table_name: str, old_key: str, new_key: str) -> None:
+    async def rename_column(self, table_name: str, old_key: str, new_key: str) -> None:
         """
         重命名结果表列。
 
@@ -279,7 +281,7 @@ class SchemaSyncService(SupabaseClientMixin):
             return
         logger.info(f"DDL RENAME COLUMN: {table_name}.{old_key} -> {new_key}")
         try:
-            data = self._call_ddl_rpc("rename_result_column", {
+            data = await self._call_ddl_rpc("rename_result_column", {
                 "p_table": table_name,
                 "p_old_col": old_key,
                 "p_new_col": new_key,
@@ -293,7 +295,7 @@ class SchemaSyncService(SupabaseClientMixin):
         except Exception as e:
             raise SchemaError(f"重命名列 {old_key} -> {new_key} 时遇到异常: {e}")
 
-    def drop_column(self, table_name: str, field_key: str, force: bool = False) -> None:
+    async def drop_column(self, table_name: str, field_key: str, force: bool = False) -> None:
         """
         删除结果表列。
 
@@ -303,7 +305,7 @@ class SchemaSyncService(SupabaseClientMixin):
         """
         logger.info(f"DDL DROP COLUMN: {table_name}.{field_key} (force={force})")
         try:
-            data = self._call_ddl_rpc("drop_result_column", {
+            data = await self._call_ddl_rpc("drop_result_column", {
                 "p_table": table_name,
                 "p_column": field_key,
                 "p_force": force,

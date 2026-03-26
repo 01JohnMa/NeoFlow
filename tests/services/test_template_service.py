@@ -283,7 +283,7 @@ class TestCreateField:
         """DDL 失败时 SchemaError 向上传播"""
         from services.schema_sync_service import SchemaError
         with patch.object(svc, "_get_result_table_for_template", new_callable=AsyncMock, return_value="inspection_reports"), \
-             patch("services.schema_sync_service.schema_sync_service.add_column", side_effect=SchemaError("列名冲突")):
+             patch("services.schema_sync_service.schema_sync_service.add_column", new_callable=AsyncMock, side_effect=SchemaError("列名冲突")):
             with pytest.raises(SchemaError):
                 await svc.create_field(TEMPLATE_ID, {
                     "field_key": "duplicate_col",
@@ -310,9 +310,9 @@ class TestUpdateField:
         _chain(mock_supabase_client, data=[{**MOCK_FIELD, "field_key": "new_key"}])
         with patch.object(svc, "get_field_by_id", new_callable=AsyncMock, return_value=MOCK_FIELD), \
              patch.object(svc, "_get_result_table_for_template", new_callable=AsyncMock, return_value="inspection_reports"), \
-             patch("services.schema_sync_service.schema_sync_service.rename_column") as mock_rename:
+             patch("services.schema_sync_service.schema_sync_service.rename_column", new_callable=AsyncMock) as mock_rename:
             await svc.update_field(FIELD_ID, {"field_key": "new_key"})
-            mock_rename.assert_called_once_with("inspection_reports", "sample_no", "new_key")
+            mock_rename.assert_awaited_once_with("inspection_reports", "sample_no", "new_key")
 
     @pytest.mark.asyncio
     async def test_field_not_found_raises(self, svc, mock_supabase_client):
@@ -342,7 +342,7 @@ class TestDeleteField:
         with patch.object(svc, "get_field_by_id", new_callable=AsyncMock, return_value=MOCK_FIELD), \
              patch.object(svc, "_get_result_table_for_template", new_callable=AsyncMock, return_value="inspection_reports"), \
              patch("services.schema_sync_service.schema_sync_service.drop_column",
-                   side_effect=SchemaError("列有历史数据", non_null_count=5)):
+                   new_callable=AsyncMock, side_effect=SchemaError("列有历史数据", non_null_count=5)):
             with pytest.raises(SchemaError) as exc_info:
                 await svc.delete_field(FIELD_ID, force=False)
             assert exc_info.value.non_null_count == 5
@@ -353,9 +353,9 @@ class TestDeleteField:
         _chain(mock_supabase_client, data=[])
         with patch.object(svc, "get_field_by_id", new_callable=AsyncMock, return_value=MOCK_FIELD), \
              patch.object(svc, "_get_result_table_for_template", new_callable=AsyncMock, return_value="inspection_reports"), \
-             patch("services.schema_sync_service.schema_sync_service.drop_column") as mock_drop:
+             patch("services.schema_sync_service.schema_sync_service.drop_column", new_callable=AsyncMock) as mock_drop:
             await svc.delete_field(FIELD_ID, force=True)
-            mock_drop.assert_called_once_with("inspection_reports", "sample_no", force=True)
+            mock_drop.assert_awaited_once_with("inspection_reports", "sample_no", force=True)
 
     @pytest.mark.asyncio
     async def test_returns_true_when_field_not_found(self, svc, mock_supabase_client):

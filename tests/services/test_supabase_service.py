@@ -37,6 +37,36 @@ class TestLoggingSafety:
         mock_logger_error.assert_called_once()
 
 
+class TestAsyncOffloading:
+    @pytest.mark.asyncio
+    async def test_get_document_uses_run_sync_for_blocking_execute(self, svc):
+        chain = MagicMock()
+        chain.select.return_value = chain
+        chain.eq.return_value = chain
+        chain.execute.return_value = MagicMock(data=[{"id": "doc-1"}])
+        svc._client.table.return_value = chain
+
+        with patch.object(svc, "_run_sync", new_callable=AsyncMock) as mock_run_sync:
+            mock_run_sync.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+            result = await svc.get_document("doc-1")
+
+        assert result == {"id": "doc-1"}
+        mock_run_sync.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_save_extraction_result_awaits_async_column_lookup(self, svc):
+        chain = MagicMock()
+        chain.upsert.return_value = chain
+        chain.execute.return_value = MagicMock(data=[{"document_id": "doc-1"}])
+        svc._client.table.return_value = chain
+
+        with patch("services.schema_sync_service.schema_sync_service.get_columns", new_callable=AsyncMock, return_value={"document_id", "raw_extraction_data", "sample_name"}) as mock_get_columns:
+            result = await svc.save_inspection_report("doc-1", {"sample_name": "样品A"})
+
+        assert result == {"document_id": "doc-1"}
+        mock_get_columns.assert_awaited_once_with("inspection_reports")
+
+
 class TestValidateAndFixDate:
     """日期格式校验与修复"""
 

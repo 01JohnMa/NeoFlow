@@ -107,7 +107,7 @@ async def batch_process(
         related_document_ids.extend(doc_ids)
 
     dedupe_key = build_batch_dedupe_key(dedupe_items)
-    existing_job = find_job_by_dedupe_key(dedupe_key)
+    existing_job = await find_job_by_dedupe_key(dedupe_key)
     if existing_job:
         return JSONResponse(status_code=202, content={"job_id": existing_job["job_id"], "status": existing_job["status"]})
 
@@ -115,7 +115,7 @@ async def batch_process(
     for document_id in unique_document_ids:
         await _set_document_status_safe(document_id, "queued")
 
-    job_id = create_job(
+    job_id = await create_job(
         batch_items=batch_items,
         job_type="batch",
         created_by=user.user_id,
@@ -150,10 +150,10 @@ async def _run_batch_job(
     user: CurrentUser,
 ):
     """串行执行批量任务项，单项失败不影响其余"""
-    update_job(job_id, "ocr")
+    await update_job(job_id, "ocr")
 
     for idx, item in enumerate(items):
-        update_batch_item(job_id, idx, "processing")
+        await update_batch_item(job_id, idx, "processing")
         await _set_item_documents_status(item, "processing")
         try:
             if item.paired_document_id:
@@ -163,13 +163,13 @@ async def _run_batch_job(
         except Exception as e:
             logger.error(f"[job={job_id}] 任务项 {idx} 异常: {e}")
             await _set_item_documents_status(item, "failed", error_message=str(e))
-            update_batch_item(job_id, idx, "failed", error=str(e))
+            await update_batch_item(job_id, idx, "failed", error=str(e))
 
-    final_job = get_job(job_id)
+    final_job = await get_job(job_id)
     if final_job and final_job.get("status") == "failed":
-        update_job(job_id, "failed", error=final_job.get("error"))
+        await update_job(job_id, "failed", error=final_job.get("error"))
     else:
-        update_job(job_id, "completed", document_ids=(final_job or {}).get("document_ids", []), error=None)
+        await update_job(job_id, "completed", document_ids=(final_job or {}).get("document_ids", []), error=None)
     logger.info(f"[job={job_id}] 批量任务全部完成")
 
 
@@ -181,7 +181,7 @@ async def _process_single_item(
     file_path = doc.get("file_path", "")
     if not file_path or not os.path.exists(file_path):
         await _set_item_documents_status(item, "failed", error_message="文件不存在")
-        update_batch_item(job_id, idx, "failed", error="文件不存在")
+        await update_batch_item(job_id, idx, "failed", error="文件不存在")
         return
 
     template = await template_service.get_template(item.template_id)
@@ -205,11 +205,11 @@ async def _process_single_item(
             source_file_path=file_path,
             custom_push_name=item.custom_push_name or (doc.get("custom_push_name") if doc else None),
         )
-        update_batch_item(job_id, idx, "completed", document_ids=[item.document_id])
+        await update_batch_item(job_id, idx, "completed", document_ids=[item.document_id])
     else:
         error_msg = result.get("error", "处理失败")
         await handle_processing_failure(item.document_id, error_msg)
-        update_batch_item(job_id, idx, "failed", error=error_msg)
+        await update_batch_item(job_id, idx, "failed", error=error_msg)
 
 
 async def _process_merge_item(
@@ -223,22 +223,22 @@ async def _process_merge_item(
 
     if not fp_a or not os.path.exists(fp_a):
         await _set_item_documents_status(item, "failed", error_message=f"文件 A 不存在: {fp_a}")
-        update_batch_item(job_id, idx, "failed", error=f"文件 A 不存在: {fp_a}")
+        await update_batch_item(job_id, idx, "failed", error=f"文件 A 不存在: {fp_a}")
         return
     if not fp_b or not os.path.exists(fp_b):
         await _set_item_documents_status(item, "failed", error_message=f"文件 B 不存在: {fp_b}")
-        update_batch_item(job_id, idx, "failed", error=f"文件 B 不存在: {fp_b}")
+        await update_batch_item(job_id, idx, "failed", error=f"文件 B 不存在: {fp_b}")
         return
 
     sub_template_a = await template_service.get_template_with_details(item.template_id)
     if not sub_template_a:
         await _set_item_documents_status(item, "failed", error_message="模板 A 不存在")
-        update_batch_item(job_id, idx, "failed", error="模板 A 不存在")
+        await update_batch_item(job_id, idx, "failed", error="模板 A 不存在")
         return
     sub_template_b = await template_service.get_template_with_details(item.paired_template_id)
     if not sub_template_b:
         await _set_item_documents_status(item, "failed", error_message="模板 B 不存在")
-        update_batch_item(job_id, idx, "failed", error="模板 B 不存在")
+        await update_batch_item(job_id, idx, "failed", error="模板 B 不存在")
         return
 
     template_name = sub_template_a.get("name", "综合报告")
@@ -260,13 +260,13 @@ async def _process_merge_item(
     if not result.get("success"):
         error_msg = result.get("error", "合并处理失败")
         await _set_item_documents_status(item, "failed", error_message=error_msg)
-        update_batch_item(job_id, idx, "failed", error=error_msg)
+        await update_batch_item(job_id, idx, "failed", error=error_msg)
         return
 
     extraction_results = result.get("extraction_results", [])
     if not extraction_results:
         await _set_item_documents_status(item, "failed", error_message="未提取到有效字段")
-        update_batch_item(job_id, idx, "failed", error="未提取到有效字段")
+        await update_batch_item(job_id, idx, "failed", error="未提取到有效字段")
         return
 
     sub_results = result.get("sub_results", {})
@@ -316,7 +316,7 @@ async def _process_merge_item(
                 logger.warning(f"[job={job_id}] 飞书推送失败: {feishu_err}")
 
         await _set_item_documents_status(item, "completed")
-        update_batch_item(job_id, idx, "completed", document_ids=[doc_a_id, doc_b_id])
+        await update_batch_item(job_id, idx, "completed", document_ids=[doc_a_id, doc_b_id])
         logger.info(f"[job={job_id}] merge 任务项 {idx} auto_approve 推送完成")
         return
 
@@ -381,5 +381,5 @@ async def _process_merge_item(
         })
 
     all_doc_ids = [doc_a_id] + created_doc_ids + ([doc_b_id] if doc_b_id else [])
-    update_batch_item(job_id, idx, "completed", document_ids=all_doc_ids)
+    await update_batch_item(job_id, idx, "completed", document_ids=all_doc_ids)
     logger.info(f"[job={job_id}] merge 任务项 {idx} 完成, docs={all_doc_ids}")

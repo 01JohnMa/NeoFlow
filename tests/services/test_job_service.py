@@ -36,7 +36,7 @@ class TestJobService:
             insert_result = _mock_result([{'job_id': 'job-123', 'status': 'queued'}])
             mock_svc.client.table.return_value = _mock_chain(insert_result)
 
-            job_id = create_job(
+            job_id = await create_job(
                 batch_items=[{'index': 0, 'type': 'single', 'document_ids': ['doc-1'], 'status': 'queued'}],
                 job_type='batch',
                 created_by='user-1',
@@ -59,7 +59,7 @@ class TestJobService:
         with patch('api.jobs.supabase_service') as mock_svc:
             mock_svc.client.table.return_value = _mock_chain(_mock_result([{'job_id': 'job-1'}]))
 
-            update_job('job-1', 'ocr')
+            await update_job('job-1', 'ocr')
 
         payload = mock_svc.client.table.return_value.update.call_args.args[0]
         assert payload['stage'] == 'ocr'
@@ -81,7 +81,7 @@ class TestJobService:
             update_chain = _mock_chain(_mock_result([{'job_id': 'job-1'}]))
             mock_svc.client.table.side_effect = [select_chain, update_chain]
 
-            update_batch_item('job-1', 0, 'completed', document_ids=['doc-1'])
+            await update_batch_item('job-1', 0, 'completed', document_ids=['doc-1'])
 
         update_payload = update_chain.update.call_args.args[0]
         assert update_payload['completed_count'] == 1
@@ -100,7 +100,7 @@ class TestJobService:
                 'progress': 0,
             }]))
 
-            job = get_job('job-1')
+            job = await get_job('job-1')
 
         assert job is not None
         assert job['job_id'] == 'job-1'
@@ -115,7 +115,7 @@ class TestJobService:
                 'dedupe_key': 'same-batch',
             }]))
 
-            job = find_job_by_dedupe_key('same-batch')
+            job = await find_job_by_dedupe_key('same-batch')
 
         assert job is not None
         assert job['job_id'] == 'job-1'

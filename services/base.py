@@ -1,8 +1,10 @@
 # services/base.py
 """服务层基类"""
 
+import asyncio
 import json
-from typing import Any, Dict, List, Optional
+from functools import partial
+from typing import Any, Callable, Dict, List, Optional
 
 
 class SupabaseClientMixin:
@@ -15,6 +17,11 @@ class SupabaseClientMixin:
             from services.supabase_service import supabase_service
             self._client = supabase_service.client
         return self._client
+
+    async def _run_sync(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """将同步 I/O 卸载到线程池，避免阻塞 asyncio 事件循环。"""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(fn, *args, **kwargs))
 
 
 def build_field_table(fields: List[Dict[str, Any]]) -> str:

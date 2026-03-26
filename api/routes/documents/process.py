@@ -152,7 +152,7 @@ async def process_document(
             return result
         else:
             # 异步处理
-            job_id = create_job(
+            job_id = await create_job(
                 job_type="template" if template_id else "single",
                 created_by=user.user_id,
                 related_document_ids=[document_id],
@@ -200,7 +200,7 @@ async def process_document_task(
     try:
         async with _DOC_PROCESS_SEMAPHORE:
             if job_id:
-                update_job(job_id, "ocr")
+                await update_job(job_id, "ocr")
             await supabase_service.update_document_status(document_id, "processing")
             logger.info(f"开始后台处理: {document_id}, 模板: {template_id or '无(自动分类)'}")
 
@@ -236,7 +236,7 @@ async def process_document_task(
                     custom_push_name=custom_push_name,
                 )
                 if job_id:
-                    update_job(job_id, "completed", document_ids=[document_id], error=None)
+                    await update_job(job_id, "completed", document_ids=[document_id], error=None)
             else:
                 error_message = result.get("error") or "未提取到有效字段"
                 await _handle_processing_failure(
@@ -244,11 +244,11 @@ async def process_document_task(
                     error_message
                 )
                 if job_id:
-                    update_job(job_id, "failed", error=error_message)
+                    await update_job(job_id, "failed", error=error_message)
 
     except Exception as e:
         if job_id:
-            update_job(job_id, "failed", error=str(e))
+            await update_job(job_id, "failed", error=str(e))
         await _handle_processing_exception(document_id, e)
 
 
@@ -360,7 +360,7 @@ async def process_document_with_template(
             return result
         else:
             # 异步处理
-            job_id = create_job(
+            job_id = await create_job(
                 job_type="template",
                 created_by=user.user_id,
                 related_document_ids=[document_id],
@@ -406,7 +406,7 @@ async def process_document_with_template_task(
     try:
         async with _DOC_PROCESS_SEMAPHORE:
             if job_id:
-                update_job(job_id, "ocr")
+                await update_job(job_id, "ocr")
             await supabase_service.update_document_status(document_id, "processing")
             logger.info(f"开始模板化后台处理: {document_id}, 模板: {template_id}")
 
@@ -429,7 +429,7 @@ async def process_document_with_template_task(
                     custom_push_name=custom_push_name,
                 )
                 if job_id:
-                    update_job(job_id, "completed", document_ids=[document_id], error=None)
+                    await update_job(job_id, "completed", document_ids=[document_id], error=None)
             else:
                 error_message = result.get("error") or "未提取到有效字段"
                 await _handle_processing_failure(
@@ -437,11 +437,11 @@ async def process_document_with_template_task(
                     error_message
                 )
                 if job_id:
-                    update_job(job_id, "failed", error=error_message)
+                    await update_job(job_id, "failed", error=error_message)
             
     except Exception as e:
         if job_id:
-            update_job(job_id, "failed", error=str(e))
+            await update_job(job_id, "failed", error=str(e))
         await _handle_processing_exception(document_id, e)
 
 
@@ -462,7 +462,7 @@ async def get_merge_job_status(
             "error": "..."           # failed 时填入
         }
     """
-    job = get_job(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return job

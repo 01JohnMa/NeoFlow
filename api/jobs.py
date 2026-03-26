@@ -2,6 +2,7 @@
 """持久化 Job 管理器 - 用于跟踪异步处理任务状态与防重记录"""
 
 import hashlib
+import inspect
 import json
 import uuid
 from datetime import datetime
@@ -38,6 +39,13 @@ def _push_record_table():
     return supabase_service.client.table("feishu_push_records")
 
 
+async def _run_db(fn):
+    runner = getattr(supabase_service, "_run_sync", None)
+    if runner is not None and inspect.iscoroutinefunction(runner):
+        return await runner(fn)
+    return fn()
+
+
 def _normalize_job_record(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not row:
         return None
@@ -70,7 +78,7 @@ def build_batch_dedupe_key(items: list[dict]) -> str:
     return f"batch:{digest}"
 
 
-def create_job(
+async def create_job(
     batch_items: list | None = None,
     *,
     job_type: str = "batch",
@@ -97,12 +105,14 @@ def create_job(
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
     }
-    result = _job_table().insert(payload).execute()
+    result = await _run_db(
+        lambda: _job_table().insert(payload).execute()
+    )
     created = (result.data or [{}])[0]
     return created.get("job_id") or job_id
 
 
-def update_job(job_id: str, stage: str, **extra: Any) -> None:
+async def update_job(job_id: str, stage: str, **extra: Any) -> None:
     """更新 Job 阶段和附加字段。"""
     if stage == "failed":
         status = "failed"
@@ -120,20 +130,24 @@ def update_job(job_id: str, stage: str, **extra: Any) -> None:
         "updated_at": _utc_now_iso(),
         **extra,
     }
-    _job_table().update(payload).eq("job_id", job_id).execute()
+    await _run_db(
+        lambda: _job_table().update(payload).eq("job_id", job_id).execute()
+    )
 
 
-def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+async def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     """按 ID 获取 Job，不存在返回 None。"""
-    result = _job_table().select("*").eq("job_id", job_id).limit(1).execute()
+    result = await _run_db(
+        lambda: _job_table().select("*").eq("job_id", job_id).limit(1).execute()
+    )
     row = result.data[0] if result.data else None
     return _normalize_job_record(row)
 
 
-def find_job_by_dedupe_key(dedupe_key: str) -> Optional[Dict[str, Any]]:
+async def find_job_by_dedupe_key(dedupe_key: str) -> Optional[Dict[str, Any]]:
     """按去重键查找仍处于活动中的任务。"""
-    result = (
-        _job_table()
+    result = await _run_db(
+        lambda: _job_table()
         .select("*")
         .eq("dedupe_key", dedupe_key)
         .order("created_at", desc=True)
@@ -147,9 +161,9 @@ def find_job_by_dedupe_key(dedupe_key: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def update_batch_item(job_id: str, index: int, status: str, error: str = None, document_ids: list = None) -> None:
+async def update_batch_item(job_id: str, index: int, status: str, error: str = None, document_ids: list = None) -> None:
     """更新批量 Job 中某一项的状态，并自动计算进度。"""
-    job = get_job(job_id)
+    job = await get_job(job_id)
     if not job or "items" not in job:
         return
 
@@ -195,12 +209,16 @@ def update_batch_item(job_id: str, index: int, status: str, error: str = None, d
     if status == "failed" and error:
         payload["error"] = error
 
-    _job_table().update(payload).eq("job_id", job_id).execute()
+    await _run_db(
+        lambda: _job_table().update(payload).eq("job_id", job_id).execute()
+    )
 
 
 async def has_feishu_push_record(dedupe_key: str) -> bool:
     """检查飞书推送是否已记录。"""
-    result = _push_record_table().select("dedupe_key").eq("dedupe_key", dedupe_key).limit(1).execute()
+    result = await _run_db(
+        lambda: _push_record_table().select("dedupe_key").eq("dedupe_key", dedupe_key).limit(1).execute()
+    )
     return bool(result.data)
 
 
@@ -212,7 +230,9 @@ async def record_feishu_push(dedupe_key: str, document_id: str, template_id: Opt
         "template_id": template_id,
         "created_at": _utc_now_iso(),
     }
-    _push_record_table().insert(payload).execute()
+    await _run_db(
+        lambda: _push_record_table().insert(payload).execute()
+    )
 
 
 def build_feishu_push_dedupe_key(document_id: str, template_id: Optional[str], extraction_data: dict) -> str:

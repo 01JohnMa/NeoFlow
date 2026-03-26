@@ -26,11 +26,13 @@ class TestProcessDocument:
     """POST /api/documents/{document_id}/process"""
 
     def test_process_async_accepted(self, client):
-        """异步处理返回 200"""
+        """异步处理返回 200，并进入排队状态"""
         doc = {**MOCK_DOCUMENT, "file_path": "/tmp/test.pdf", "template_id": TEMPLATE_ID}
         with _patch_supabase() as mock_svc, \
              _patch_workflow(), \
-             patch("os.path.exists", return_value=True):
+             patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-001"), \
+             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock):
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
@@ -38,7 +40,8 @@ class TestProcessDocument:
         assert resp.status_code == 200
         data = resp.json()
         assert data["document_id"] == DOCUMENT_ID
-        assert data["status"] == "processing"
+        assert data["job_id"] == "job-001"
+        assert data["status"] == "queued"
 
     def test_process_document_not_found(self, client):
         """文档不存在返回 404"""
@@ -109,6 +112,7 @@ class TestProcessDocument:
         doc = {**MOCK_DOCUMENT, "file_path": "/tmp/test.pdf", "template_id": TEMPLATE_ID, "status": "uploaded"}
         with _patch_supabase() as mock_svc, \
              patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-002"), \
              patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock):
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()
@@ -116,8 +120,9 @@ class TestProcessDocument:
             resp = client.post(f"/api/documents/{DOCUMENT_ID}/process")
         assert resp.status_code == 200
         data = resp.json()
+        assert data["job_id"] == "job-002"
         assert data["status"] == "queued"
-        assert "已加入队列" in data["message"]
+        assert "已加入处理队列" in data["message"]
         mock_svc.update_document_status.assert_called_once_with(DOCUMENT_ID, "queued")
 
     def test_process_async_is_idempotent_when_document_already_queued(self, client):
@@ -149,6 +154,8 @@ class TestProcessWithTemplate:
         with _patch_supabase() as mock_svc, \
              _patch_workflow(), \
              patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-003"), \
+             patch("api.routes.documents.process.process_document_with_template_task", new_callable=AsyncMock), \
              patch("api.routes.documents.process.template_service") as mock_ts:
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()

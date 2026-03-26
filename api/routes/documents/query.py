@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from typing import Optional
 from loguru import logger
+import inspect
 import os
 
 from services.supabase_service import supabase_service
@@ -14,6 +15,19 @@ from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingE
 from .helpers import parse_allowed_values, raise_auth_or_processing_error
 
 router = APIRouter()
+
+
+async def _run_supabase(fn):
+    runner = getattr(supabase_service, "_run_sync", None)
+    if runner is not None and inspect.iscoroutinefunction(runner):
+        return await runner(fn)
+    return fn()
+
+
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 @router.get("/{document_id}/status")
@@ -31,7 +45,9 @@ async def get_document_status(
     """
     try:
         # 使用 service_role 查询（绕过 RLS）
-        result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = result.data[0] if result.data else None
         
         if not document:
@@ -106,7 +122,9 @@ async def get_extraction_result(
     """
     try:
         # 使用 service_role 查询（绕过 RLS），手动验证权限
-        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        doc_result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
@@ -119,10 +137,10 @@ async def get_extraction_result(
         doc_status = document.get("status")
 
         # 优先用 template_id 查 target_table，fallback 到 TABLE_MAP
-        table_name = supabase_service.resolve_table_name(
+        table_name = await _maybe_await(supabase_service.resolve_table_name(
             template_id=document.get("template_id"),
             document_type=document_type,
-        )
+        ))
         
         # 如果文档正在处理中或尚未有类型
         if not document_type:
@@ -144,7 +162,9 @@ async def get_extraction_result(
                 inferred_type = None
                 for type_name, tbl_name in [("检测报告", "inspection_reports"), ("快递单", "expresses"), ("抽样单", "sampling_forms")]:
                     try:
-                        query_result = supabase_service.client.table(tbl_name).select("*").eq("document_id", document_id).execute()
+                        query_result = await _run_supabase(
+                            lambda tbl_name=tbl_name: supabase_service.client.table(tbl_name).select("*").eq("document_id", document_id).execute()
+                        )
                         if query_result.data:
                             result = query_result.data[0]
                             inferred_type = type_name
@@ -156,7 +176,9 @@ async def get_extraction_result(
                 
                 if result and inferred_type:
                     try:
-                        supabase_service.client.table("documents").update({"document_type": inferred_type}).eq("id", document_id).execute()
+                        await _run_supabase(
+                            lambda: supabase_service.client.table("documents").update({"document_type": inferred_type}).eq("id", document_id).execute()
+                        )
                         logger.info(f"已自动修复文档 {document_id} 的 document_type")
                     except Exception as e:
                         logger.warning(f"自动修复 document_type 失败: {e}")
@@ -188,7 +210,9 @@ async def get_extraction_result(
         # 按 document_type 查询（复用上面已解析的 table_name）
         if result is None:
             if table_name:
-                result_query = supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
+                result_query = await _run_supabase(
+                    lambda: supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
+                )
                 result = result_query.data[0] if result_query.data else None
         
         if not result:
@@ -285,7 +309,9 @@ async def download_document(
     """
     try:
         # 使用 service_role 查询，手动验证权限
-        result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = result.data[0] if result.data else None
         
         if not document:
@@ -344,7 +370,9 @@ async def list_documents(
             query = query.eq("document_type", document_type)
         
         offset = (page - 1) * limit
-        result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        result = await _run_supabase(
+            lambda: query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        )
         
         # 统计总数（使用相同的权限过滤）
         count_query = supabase_service.client.table("documents").select("id", count="exact")
@@ -361,7 +389,7 @@ async def list_documents(
             count_query = count_query.eq("status", status)
         if document_type:
             count_query = count_query.eq("document_type", document_type)
-        count_result = count_query.execute()
+        count_result = await _run_supabase(count_query.execute)
         
         total = count_result.count or 0
         
@@ -388,7 +416,9 @@ async def delete_document(
     """
     try:
         # 使用 service_role 查询，手动验证权限
-        result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = result.data[0] if result.data else None
         
         if not document:
@@ -403,7 +433,9 @@ async def delete_document(
             os.remove(file_path)
         
         # 删除数据库记录
-        supabase_service.client.table("documents").delete().eq("id", document_id).execute()
+        await _run_supabase(
+            lambda: supabase_service.client.table("documents").delete().eq("id", document_id).execute()
+        )
         
         return {
             "document_id": document_id,
