@@ -105,6 +105,7 @@ export function Documents() {
               <option value="">全部状态</option>
               <option value="pending">待处理</option>
               <option value="uploaded">已上传</option>
+              <option value="queued">排队中</option>
               <option value="processing">处理中</option>
               <option value="pending_review">待审核</option>
               <option value="completed">已完成</option>

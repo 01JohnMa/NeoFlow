@@ -15,7 +15,15 @@ from services.supabase_service import supabase_service
 from services.template_service import template_service
 from agents.workflow import ocr_workflow
 from api.dependencies.auth import get_current_user, CurrentUser
-from api.jobs import create_job, update_job, update_batch_item, get_job
+from api.jobs import (
+    build_batch_dedupe_key,
+    build_feishu_push_dedupe_key,
+    create_job,
+    find_job_by_dedupe_key,
+    update_job,
+    update_batch_item,
+    get_job,
+)
 from .helpers import (
     handle_processing_success,
     handle_processing_failure,
@@ -84,23 +92,57 @@ async def batch_process(
 
     # 构建 batch items 结构
     batch_items = []
+    dedupe_items = []
+    related_document_ids: list[str] = []
     for idx, item in enumerate(request.items):
         is_merge = bool(item.paired_document_id)
-        doc_ids = [item.document_id, item.paired_document_id] if is_merge else [item.document_id]
+        doc_ids = [doc_id for doc_id in [item.document_id, item.paired_document_id] if doc_id]
         batch_items.append({
             "index": idx,
             "type": "merge" if is_merge else "single",
             "document_ids": doc_ids,
-            "status": "pending",
+            "status": "queued",
         })
+        dedupe_items.append(item.model_dump())
+        related_document_ids.extend(doc_ids)
 
-    job_id = create_job(batch_items=batch_items)
+    dedupe_key = build_batch_dedupe_key(dedupe_items)
+    existing_job = find_job_by_dedupe_key(dedupe_key)
+    if existing_job:
+        return JSONResponse(status_code=202, content={"job_id": existing_job["job_id"], "status": existing_job["status"]})
+
+    unique_document_ids = list(dict.fromkeys(related_document_ids))
+    for document_id in unique_document_ids:
+        await _set_document_status_safe(document_id, "queued")
+
+    job_id = create_job(
+        batch_items=batch_items,
+        job_type="batch",
+        created_by=user.user_id,
+        dedupe_key=dedupe_key,
+        related_document_ids=unique_document_ids,
+    )
     asyncio.create_task(_run_batch_job(job_id, request.items, user))
     logger.info(f"批量任务已提交: job_id={job_id}, 任务数={len(request.items)}")
-    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "pending"})
+    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "queued"})
 
 
 # ============ 后台批量任务 ============
+
+async def _set_document_status_safe(document_id: Optional[str], status: str, error_message: Optional[str] = None):
+    if not document_id:
+        return
+    try:
+        await supabase_service.update_document_status(document_id, status, error_message=error_message)
+    except Exception as exc:
+        logger.warning(f"更新文档状态失败: doc={document_id}, status={status}, err={exc}")
+
+
+async def _set_item_documents_status(item: BatchItem, status: str, error_message: Optional[str] = None):
+    await _set_document_status_safe(item.document_id, status, error_message=error_message)
+    if item.paired_document_id:
+        await _set_document_status_safe(item.paired_document_id, status, error_message=error_message)
+
 
 async def _run_batch_job(
     job_id: str,
@@ -112,6 +154,7 @@ async def _run_batch_job(
 
     for idx, item in enumerate(items):
         update_batch_item(job_id, idx, "processing")
+        await _set_item_documents_status(item, "processing")
         try:
             if item.paired_document_id:
                 await _process_merge_item(job_id, idx, item, user)
@@ -119,10 +162,14 @@ async def _run_batch_job(
                 await _process_single_item(job_id, idx, item, user)
         except Exception as e:
             logger.error(f"[job={job_id}] 任务项 {idx} 异常: {e}")
+            await _set_item_documents_status(item, "failed", error_message=str(e))
             update_batch_item(job_id, idx, "failed", error=str(e))
 
-    # 全部完成
-    update_job(job_id, "completed")
+    final_job = get_job(job_id)
+    if final_job and final_job.get("status") == "failed":
+        update_job(job_id, "failed", error=final_job.get("error"))
+    else:
+        update_job(job_id, "completed", document_ids=(final_job or {}).get("document_ids", []), error=None)
     logger.info(f"[job={job_id}] 批量任务全部完成")
 
 
@@ -133,6 +180,7 @@ async def _process_single_item(
     doc = await supabase_service.get_document(item.document_id)
     file_path = doc.get("file_path", "")
     if not file_path or not os.path.exists(file_path):
+        await _set_item_documents_status(item, "failed", error_message="文件不存在")
         update_batch_item(job_id, idx, "failed", error="文件不存在")
         return
 
@@ -174,18 +222,22 @@ async def _process_merge_item(
     fp_b = doc_b.get("file_path", "") if doc_b else ""
 
     if not fp_a or not os.path.exists(fp_a):
+        await _set_item_documents_status(item, "failed", error_message=f"文件 A 不存在: {fp_a}")
         update_batch_item(job_id, idx, "failed", error=f"文件 A 不存在: {fp_a}")
         return
     if not fp_b or not os.path.exists(fp_b):
+        await _set_item_documents_status(item, "failed", error_message=f"文件 B 不存在: {fp_b}")
         update_batch_item(job_id, idx, "failed", error=f"文件 B 不存在: {fp_b}")
         return
 
     sub_template_a = await template_service.get_template_with_details(item.template_id)
     if not sub_template_a:
+        await _set_item_documents_status(item, "failed", error_message="模板 A 不存在")
         update_batch_item(job_id, idx, "failed", error="模板 A 不存在")
         return
     sub_template_b = await template_service.get_template_with_details(item.paired_template_id)
     if not sub_template_b:
+        await _set_item_documents_status(item, "failed", error_message="模板 B 不存在")
         update_batch_item(job_id, idx, "failed", error="模板 B 不存在")
         return
 
@@ -207,11 +259,13 @@ async def _process_merge_item(
 
     if not result.get("success"):
         error_msg = result.get("error", "合并处理失败")
+        await _set_item_documents_status(item, "failed", error_message=error_msg)
         update_batch_item(job_id, idx, "failed", error=error_msg)
         return
 
     extraction_results = result.get("extraction_results", [])
     if not extraction_results:
+        await _set_item_documents_status(item, "failed", error_message="未提取到有效字段")
         update_batch_item(job_id, idx, "failed", error="未提取到有效字段")
         return
 
@@ -252,10 +306,16 @@ async def _process_merge_item(
                     log_prefix=f"[job={job_id}] batch-merge 样品{sample_index} ",
                     extra_template=sub_template_b,
                     custom_push_name=custom_push_name,
+                    dedupe_key=build_feishu_push_dedupe_key(
+                        f"merge:{doc_a_id}:{doc_b_id}:sample:{sample_index}",
+                        item.template_id,
+                        sample_data,
+                    ),
                 )
             except Exception as feishu_err:
                 logger.warning(f"[job={job_id}] 飞书推送失败: {feishu_err}")
 
+        await _set_item_documents_status(item, "completed")
         update_batch_item(job_id, idx, "completed", document_ids=[doc_a_id, doc_b_id])
         logger.info(f"[job={job_id}] merge 任务项 {idx} auto_approve 推送完成")
         return

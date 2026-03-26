@@ -6,6 +6,7 @@ from datetime import datetime
 
 from config.settings import settings
 from services.ocr_service import ocr_service
+from services.supabase_service import supabase_service
 
 router = APIRouter()
 
@@ -41,6 +42,12 @@ async def ocr_health():
             "doc": settings.OCR_DOC_MODEL_PATH
         }
     }
+
+
+@router.get("/health/jobs")
+async def jobs_health():
+    """任务观测指标接口"""
+    return await supabase_service.get_job_metrics()
 
 
 @router.get("/health/config")

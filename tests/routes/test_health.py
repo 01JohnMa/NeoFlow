@@ -1,5 +1,5 @@
 # tests/routes/test_health.py
-"""健康检查路由测试 — GET /api/health、/api/health/ocr、/api/health/config"""
+"""健康检查路由测试 — GET /api/health、/api/health/ocr、/api/health/jobs、/api/health/config"""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -157,6 +157,28 @@ class TestGeneralExceptionHandler:
             "error": "内部服务器错误",
             "code": "INTERNAL_ERROR",
         }
+
+
+class TestJobsHealth:
+    """GET /api/health/jobs"""
+
+    def test_jobs_health_returns_metrics(self, client):
+        with patch("api.routes.health.supabase_service.get_job_metrics", new_callable=MagicMock) as mock_metrics:
+            mock_metrics.return_value = {
+                "active_jobs": 3,
+                "failed_jobs": 1,
+                "completed_jobs": 8,
+                "avg_queue_seconds": 42,
+                "sample_size": 5,
+                "recommended_action": "stay_on_current_architecture",
+                "escalation_reasons": [],
+                "observed_at": "2026-03-25T00:00:00",
+            }
+            resp = client.get("/api/health/jobs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active_jobs"] == 3
+        assert data["recommended_action"] == "stay_on_current_architecture"
 
 
 class TestConfigCheck:

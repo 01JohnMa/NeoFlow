@@ -41,11 +41,28 @@ const scenario: CompositeScenarioConfig = {
 }
 
 describe('CompositeUploadPanel', () => {
-  it('将推送文件名输入放到统一侧栏并隐藏任务摘要与组内命名说明', () => {
+  it('将文档槽位标题合并进类型选择文案以减少纵向信息', () => {
     const html = renderToStaticMarkup(<CompositeUploadPanel scenario={scenario} />)
 
-    expect(html).toContain('分组 1')
-    expect(html).toContain('推送文件名')
+    expect(html).toContain('aria-label="分组 1 推送文件名"')
+    expect(html).toContain('推送名')
+    expect(html).toContain('aria-label="删除当前分组"')
+    expect(html).toContain('text-error-400')
+    expect(html).toContain('选择A文档类型...')
+    expect(html).toContain('选择B文档类型...')
+    expect(html).not.toContain('>文档 A<')
+    expect(html).not.toContain('>文档 B<')
+    expect(html).not.toContain('>分组 1<')
+    expect(html).not.toContain('>空组<')
+    expect(html).not.toContain('>完整组<')
+    expect(html).not.toContain('>部分组<')
+    expect(html).not.toContain('>推送文件名<')
+    expect(html).not.toContain('推送文件名侧栏')
+    expect(html).not.toContain('名称#1')
+    expect(html).not.toContain('按组上传文档')
+    expect(html).not.toContain('按分组命名')
+    expect(html).not.toContain('请先在该组上传文件')
+    expect(html).not.toContain('使用推荐名')
     expect(html).not.toContain('任务摘要')
     expect(html).not.toContain('当前组自定义文件名')
     expect(html).not.toContain('实际生效名称')

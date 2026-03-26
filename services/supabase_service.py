@@ -268,12 +268,74 @@ class SupabaseService:
     ) -> Optional[Dict[str, Any]]:
         """更新文档状态"""
         data = {"status": status}
-        if error_message:
+        if error_message is not None:
             data["error_message"] = error_message
+        elif status in ("queued", "processing", "completed", "pending_review"):
+            data["error_message"] = None
         if status == "completed":
             data["processed_at"] = datetime.now().isoformat()
         
         return await self.update_document(document_id, data)
+
+    async def get_job_metrics(self) -> Dict[str, Any]:
+        """获取当前任务观测指标。"""
+        try:
+            pending_result = self.client.table("processing_jobs").select("job_id", count="exact").in_("status", ["queued", "pending", "processing"]).execute()
+            failed_result = self.client.table("processing_jobs").select("job_id", count="exact").eq("status", "failed").execute()
+            completed_result = self.client.table("processing_jobs").select("job_id", count="exact").eq("status", "completed").execute()
+            recent_queue_result = self.client.table("processing_jobs").select("created_at,updated_at,status").order("created_at", desc=True).limit(20).execute()
+
+            queue_durations = []
+            for row in recent_queue_result.data or []:
+                if row.get("status") in ("processing", "completed", "failed") and row.get("created_at") and row.get("updated_at"):
+                    try:
+                        created_at = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+                        updated_at = datetime.fromisoformat(str(row["updated_at"]).replace("Z", "+00:00"))
+                        queue_durations.append(max(0, int((updated_at - created_at).total_seconds())))
+                    except ValueError:
+                        continue
+
+            avg_queue_seconds = int(sum(queue_durations) / len(queue_durations)) if queue_durations else 0
+            active_jobs = pending_result.count or 0
+            failed_jobs = failed_result.count or 0
+            completed_jobs = completed_result.count or 0
+
+            escalation_reasons: list[str] = []
+            recommended_action = "stay_on_current_architecture"
+            if avg_queue_seconds >= 300:
+                escalation_reasons.append("任务平均排队时长已超过 5 分钟")
+            if active_jobs > max(4, settings.DOC_PROCESS_MAX_CONCURRENCY * 2):
+                escalation_reasons.append("当前活跃任务数持续高于 API 进程可舒适承载范围")
+            if failed_jobs > completed_jobs and failed_jobs > 0:
+                escalation_reasons.append("失败任务数量已超过完成任务数量")
+
+            if len(escalation_reasons) >= 2:
+                recommended_action = "consider_half_worker"
+            if avg_queue_seconds >= 600 and active_jobs > max(6, settings.DOC_PROCESS_MAX_CONCURRENCY * 3):
+                recommended_action = "consider_full_worker"
+
+            return {
+                "active_jobs": active_jobs,
+                "failed_jobs": failed_jobs,
+                "completed_jobs": completed_jobs,
+                "avg_queue_seconds": avg_queue_seconds,
+                "sample_size": len(queue_durations),
+                "recommended_action": recommended_action,
+                "escalation_reasons": escalation_reasons,
+                "observed_at": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"获取任务指标失败: {e}")
+            return {
+                "active_jobs": 0,
+                "failed_jobs": 0,
+                "completed_jobs": 0,
+                "avg_queue_seconds": 0,
+                "sample_size": 0,
+                "recommended_action": "stay_on_current_architecture",
+                "escalation_reasons": [],
+                "observed_at": datetime.now().isoformat(),
+            }
     
     async def list_documents(
         self,

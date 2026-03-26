@@ -12,6 +12,7 @@ from loguru import logger
 from config.settings import settings
 from services.supabase_service import supabase_service
 from services.template_service import template_service
+from api.jobs import build_feishu_push_dedupe_key, has_feishu_push_record, record_feishu_push
 
 
 async def save_upload_file(file: UploadFile, destination: str) -> int:
@@ -98,6 +99,7 @@ async def push_to_feishu(
     log_prefix: str = "",
     extra_template: Optional[dict] = None,
     custom_push_name: Optional[str] = None,
+    dedupe_key: Optional[str] = None,
 ) -> None:
     """
     统一飞书推送逻辑：构建 field_mapping → 生成文件名 → 上传附件 → push_by_template
@@ -114,6 +116,11 @@ async def push_to_feishu(
 
     bitable_token = template.get("feishu_bitable_token")
     table_id = template.get("feishu_table_id")
+    effective_dedupe_key = dedupe_key or build_feishu_push_dedupe_key(document_id, template.get("id"), extraction_data)
+
+    if await has_feishu_push_record(effective_dedupe_key):
+        logger.info(f"{log_prefix}检测到重复飞书推送，跳过: {document_id}")
+        return
 
     if not (bitable_token and table_id):
         logger.info(f"{log_prefix}模板未配置飞书，跳过推送: {document_id}")
@@ -159,6 +166,7 @@ async def push_to_feishu(
 
     success = await feishu_service.push_by_template(push_data, field_mapping, bitable_token, table_id)
     if success:
+        await record_feishu_push(effective_dedupe_key, document_id, template.get("id"))
         logger.info(f"{log_prefix}飞书推送成功: {document_id}")
     else:
         logger.warning(f"{log_prefix}飞书推送失败: {document_id}")

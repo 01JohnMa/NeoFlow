@@ -109,9 +109,35 @@ class TestGetExtractionResult:
         chain = _mock_supabase_doc(processing_doc)
         with _patch_supabase() as mock_svc:
             mock_svc.client.table.return_value = chain
-            mock_svc.get_table_name.return_value = None
+            mock_svc.resolve_table_name.return_value = None
             resp = client.get(f"/api/documents/{DOCUMENT_ID}/result")
         assert resp.status_code == 202
+
+    def test_returns_202_for_queued_document(self, client):
+        """排队中文档返回 202"""
+        queued_doc = {**MOCK_DOCUMENT, "status": "queued", "document_type": None}
+        chain = _mock_supabase_doc(queued_doc)
+        with _patch_supabase() as mock_svc:
+            mock_svc.client.table.return_value = chain
+            mock_svc.resolve_table_name.return_value = None
+            resp = client.get(f"/api/documents/{DOCUMENT_ID}/result")
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "queued"
+
+    def test_returns_result_for_pending_review_document(self, client):
+        """待审核文档也应返回 200 和提取结果"""
+        pending_doc = {**MOCK_DOCUMENT, "status": "pending_review", "document_type": "检测报告"}
+        with _patch_supabase() as mock_svc, \
+             patch("api.routes.documents.query.template_service.get_template_fields",
+                   new_callable=AsyncMock, return_value=[]):
+            self._setup_result_mock(mock_svc, doc=pending_doc)
+            mock_svc.resolve_table_name.return_value = "inspection_reports"
+            resp = client.get(f"/api/documents/{DOCUMENT_ID}/result")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["document_id"] == DOCUMENT_ID
+        assert "extraction_data" in data
 
     def test_returns_404_for_nonexistent_document(self, client):
         """文档不存在返回 404"""

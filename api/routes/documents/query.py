@@ -126,18 +126,19 @@ async def get_extraction_result(
         
         # 如果文档正在处理中或尚未有类型
         if not document_type:
-            if doc_status in ("uploaded", "processing"):
+            if doc_status in ("uploaded", "queued", "processing"):
+                message = "文档正在排队中，请稍后重试" if doc_status == "queued" else "文档正在处理中，请稍后重试"
                 return JSONResponse(
                     status_code=202,
                     content={
                         "document_id": document_id,
                         "status": doc_status,
-                        "message": "文档正在处理中，请稍后重试"
+                        "message": message
                     }
                 )
-            elif doc_status == "completed":
+            elif doc_status in ("completed", "pending_review"):
                 # 兜底逻辑：尝试从所有结果表查询
-                logger.warning(f"文档 {document_id} 状态为 completed 但 document_type 为空")
+                logger.warning(f"文档 {document_id} 状态为 {doc_status} 但 document_type 为空")
                 
                 result = None
                 inferred_type = None
@@ -166,12 +167,21 @@ async def get_extraction_result(
                         status_code=202,
                         content={
                             "document_id": document_id,
-                            "status": "completed",
+                            "status": doc_status,
                             "message": "提取结果正在同步中，请稍后重试"
                         }
                     )
+            elif doc_status == "failed":
+                raise HTTPException(status_code=422, detail=document.get("error_message") or "文档处理失败")
             else:
-                raise HTTPException(status_code=404, detail="文档处理未完成或失败")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "document_id": document_id,
+                        "status": doc_status or "unknown",
+                        "message": "文档尚未完成处理，请稍后重试"
+                    }
+                )
         else:
             result = None
         
@@ -182,18 +192,28 @@ async def get_extraction_result(
                 result = result_query.data[0] if result_query.data else None
         
         if not result:
-            if doc_status == "completed":
-                logger.warning(f"文档 {document_id} 状态为 completed 但提取结果尚未查询到")
+            if doc_status in ("completed", "pending_review"):
+                logger.warning(f"文档 {document_id} 状态为 {doc_status} 但提取结果尚未查询到")
                 return JSONResponse(
                     status_code=202,
                     content={
                         "document_id": document_id,
-                        "status": "completed",
+                        "status": doc_status,
                         "message": "提取结果正在同步中，请稍后重试"
                     }
                 )
+            elif doc_status == "failed":
+                raise HTTPException(status_code=422, detail=document.get("error_message") or "文档处理失败")
             else:
-                raise HTTPException(status_code=404, detail="提取结果不存在")
+                message = "文档正在排队中，请稍后重试" if doc_status == "queued" else "文档尚未完成处理，请稍后重试"
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "document_id": document_id,
+                        "status": doc_status or "unknown",
+                        "message": message
+                    }
+                )
         
         ocr_text = document.get("ocr_text") or ""
 

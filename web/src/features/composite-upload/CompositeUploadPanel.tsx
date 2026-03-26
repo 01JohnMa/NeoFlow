@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import documentsService from '@/services/documents'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { CompositeGroupEditor } from '@/features/composite-upload/components/CompositeGroupEditor'
 import {
   buildCompositeBatchPayload,
@@ -22,6 +21,7 @@ import {
   FolderUp,
   Loader2,
   Upload as UploadIcon,
+  X,
 } from 'lucide-react'
 
 const ACCEPTED_TYPES = [
@@ -138,16 +138,6 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
     () => getSubmittableCompositeUploadFiles(groups, scenario),
     [groups, scenario],
   )
-  const groupEffectivePushNames = useMemo(
-    () => Object.fromEntries(
-      groups.map(group => [
-        group.id,
-        (groupCustomPushNames[group.id] || '').trim() || getDefaultCompositeGroupPushName(group, scenario),
-      ]),
-    ),
-    [groupCustomPushNames, groups, scenario],
-  )
-
   const handleBatchSubmit = async () => {
     if (!batchValidation.canSubmit) {
       setUploadError(batchValidation.globalErrors[0] || '当前仍有未满足提交条件的分组')
@@ -280,17 +270,65 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
           <FolderUp className="h-5 w-5 text-primary-400" />
           {scenario.displayName}
         </CardTitle>
-        <CardDescription>
-          {scenario.description}
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(300px,22rem)] lg:items-start">
           <CompositeGroupEditor
             scenario={scenario}
             groups={groups}
             groupErrors={batchValidation.groupErrors}
             disabled={batchPhase !== 'idle'}
+            renderGroupAside={(group, index) => {
+              const recommendedName = getDefaultCompositeGroupPushName(group, scenario)
+              const effectiveValue = groupCustomPushNames[group.id] ?? recommendedName
+
+              return (
+                <div className="rounded-lg border border-border-default bg-bg-secondary/40 px-2.5 py-2" aria-label={`分组 ${index + 1} 推送文件名`}>
+                  <div className="flex items-center gap-2">
+                    <div className="shrink-0 text-[11px] font-medium text-text-secondary">推送名</div>
+                    <Input
+                      value={effectiveValue}
+                      onChange={(e) => {
+                        const nextValue = e.target.value
+                        setGroupCustomPushNames(prev => {
+                          const next = { ...prev }
+                          if (nextValue.trim().length === 0 || nextValue === recommendedName) {
+                            delete next[group.id]
+                          } else {
+                            next[group.id] = nextValue
+                          }
+                          return next
+                        })
+                      }}
+                      aria-label={`分组 ${index + 1} 推送文件名`}
+                      maxLength={100}
+                      disabled={batchPhase !== 'idle'}
+                      className="h-8 min-w-0 text-xs"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="删除当前分组"
+                      className="h-7 w-7 shrink-0 text-error-400 hover:bg-error-500/10 hover:text-error-500"
+                      onClick={() => {
+                        setGroups(prev => {
+                          const next = prev.filter(currentGroup => currentGroup.id !== group.id)
+                          return next.length > 0 ? next : [createEmptyCompositeGroup(scenario)]
+                        })
+                        setGroupCustomPushNames(prev => {
+                          const next = { ...prev }
+                          delete next[group.id]
+                          return next
+                        })
+                      }}
+                      disabled={batchPhase !== 'idle'}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )
+            }}
             onAddGroup={() => setGroups(prev => [
               ...prev,
               createEmptyCompositeGroupSeededFromFirst(scenario, prev[0]),
@@ -309,69 +347,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
               )))
             }}
             onUpdateGroupFile={handleGroupFileChange}
-            onRemoveGroup={(groupId) => {
-              setGroups(prev => {
-                const next = prev.filter(group => group.id !== groupId)
-                return next.length > 0 ? next : [createEmptyCompositeGroup(scenario)]
-              })
-              setGroupCustomPushNames(prev => {
-                const next = { ...prev }
-                delete next[groupId]
-                return next
-              })
-            }}
           />
-
-          <div className="rounded-lg border border-border-default bg-bg-secondary/40 p-4 lg:min-w-0" aria-label="推送文件名侧栏">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-sm font-medium text-text-primary">推送文件名</Label>
-              <span className="text-xs text-text-muted">按分组命名</span>
-            </div>
-            <div className="mt-3 space-y-3">
-              {groups.map((group, index) => {
-                const recommendedName = groupEffectivePushNames[group.id] || ''
-
-                return (
-                  <div key={`${group.id}-push-name`} className="space-y-2 rounded-md border border-border-default/70 bg-bg-primary p-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-text-secondary">分组 {index + 1}</span>
-                      {batchPhase === 'idle' && recommendedName && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-1.5 text-[11px] text-text-muted"
-                          onClick={() => {
-                            setGroupCustomPushNames(prev => ({
-                              ...prev,
-                              [group.id]: recommendedName,
-                            }))
-                          }}
-                        >
-                          使用推荐名
-                        </Button>
-                      )}
-                    </div>
-                    <Input
-                      value={groupCustomPushNames[group.id] || ''}
-                      onChange={(e) => {
-                        const { value } = e.target
-                        setGroupCustomPushNames(prev => ({
-                          ...prev,
-                          [group.id]: value,
-                        }))
-                      }}
-                      placeholder={recommendedName || '请先在该组上传文件'}
-                      maxLength={100}
-                      disabled={batchPhase !== 'idle'}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
 
         {batchValidation.globalErrors.length > 0 && (
           <div className="space-y-2 rounded-lg border border-error-500/20 bg-error-500/10 p-3 text-sm text-error-500">

@@ -86,6 +86,57 @@ class TestProcessDocument:
         data = resp.json()
         assert data["success"] is True
 
+    def test_process_async_is_idempotent_when_already_processing(self, client):
+        """文档已在处理中时，不应重复提交后台任务"""
+        doc = {**MOCK_DOCUMENT, "file_path": "/tmp/test.pdf", "template_id": TEMPLATE_ID, "status": "processing"}
+        with _patch_supabase() as mock_svc, \
+             patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task:
+            mock_svc.get_document = AsyncMock(return_value=doc)
+            mock_svc.update_document_status = AsyncMock()
+            mock_svc.update_document = AsyncMock()
+            resp = client.post(f"/api/documents/{DOCUMENT_ID}/process")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["document_id"] == DOCUMENT_ID
+        assert data["status"] == "processing"
+        assert "已在处理中" in data["message"]
+        mock_svc.update_document_status.assert_not_called()
+        mock_task.assert_not_awaited()
+
+    def test_process_async_returns_queued_when_document_first_submitted(self, client):
+        """首次异步提交应返回 queued，等待后台槽位执行"""
+        doc = {**MOCK_DOCUMENT, "file_path": "/tmp/test.pdf", "template_id": TEMPLATE_ID, "status": "uploaded"}
+        with _patch_supabase() as mock_svc, \
+             patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock):
+            mock_svc.get_document = AsyncMock(return_value=doc)
+            mock_svc.update_document_status = AsyncMock()
+            mock_svc.update_document = AsyncMock()
+            resp = client.post(f"/api/documents/{DOCUMENT_ID}/process")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "queued"
+        assert "已加入队列" in data["message"]
+        mock_svc.update_document_status.assert_called_once_with(DOCUMENT_ID, "queued")
+
+    def test_process_async_is_idempotent_when_document_already_queued(self, client):
+        """文档已在排队时，不应重复提交后台任务"""
+        doc = {**MOCK_DOCUMENT, "file_path": "/tmp/test.pdf", "template_id": TEMPLATE_ID, "status": "queued"}
+        with _patch_supabase() as mock_svc, \
+             patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task:
+            mock_svc.get_document = AsyncMock(return_value=doc)
+            mock_svc.update_document_status = AsyncMock()
+            mock_svc.update_document = AsyncMock()
+            resp = client.post(f"/api/documents/{DOCUMENT_ID}/process")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "queued"
+        assert "已在队列中" in data["message"]
+        mock_svc.update_document_status.assert_not_called()
+        mock_task.assert_not_awaited()
+
 
 # ============ process-with-template ============
 
