@@ -426,7 +426,7 @@ class OCRWorkflow:
             )
 
             results_a = []
-            result_b = None
+            results_b = []
 
             # files[0] → sub_template_a
             if len(files) > 0:
@@ -487,49 +487,62 @@ class OCRWorkflow:
                             from services.vlm_service import vlm_service
                             logger.info(f"VLM逐页处理文档B: {file_path_b}")
                             vlm_pages = await vlm_service.extract_per_page(file_path_b, sub_template_b)
-                            result_b = vlm_pages[0]["data"] if vlm_pages else {}
                             for vp in vlm_pages:
+                                results_b.append(vp["data"])
                                 logger.info(f"文档B 第{vp['page']}页VLM提取完成: {len(vp['data'])}个字段")
                         else:
                             logger.info(f"逐页OCR处理文档B: {file_path_b}")
                             page_results = await ocr_service.process_document_per_page(file_path_b)
-                            # 逐页提取但作为配对文档，合并所有页的字段
-                            result_b = {}
                             for page in page_results:
                                 extracted = parse_llm_json(
                                     await self._llm_invoke_with_retry(
                                         template_service.build_extraction_prompt(sub_template_b, page["text"])
                                     )
                                 )
-                                result_b.update(extracted)
+                                results_b.append(extracted)
                                 logger.info(f"文档B 第{page['page']}页提取完成: {len(extracted)}个字段")
                     else:
                         # 整体提取
                         if mode_b == "vlm":
                             from services.vlm_service import vlm_service
                             logger.info(f"VLM处理文档B: {file_path_b}")
-                            result_b = await vlm_service.extract_from_image(file_path_b, sub_template_b)
+                            extracted = await vlm_service.extract_from_image(file_path_b, sub_template_b)
                         else:
                             logger.info(f"OCR处理文档B: {file_path_b}")
                             ocr_result = await ocr_service.process_document(file_path_b)
-                            result_b = parse_llm_json(
+                            extracted = parse_llm_json(
                                 await self._llm_invoke_with_retry(
                                     template_service.build_extraction_prompt(sub_template_b, ocr_result["text"])
                                 )
                             )
-                    logger.info(f"文档B 提取完成: {len(result_b)}个字段")
+                        results_b.append(extracted)
+                        logger.info(f"文档B 整体提取完成: {len(extracted)}个字段")
 
-            # 合并结果
-            if results_a:
+                    logger.info(f"文档B 共提取 {len(results_b)} 个样品")
+
+            # 合并结果：一对文件只有一方会逐页，用有多个结果的一方驱动样品数
+            if len(results_a) >= len(results_b):
+                # A 驱动：每个 A 页 merge 同一个 B
+                b_single = results_b[0] if results_b else {}
                 extraction_results = [
                     {
                         "sample_index": i + 1,
-                        "data": template_service.merge_extraction_results(result_a, result_b),
+                        "data": template_service.merge_extraction_results(result_a, b_single),
                     }
                     for i, result_a in enumerate(results_a)
                 ]
+            elif results_b:
+                # B 驱动：同一个 A merge 每个 B 页
+                a_single = results_a[0] if results_a else {}
+                extraction_results = [
+                    {
+                        "sample_index": i + 1,
+                        "data": template_service.merge_extraction_results(a_single, result_b_item),
+                    }
+                    for i, result_b_item in enumerate(results_b)
+                ]
             else:
-                extraction_results = [{"sample_index": 1, "data": result_b or {}}]
+                extraction_results = []
 
             processing_time = self._elapsed(processing_start)
             logger.info(f"合并提取完成: {len(extraction_results)}个样品，耗时{processing_time:.2f}s")
@@ -541,7 +554,7 @@ class OCRWorkflow:
                 document_type=sub_template_a.get("code", ""),
                 extraction_results=extraction_results,
                 results_a=results_a,
-                result_b=result_b,
+                results_b=results_b,
                 processing_time=processing_time,
             )
 

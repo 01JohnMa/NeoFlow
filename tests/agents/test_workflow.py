@@ -243,10 +243,10 @@ class TestResultBuilder:
             document_type="lighting_combined",
             extraction_results=[{"sample_index": 0, "data": {"power": "10W"}}],
             results_a=[{"power": "10W"}],
-            result_b={"distribution": "ok"},
+            results_b=[{"distribution": "ok"}],
             processing_time=5.0,
         )
         assert result["success"] is True
         assert result["sample_count"] == 1
         assert result["extraction_data"]["power"] == "10W"
-        assert result["sub_results"]["result_b"]["distribution"] == "ok"
+        assert result["sub_results"]["results_b"][0]["distribution"] == "ok"

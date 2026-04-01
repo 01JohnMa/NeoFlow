@@ -46,6 +46,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isSubmittingRef = useRef(false)
+  const pushNameInitializedRef = useRef(new Set<string>())
 
   const stopBatchTimer = useCallback(() => {
     if (batchTimerRef.current) {
@@ -57,6 +58,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
   useEffect(() => {
     setGroups([createEmptyCompositeGroup(scenario)])
     setGroupCustomPushNames({})
+    pushNameInitializedRef.current = new Set()
     setBatchPhase('idle')
     setBatchProgress(0)
     setUploadError(null)

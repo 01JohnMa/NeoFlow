@@ -109,7 +109,7 @@ class TestBatchProcessCustomPushName:
                 ],
                 'sub_results': {
                     'results_a': [{'sample_no': 'A-001'}],
-                    'result_b': {'report_no': 'B-001'},
+                    'results_b': [{'report_no': 'B-001'}],
                 },
             })
 

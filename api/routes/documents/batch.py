@@ -271,7 +271,7 @@ async def _process_merge_item(
 
     sub_results = result.get("sub_results", {})
     results_a = sub_results.get("results_a", [])
-    result_b = sub_results.get("result_b")
+    results_b = sub_results.get("results_b", [])
 
     doc_a_id = item.document_id
     doc_b_id = item.paired_document_id
@@ -371,12 +371,16 @@ async def _process_merge_item(
             "merge_template_id": item.template_id,
         })
 
-    if result_b and doc_b_id:
+    if results_b and doc_b_id:
         sub_b_code = sub_template_b.get("code", "")
+        # 合并所有 B 页结果后存（保持一条 extraction_result 记录）
+        merged_b = {}
+        for rb in results_b:
+            merged_b.update(rb)
         await supabase_service.save_extraction_result(
             document_id=doc_b_id,
             document_type=sub_b_code,
-            extraction_data=result_b,
+            extraction_data=merged_b,
             template_id=item.paired_template_id,
         )
         await supabase_service.update_document(doc_b_id, {
