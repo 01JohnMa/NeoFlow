@@ -297,7 +297,7 @@ export function buildCompositeBatchPayload(params: {
 
   getSubmittableCompositeGroups(params.groups, params.scenario).forEach(group => {
     const filledEntries = getFilledSlotEntries(group, params.scenario)
-    const customPushName = (params.groupCustomPushNames[group.id] || '').trim() || getDefaultCompositeGroupPushName(group, params.scenario)
+    const customPushName = (params.groupCustomPushNames[group.id] ?? '').trim()
 
     if (customPushName) {
       filledEntries.forEach(([, files]) => {

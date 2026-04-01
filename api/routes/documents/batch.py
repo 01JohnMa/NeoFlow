@@ -278,7 +278,7 @@ async def _process_merge_item(
     created_doc_ids = []
 
     if auto_approve:
-        custom_push_name = item.custom_push_name or (doc_a.get("custom_push_name") if doc_a else None)
+        base_push_name = item.custom_push_name or (doc_a.get("custom_push_name") if doc_a else None)
         sample_count = len(extraction_results)
         for sample_result in extraction_results:
             sample_index = sample_result.get("sample_index", 1)
@@ -290,6 +290,11 @@ async def _process_merge_item(
             )
             if sample_count > 1:
                 display_name = f"{display_name}_样品{sample_index}"
+            # 多样品时推送名拼接序号，单样品保持原样
+            if sample_count > 1 and base_push_name:
+                custom_push_name = f"{base_push_name}_{sample_index}"
+            else:
+                custom_push_name = base_push_name
             try:
                 # 根据各自模板的 push_attachment 决定推哪些文件
                 merge_file_paths = []

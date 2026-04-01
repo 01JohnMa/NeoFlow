@@ -66,6 +66,24 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
     return () => { stopBatchTimer() }
   }, [stopBatchTimer])
 
+  // 当分组有文件后自动填入默认推送名（仅首次，用户清空后不再回填）
+  useEffect(() => {
+    setGroupCustomPushNames(prev => {
+      const next = { ...prev }
+      let changed = false
+      groups.forEach(group => {
+        if (!(group.id in next)) {
+          const defaultName = getDefaultCompositeGroupPushName(group, scenario)
+          if (defaultName) {
+            next[group.id] = defaultName
+            changed = true
+          }
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [groups, scenario])
+
   const validateFile = (file: File): string | null => {
     if (!ACCEPTED_TYPES.includes(file.type)) {
       return '不支持的文件格式，请上传 PDF、PNG、JPG、TIFF 或 BMP 文件'
@@ -311,8 +329,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
             groupErrors={batchValidation.groupErrors}
             disabled={batchPhase !== 'idle'}
             renderGroupAside={(group) => {
-              const recommendedName = getDefaultCompositeGroupPushName(group, scenario)
-              const effectiveValue = groupCustomPushNames[group.id] ?? recommendedName
+              const effectiveValue = groupCustomPushNames[group.id] ?? ''
 
               return (
                 <div className="rounded-lg border border-border-default bg-bg-secondary/40 px-2.5 py-2" aria-label="推送文件名">
@@ -322,15 +339,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
                       value={effectiveValue}
                       onChange={(e) => {
                         const nextValue = e.target.value
-                        setGroupCustomPushNames(prev => {
-                          const next = { ...prev }
-                          if (nextValue.trim().length === 0 || nextValue === recommendedName) {
-                            delete next[group.id]
-                          } else {
-                            next[group.id] = nextValue
-                          }
-                          return next
-                        })
+                        setGroupCustomPushNames(prev => ({ ...prev, [group.id]: nextValue }))
                       }}
                       aria-label="推送文件名"
                       maxLength={100}
