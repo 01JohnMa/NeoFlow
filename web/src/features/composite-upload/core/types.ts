@@ -10,7 +10,7 @@ export interface CompositeUploadedFile {
 
 export interface CompositeGroup {
   id: string
-  documents: Record<CompositeSlotKey, CompositeUploadedFile | null>
+  documents: Record<CompositeSlotKey, CompositeUploadedFile[]>
   templateSelections: Record<CompositeSlotKey, string | null>
 }
 

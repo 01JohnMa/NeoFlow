@@ -21,7 +21,6 @@ import {
   FolderUp,
   Loader2,
   Upload as UploadIcon,
-  X,
 } from 'lucide-react'
 
 const ACCEPTED_TYPES = [
@@ -46,6 +45,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
   const [batchProgress, setBatchProgress] = useState(0)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const batchTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const isSubmittingRef = useRef(false)
 
   const stopBatchTimer = useCallback(() => {
     if (batchTimerRef.current) {
@@ -96,32 +96,57 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
     })
   }, [])
 
-  const handleGroupFileChange = useCallback(async (groupId: string, slotKey: CompositeSlotKey, file: File | null) => {
-    if (!file) {
+  const handleGroupFileChange = useCallback(async (groupId: string, slotKey: CompositeSlotKey, files: File[]) => {
+    if (files.length === 0) {
       setGroups(prev => prev.map(group => (
         group.id === groupId
-          ? { ...group, documents: { ...group.documents, [slotKey]: null } }
+          ? { ...group, documents: { ...group.documents, [slotKey]: [] } }
           : group
       )))
       return
     }
 
-    const error = validateFile(file)
-    if (error) {
-      setUploadError(error)
+    const currentGroup = groups.find(group => group.id === groupId)
+    const existingSlotFiles = currentGroup?.documents[slotKey] || []
+    const existingIdentities = new Set(existingSlotFiles.map(file => `${file.file.name}::${file.file.size}::${file.file.lastModified}::${file.file.type}`))
+    const pendingUploads: File[] = []
+
+    for (const file of files) {
+      const error = validateFile(file)
+      if (error) {
+        setUploadError(error)
+        return
+      }
+
+      if (isCompositeFileUsedInOtherGroups(groups, groupId, file)) {
+        setUploadError('该文件已在其他分组中使用，请勿重复上传同一文件')
+        return
+      }
+
+      const identity = `${file.name}::${file.size}::${file.lastModified}::${file.type}`
+      if (existingIdentities.has(identity)) {
+        continue
+      }
+      existingIdentities.add(identity)
+      pendingUploads.push(file)
+    }
+
+    if (pendingUploads.length === 0) {
+      setUploadError(null)
       return
     }
 
-    if (isCompositeFileUsedInOtherGroups(groups, groupId, file)) {
-      setUploadError('该文件已在其他分组中使用，请勿重复上传同一文件')
-      return
-    }
-
-    const uploadedFile = await createCompositeUploadedFile(file)
+    const uploadedFiles = await Promise.all(pendingUploads.map(file => createCompositeUploadedFile(file)))
     setUploadError(null)
     setGroups(prev => prev.map(group => (
       group.id === groupId
-        ? { ...group, documents: { ...group.documents, [slotKey]: uploadedFile } }
+        ? {
+            ...group,
+            documents: {
+              ...group.documents,
+              [slotKey]: [...group.documents[slotKey], ...uploadedFiles],
+            },
+          }
         : group
     )))
   }, [createCompositeUploadedFile, groups])
@@ -139,11 +164,13 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
     [groups, scenario],
   )
   const handleBatchSubmit = async () => {
+    if (isSubmittingRef.current) return
     if (!batchValidation.canSubmit) {
       setUploadError(batchValidation.globalErrors[0] || '当前仍有未满足提交条件的分组')
       return
     }
 
+    isSubmittingRef.current = true
     setUploadError(null)
     setBatchPhase('uploading')
     setBatchProgress(0)
@@ -177,14 +204,19 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
         setGroups(prev => prev.map(group => ({
           ...group,
           documents: Object.fromEntries(
-            Object.entries(group.documents).map(([currentSlotKey, currentUploadedFile]) => {
-              if (currentUploadedFile?.id === currentFile.id) {
+            Object.entries(group.documents).map(([currentSlotKey, currentUploadedFiles]) => {
+              const hasCurrentFile = currentUploadedFiles.some(file => file.id === currentFile.id)
+              if (hasCurrentFile) {
                 return [
                   currentSlotKey,
-                  { ...currentUploadedFile, documentId: result.document_id, filePath: result.file_path },
+                  currentUploadedFiles.map((file) => (
+                    file.id === currentFile.id
+                      ? { ...file, documentId: result.document_id, filePath: result.file_path }
+                      : file
+                  )),
                 ]
               }
-              return [currentSlotKey, currentUploadedFile]
+              return [currentSlotKey, currentUploadedFiles]
             }),
           ),
         })))
@@ -196,15 +228,14 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
       const latestGroups = submittableGroups.map(group => ({
         ...group,
         documents: Object.fromEntries(
-          Object.entries(group.documents).map(([slotKey, file]) => {
-            if (!file) return [slotKey, null]
+          Object.entries(group.documents).map(([slotKey, files]) => {
             return [
               slotKey,
-              {
+              files.map((file) => ({
                 ...file,
                 documentId: uploadResults[file.id]?.document_id || file.documentId,
                 filePath: uploadResults[file.id]?.file_path || file.filePath,
-              },
+              })),
             ]
           }),
         ),
@@ -231,6 +262,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
 
             if (jobStatus.status === 'completed') {
               stopBatchTimer()
+              isSubmittingRef.current = false
               setBatchProgress(100)
               await new Promise(innerResolve => setTimeout(innerResolve, 600))
               const firstDocId = jobStatus.document_ids?.[0]
@@ -247,6 +279,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
       })
     } catch (error) {
       stopBatchTimer()
+      isSubmittingRef.current = false
       setBatchPhase('idle')
       setBatchProgress(0)
       const message = error instanceof Error ? error.message : '批量处理失败'
@@ -277,12 +310,12 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
             groups={groups}
             groupErrors={batchValidation.groupErrors}
             disabled={batchPhase !== 'idle'}
-            renderGroupAside={(group, index) => {
+            renderGroupAside={(group) => {
               const recommendedName = getDefaultCompositeGroupPushName(group, scenario)
               const effectiveValue = groupCustomPushNames[group.id] ?? recommendedName
 
               return (
-                <div className="rounded-lg border border-border-default bg-bg-secondary/40 px-2.5 py-2" aria-label={`分组 ${index + 1} 推送文件名`}>
+                <div className="rounded-lg border border-border-default bg-bg-secondary/40 px-2.5 py-2" aria-label="推送文件名">
                   <div className="flex items-center gap-2">
                     <div className="shrink-0 text-[11px] font-medium text-text-secondary">推送名</div>
                     <Input
@@ -299,32 +332,11 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
                           return next
                         })
                       }}
-                      aria-label={`分组 ${index + 1} 推送文件名`}
+                      aria-label="推送文件名"
                       maxLength={100}
                       disabled={batchPhase !== 'idle'}
-                      className="h-8 min-w-0 text-xs"
+                      className="h-8 min-w-0 flex-1 text-xs"
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="删除当前分组"
-                      className="h-7 w-7 shrink-0 text-error-400 hover:bg-error-500/10 hover:text-error-500"
-                      onClick={() => {
-                        setGroups(prev => {
-                          const next = prev.filter(currentGroup => currentGroup.id !== group.id)
-                          return next.length > 0 ? next : [createEmptyCompositeGroup(scenario)]
-                        })
-                        setGroupCustomPushNames(prev => {
-                          const next = { ...prev }
-                          delete next[group.id]
-                          return next
-                        })
-                      }}
-                      disabled={batchPhase !== 'idle'}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
                   </div>
                 </div>
               )
@@ -347,6 +359,30 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
               )))
             }}
             onUpdateGroupFile={handleGroupFileChange}
+            onRemoveGroupFile={(groupId, slotKey, fileId) => {
+              setGroups(prev => prev.map(group => (
+                group.id === groupId
+                  ? {
+                      ...group,
+                      documents: {
+                        ...group.documents,
+                        [slotKey]: group.documents[slotKey].filter(file => file.id !== fileId),
+                      },
+                    }
+                  : group
+              )))
+            }}
+            onRemoveGroup={(groupId) => {
+              setGroups(prev => {
+                const next = prev.filter(g => g.id !== groupId)
+                return next.length > 0 ? next : [createEmptyCompositeGroup(scenario)]
+              })
+              setGroupCustomPushNames(prev => {
+                const next = { ...prev }
+                delete next[groupId]
+                return next
+              })
+            }}
           />
 
         {batchValidation.globalErrors.length > 0 && (

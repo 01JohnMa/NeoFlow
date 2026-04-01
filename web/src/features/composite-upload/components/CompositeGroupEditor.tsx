@@ -20,7 +20,8 @@ interface CompositeGroupEditorProps {
   renderGroupAside?: (group: CompositeGroup, index: number) => ReactNode
   onAddGroup: () => void
   onUpdateGroupTemplateSelection: (groupId: string, slotKey: CompositeSlotKey, templateId: string | null) => void
-  onUpdateGroupFile: (groupId: string, slotKey: CompositeSlotKey, file: File | null) => void
+  onUpdateGroupFile: (groupId: string, slotKey: CompositeSlotKey, files: File[]) => void
+  onRemoveGroupFile: (groupId: string, slotKey: CompositeSlotKey, fileId: string) => void
   onRemoveGroup?: (groupId: string) => void
 }
 
@@ -28,23 +29,27 @@ function FileSlot({
   title,
   templateValue,
   templateOptions,
-  file,
+  files,
   disabled,
   showTemplateSelector,
-  trailingAction,
+  allowMultiple,
+  leadingAction,
   onTemplateChange,
-  onSelect,
+  onSelectFiles,
+  onRemoveFile,
   onClear,
 }: {
   title: string
   templateValue: string | null
   templateOptions: CompositeScenarioConfig['templateOptions']
-  file: CompositeUploadedFile | null
+  files: CompositeUploadedFile[]
   disabled: boolean
   showTemplateSelector: boolean
-  trailingAction?: ReactNode
+  allowMultiple: boolean
+  leadingAction?: ReactNode
   onTemplateChange: (templateId: string | null) => void
-  onSelect: (file: File | null) => void
+  onSelectFiles: (files: File[]) => void
+  onRemoveFile: (fileId: string) => void
   onClear: () => void
 }) {
   const compactTitle = title.replace(/^文档\s*/u, '').replace(/\s+/g, '')
@@ -52,11 +57,14 @@ function FileSlot({
     <div className="space-y-2">
       {showTemplateSelector && (
         <div className="flex items-center gap-1">
+          {leadingAction ? (
+            <div className="flex shrink-0 items-center">{leadingAction}</div>
+          ) : null}
           <select
             value={templateValue || ''}
             disabled={disabled}
             onChange={(event) => onTemplateChange(event.target.value || null)}
-            className="h-8 w-full rounded-md border border-border-default bg-bg-primary px-2.5 text-xs text-text-primary"
+            className="h-8 min-w-0 flex-1 rounded-md border border-border-default bg-bg-primary px-2.5 text-xs text-text-primary"
           >
             <option value="">选择{compactTitle}文档类型...</option>
             {templateOptions.map(option => (
@@ -65,9 +73,8 @@ function FileSlot({
               </option>
             ))}
           </select>
-          <div className="flex items-center gap-1">
-            {trailingAction}
-            {file && (
+          <div className="flex shrink-0 items-center gap-1">
+            {files.length > 0 && (
               <Button
                 type="button"
                 variant="ghost"
@@ -84,11 +91,13 @@ function FileSlot({
       )}
 
       {!showTemplateSelector && (
-        <div className="flex items-center justify-between gap-2">
-          <Label className="text-xs text-text-secondary">{title}</Label>
-          <div className="flex items-center gap-1">
-            {trailingAction}
-            {file && (
+        <div className="flex items-center gap-2">
+          {leadingAction ? (
+            <div className="flex shrink-0 items-center">{leadingAction}</div>
+          ) : null}
+          <Label className="min-w-0 flex-1 text-xs text-text-secondary">{title}</Label>
+          <div className="flex shrink-0 items-center gap-1">
+            {files.length > 0 && (
               <Button
                 type="button"
                 variant="ghost"
@@ -108,29 +117,46 @@ function FileSlot({
         <input
           type="file"
           accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp"
+          multiple={allowMultiple}
           className="hidden"
           disabled={disabled}
           onChange={(e) => {
-            onSelect(e.target.files?.[0] || null)
+            onSelectFiles(Array.from(e.target.files || []))
             e.currentTarget.value = ''
           }}
         />
 
-        {file ? (
-          <div className="rounded-md border border-border-default bg-bg-secondary px-2.5 py-2 transition-colors hover:border-primary-500/50 hover:bg-bg-hover/60">
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded bg-bg-hover flex items-center justify-center overflow-hidden flex-shrink-0">
-                {file.preview ? (
-                  <img src={file.preview} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <FileText className="h-3.5 w-3.5 text-text-muted" />
-                )}
+        {files.length > 0 ? (
+          <div className="rounded-md border border-border-default bg-bg-secondary px-2.5 py-2 transition-colors hover:border-primary-500/50 hover:bg-bg-hover/60 space-y-2">
+            {files.map((file) => (
+              <div key={file.id} className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded bg-bg-hover flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {file.preview ? (
+                    <img src={file.preview} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <FileText className="h-3.5 w-3.5 text-text-muted" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs text-text-primary">{file.file.name}</p>
+                  <p className="text-[11px] text-text-muted">{formatFileSize(file.file.size)}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    onRemoveFile(file.id)
+                  }}
+                  disabled={disabled}
+                  className="h-6 px-1.5 text-[11px] text-text-muted hover:text-error-500"
+                >
+                  移除
+                </Button>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-text-primary">{file.file.name}</p>
-                <p className="text-[11px] text-text-muted">{formatFileSize(file.file.size)} · 点击文件替换</p>
-              </div>
-            </div>
+            ))}
+            <p className="text-[11px] text-text-muted">{allowMultiple ? '点击可继续追加文件' : '点击文件可替换'}</p>
           </div>
         ) : (
           <div className="rounded-md border border-dashed border-border-default bg-bg-primary px-2.5 py-3 text-center text-xs text-text-secondary transition-colors hover:border-primary-500/50 hover:bg-bg-hover">
@@ -153,6 +179,7 @@ export function CompositeGroupEditor({
   onAddGroup,
   onUpdateGroupTemplateSelection,
   onUpdateGroupFile,
+  onRemoveGroupFile,
   onRemoveGroup,
 }: CompositeGroupEditorProps) {
   return (
@@ -173,16 +200,17 @@ export function CompositeGroupEditor({
                     title={slot.label}
                     templateValue={group.templateSelections[slot.slotKey] || slot.templateId || null}
                     templateOptions={scenario.templateOptions}
-                    file={group.documents[slot.slotKey]}
+                    files={group.documents[slot.slotKey]}
                     disabled={disabled}
                     showTemplateSelector={showTemplateSelector}
-                    trailingAction={!renderGroupAside && onRemoveGroup && slotIndex === 0 ? (
+                    allowMultiple={scenario.slotDefinitions.length === 1}
+                    leadingAction={onRemoveGroup && slotIndex === 0 ? (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
                         aria-label="删除当前分组"
-                        className="h-6 w-6 text-error-400 hover:bg-error-500/10 hover:text-error-500"
+                        className="h-7 w-7 text-error-400 hover:bg-error-500/10 hover:text-error-500"
                         onClick={() => onRemoveGroup(group.id)}
                         disabled={disabled}
                       >
@@ -190,8 +218,9 @@ export function CompositeGroupEditor({
                       </Button>
                     ) : undefined}
                     onTemplateChange={(templateId) => onUpdateGroupTemplateSelection(group.id, slot.slotKey, templateId)}
-                    onSelect={(file) => onUpdateGroupFile(group.id, slot.slotKey, file)}
-                    onClear={() => onUpdateGroupFile(group.id, slot.slotKey, null)}
+                    onSelectFiles={(files) => onUpdateGroupFile(group.id, slot.slotKey, files)}
+                    onRemoveFile={(fileId) => onRemoveGroupFile(group.id, slot.slotKey, fileId)}
+                    onClear={() => onUpdateGroupFile(group.id, slot.slotKey, [])}
                   />
                 ))}
               </div>

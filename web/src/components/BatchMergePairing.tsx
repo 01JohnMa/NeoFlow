@@ -15,6 +15,7 @@ interface BatchMergePairingProps {
   disabled?: boolean
   onAddGroup: () => void
   onUpdateGroupFile: (groupId: string, slotKey: 'sphereFile' | 'distributionFile', file: File | null) => void
+  onRemoveGroupFile?: (groupId: string, slotKey: 'sphereFile' | 'distributionFile', fileId: string) => void
   onRemoveGroup: (groupId: string) => void
 }
 
@@ -53,8 +54,8 @@ function toCompositeGroups(groups: LightingGroup[]): CompositeGroup[] {
   return groups.map(group => ({
     id: group.id,
     documents: {
-      distributionFile: group.distributionFile,
-      sphereFile: group.sphereFile,
+      distributionFile: group.distributionFile ? [group.distributionFile] : [],
+      sphereFile: group.sphereFile ? [group.sphereFile] : [],
     },
     templateSelections: {
       distributionFile: 'light_distribution',
@@ -69,6 +70,7 @@ export function BatchMergePairing({
   disabled = false,
   onAddGroup,
   onUpdateGroupFile,
+  onRemoveGroupFile,
   onRemoveGroup,
 }: BatchMergePairingProps) {
   return (
@@ -82,7 +84,16 @@ export function BatchMergePairing({
       onUpdateGroupTemplateSelection={() => {
         // legacy wrapper keeps template mapping fixed for old callers
       }}
-      onUpdateGroupFile={(groupId, slotKey, file) => onUpdateGroupFile(groupId, slotKey as SlotKey, file)}
+      onUpdateGroupFile={(groupId, slotKey, files) =>
+        onUpdateGroupFile(groupId, slotKey as SlotKey, files[0] || null)
+      }
+      onRemoveGroupFile={(groupId, slotKey, fileId) => {
+        if (onRemoveGroupFile) {
+          onRemoveGroupFile(groupId, slotKey as SlotKey, fileId)
+          return
+        }
+        onUpdateGroupFile(groupId, slotKey as SlotKey, null)
+      }}
       onRemoveGroup={onRemoveGroup}
     />
   )

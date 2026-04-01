@@ -38,15 +38,15 @@ function createNativeFile(name: string, lastModified: number = 1710000000000): F
 function createGroup(
   id: string,
   options?: {
-    documents?: Partial<Record<'slotA' | 'slotB', CompositeUploadedFile>>
+    documents?: Partial<Record<'slotA' | 'slotB', CompositeUploadedFile[]>>
     templateSelections?: Partial<Record<'slotA' | 'slotB', string | null>>
   },
 ): CompositeGroup {
   return {
     id,
     documents: {
-      slotA: options?.documents?.slotA ?? null,
-      slotB: options?.documents?.slotB ?? null,
+      slotA: options?.documents?.slotA ?? [],
+      slotB: options?.documents?.slotB ?? [],
     },
     templateSelections: {
       slotA: options?.templateSelections?.slotA ?? null,
@@ -91,8 +91,8 @@ describe('composite upload core', () => {
     expect(createEmptyCompositeGroup(scenario)).toEqual({
       id: expect.stringMatching(/^composite-group-/),
       documents: {
-        slotA: null,
-        slotB: null,
+        slotA: [],
+        slotB: [],
       },
       templateSelections: {
         slotA: null,
@@ -113,8 +113,8 @@ describe('composite upload core', () => {
       slotB: 'tpl-b',
     })
     expect(seeded.documents).toEqual({
-      slotA: null,
-      slotB: null,
+      slotA: [],
+      slotB: [],
     })
   })
 
@@ -122,14 +122,14 @@ describe('composite upload core', () => {
     const scenario = createScenario()
     const groups = [
       createGroup('g1', {
-        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        documents: { slotA: [createFile('a1', '文档A1.pdf')], slotB: [createFile('b1', '文档B1.pdf')] },
         templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
       }),
       createGroup('g2', {
-        documents: { slotA: createFile('a2', '文档A2.pdf') },
+        documents: { slotA: [createFile('a2', '文档A2.pdf')] },
         templateSelections: { slotA: 'tpl-c' },
       }),
-      createGroup('g3', { documents: { slotB: createFile('b3', '文档B3.pdf') } }),
+      createGroup('g3', { documents: { slotB: [createFile('b3', '文档B3.pdf')] } }),
       createGroup('g4'),
     ]
 
@@ -137,7 +137,7 @@ describe('composite upload core', () => {
       empty: 1,
       complete: 1,
       partial: 2,
-      totalTasks: 3,
+      totalTasks: 4,
     })
   })
 
@@ -145,7 +145,7 @@ describe('composite upload core', () => {
     const scenario = createScenario()
     const groups = [
       createGroup('g1', {
-        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        documents: { slotA: [createFile('a1', '文档A1.pdf')], slotB: [createFile('b1', '文档B1.pdf')] },
         templateSelections: { slotA: 'tpl-a' },
       }),
     ]
@@ -160,11 +160,11 @@ describe('composite upload core', () => {
     const scenario = createScenario()
     const groups = [
       createGroup('g1', {
-        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        documents: { slotA: [createFile('a1', '文档A1.pdf')], slotB: [createFile('b1', '文档B1.pdf')] },
         templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
       }),
       createGroup('g2', {
-        documents: { slotB: createFile('b2', '文档B2.pdf') },
+        documents: { slotB: [createFile('b2', '文档B2.pdf')] },
         templateSelections: { slotB: 'tpl-c' },
       }),
     ]
@@ -209,14 +209,14 @@ describe('composite upload core', () => {
 
     expect(getDefaultCompositeGroupPushName(createGroup('g1', {
       documents: {
-        slotA: createFile('a1', '文档A.pdf'),
-        slotB: createFile('b1', '文档B.pdf'),
+        slotA: [createFile('a1', '文档A.pdf')],
+        slotB: [createFile('b1', '文档B.pdf')],
       },
       templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
     }), scenario)).toBe('文档B')
 
     expect(getDefaultCompositeGroupPushName(createGroup('g2', {
-      documents: { slotA: createFile('a2', '仅文档A.pdf') },
+      documents: { slotA: [createFile('a2', '仅文档A.pdf')] },
       templateSelections: { slotA: 'tpl-a' },
     }), scenario)).toBe('仅文档A')
   })
@@ -225,7 +225,7 @@ describe('composite upload core', () => {
     const duplicatedFile = createNativeFile('重复文件.pdf')
     const groups = [
       createGroup('g1', {
-        documents: { slotA: { id: 'f1', file: duplicatedFile, preview: null } },
+        documents: { slotA: [{ id: 'f1', file: duplicatedFile, preview: null }] },
         templateSelections: { slotA: 'tpl-a' },
       }),
       createGroup('g2'),
@@ -233,26 +233,100 @@ describe('composite upload core', () => {
 
     expect(isCompositeFileUsedInOtherGroups(groups, 'g2', createNativeFile('重复文件.pdf'))).toBe(true)
     expect(isCompositeFileUsedInOtherGroups(groups, 'g1', createNativeFile('重复文件.pdf'))).toBe(false)
-    expect(getUploadedFileIdentity(groups[0].documents.slotA!)).toContain('重复文件.pdf')
+    expect(getUploadedFileIdentity(groups[0].documents.slotA[0])).toContain('重复文件.pdf')
   })
 
   it('仅返回可提交分组涉及的文件', () => {
     const scenario = createScenario()
     const groups = [
       createGroup('g1', {
-        documents: { slotA: createFile('a1', '文档A1.pdf'), slotB: createFile('b1', '文档B1.pdf') },
+        documents: { slotA: [createFile('a1', '文档A1.pdf')], slotB: [createFile('b1', '文档B1.pdf')] },
         templateSelections: { slotA: 'tpl-a', slotB: 'tpl-b' },
       }),
       createGroup('g2', {
-        documents: { slotB: createFile('b2', '文档B2.pdf') },
+        documents: { slotB: [createFile('b2', '文档B2.pdf')] },
         templateSelections: { slotB: 'tpl-c' },
       }),
       createGroup('g3', {
-        documents: { slotA: createFile('a3', '文档A3.pdf') },
+        documents: { slotA: [createFile('a3', '文档A3.pdf')] },
       }),
     ]
 
     expect(getSubmittableCompositeGroups(groups, scenario).map(group => group.id)).toEqual(['g1', 'g2'])
     expect(getSubmittableCompositeUploadFiles(groups, scenario).map(file => file.id)).toEqual(['a1', 'b1', 'b2'])
+  })
+
+  it('单槽位下将同模板多文件展开为多个批处理任务', () => {
+    const scenario = createScenario({
+      slotDefinitions: [
+        {
+          slotKey: 'slotA',
+          label: '文档',
+          required: false,
+        },
+      ],
+      pushNameStrategy: 'slotA-first',
+    })
+    const file1 = createFile('a1', '文档A1.pdf')
+    const file2 = createFile('a2', '文档A2.pdf')
+    const groups = [
+      createGroup('g1', {
+        documents: { slotA: [file1, file2] },
+        templateSelections: { slotA: 'tpl-a' },
+      }),
+    ]
+
+    const validation = validateCompositeGroups(groups, scenario)
+    expect(validation.canSubmit).toBe(true)
+    expect(validation.validTaskCount).toBe(2)
+
+    const payload = buildCompositeBatchPayload({
+      groups,
+      scenario,
+      uploadResults: {
+        a1: { document_id: 'doc-a1', file_path: '/doc-a1' },
+        a2: { document_id: 'doc-a2', file_path: '/doc-a2' },
+      },
+      groupCustomPushNames: {
+        g1: '统一推送名',
+      },
+    })
+
+    expect(payload.items).toEqual([
+      {
+        document_id: 'doc-a1',
+        template_id: 'tpl-a',
+        custom_push_name: '统一推送名',
+      },
+      {
+        document_id: 'doc-a2',
+        template_id: 'tpl-a',
+        custom_push_name: '统一推送名',
+      },
+    ])
+  })
+
+  it('单槽位文件总任务超过5时阻止提交并给出明确提示', () => {
+    const scenario = createScenario({
+      slotDefinitions: [
+        {
+          slotKey: 'slotA',
+          label: '文档',
+          required: false,
+        },
+      ],
+      maxGroups: 5,
+    })
+    const files = Array.from({ length: 6 }).map((_, index) => createFile(`a${index + 1}`, `文档${index + 1}.pdf`))
+    const groups = [
+      createGroup('g1', {
+        documents: { slotA: files },
+        templateSelections: { slotA: 'tpl-a' },
+      }),
+    ]
+
+    const result = validateCompositeGroups(groups, scenario)
+    expect(result.canSubmit).toBe(false)
+    expect(result.globalErrors).toContain('任务项不能超过 5 个（当前 6 个）')
   })
 })

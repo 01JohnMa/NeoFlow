@@ -24,10 +24,14 @@ function getConfiguredSlotKeys(scenario: CompositeScenarioConfig): CompositeSlot
   return scenario.slotDefinitions.map(slot => slot.slotKey)
 }
 
-function getFilledSlotEntries(group: CompositeGroup, scenario: CompositeScenarioConfig): Array<[CompositeSlotKey, CompositeUploadedFile]> {
+function getFilledSlotEntries(group: CompositeGroup, scenario: CompositeScenarioConfig): Array<[CompositeSlotKey, CompositeUploadedFile[]]> {
   return getConfiguredSlotKeys(scenario)
     .map(slotKey => [slotKey, group.documents[slotKey]] as const)
-    .filter((entry): entry is [CompositeSlotKey, CompositeUploadedFile] => Boolean(entry[1]))
+    .filter((entry): entry is [CompositeSlotKey, CompositeUploadedFile[]] => entry[1].length > 0)
+}
+
+function getAllFilledFiles(group: CompositeGroup, scenario: CompositeScenarioConfig): CompositeUploadedFile[] {
+  return getFilledSlotEntries(group, scenario).flatMap(([, files]) => files)
 }
 
 function getSlotDefinition(
@@ -68,7 +72,7 @@ export function createEmptyCompositeGroup(scenario: CompositeScenarioConfig): Co
   return {
     id: `composite-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     documents: Object.fromEntries(
-      configuredSlotKeys.map(slotKey => [slotKey, null]),
+      configuredSlotKeys.map(slotKey => [slotKey, []]),
     ),
     templateSelections: Object.fromEntries(
       configuredSlotKeys.map(slotKey => [slotKey, null]),
@@ -103,6 +107,7 @@ export function summarizeCompositeGroups(
 
   return groups.reduce<CompositeGroupStatusSummary>((summary, group) => {
     const filledCount = getFilledSlotEntries(group, scenario).length
+    const filledTaskCount = getAllFilledFiles(group, scenario).length
 
     if (filledCount === 0) {
       summary.empty += 1
@@ -115,7 +120,7 @@ export function summarizeCompositeGroups(
       summary.partial += 1
     }
 
-    summary.totalTasks += 1
+    summary.totalTasks += filledTaskCount
     return summary
   }, {
     empty: 0,
@@ -133,13 +138,13 @@ export function getDefaultCompositeGroupPushName(group: CompositeGroup, scenario
       : getConfiguredSlotKeys(scenario)
 
   for (const slotKey of slotOrder) {
-    const file = group.documents[slotKey]
+    const file = group.documents[slotKey]?.[0]
     if (file) {
       return stripExtension(file.file.name)
     }
   }
 
-  const firstAvailable = getFilledSlotEntries(group, scenario)[0]?.[1]
+  const firstAvailable = getAllFilledFiles(group, scenario)[0]
   return firstAvailable ? stripExtension(firstAvailable.file.name) : ''
 }
 
@@ -147,7 +152,7 @@ export function isCompositeFileUsedInOtherGroups(groups: CompositeGroup[], curre
   const identity = [file.name, file.size, file.lastModified, file.type].join('::')
   const currentGroup = groups.find(group => group.id === currentGroupId)
   const alreadyUsedInCurrentGroup = Boolean(currentGroup && Object.values(currentGroup.documents)
-    .filter((item): item is CompositeUploadedFile => Boolean(item))
+    .flatMap(slotFiles => slotFiles)
     .some(item => getUploadedFileIdentity(item) === identity))
 
   if (alreadyUsedInCurrentGroup) {
@@ -157,7 +162,7 @@ export function isCompositeFileUsedInOtherGroups(groups: CompositeGroup[], curre
   return groups.some(group => {
     if (group.id === currentGroupId) return false
     return Object.values(group.documents)
-      .filter((item): item is CompositeUploadedFile => Boolean(item))
+      .flatMap(slotFiles => slotFiles)
       .some(item => getUploadedFileIdentity(item) === identity)
   })
 }
@@ -184,20 +189,22 @@ export function validateCompositeGroups(
     const errors: string[] = []
     const configuredSlotKeys = new Set(getConfiguredSlotKeys(scenario))
 
-    Object.entries(group.documents).forEach(([slotKey, file]) => {
-      if (!file) return
+    Object.entries(group.documents).forEach(([slotKey, slotFiles]) => {
+      if (slotFiles.length === 0) return
 
       if (!configuredSlotKeys.has(slotKey)) {
         errors.push(`缺少“${slotKey}”对应模板，当前分组无法提交该槽位文件`)
       }
 
-      const identity = getUploadedFileIdentity(file)
-      occupiedByIdentity.set(identity, [...(occupiedByIdentity.get(identity) || []), group.id])
+      slotFiles.forEach((file) => {
+        const identity = getUploadedFileIdentity(file)
+        occupiedByIdentity.set(identity, [...(occupiedByIdentity.get(identity) || []), group.id])
+      })
     })
 
     scenario.slotDefinitions.forEach(slotDefinition => {
-      const file = group.documents[slotDefinition.slotKey]
-      if (!file) return
+      const slotFiles = group.documents[slotDefinition.slotKey]
+      if (slotFiles.length === 0) return
 
       const effectiveTemplateId = getEffectiveTemplateId(group, scenario, slotDefinition.slotKey)
       if (!effectiveTemplateId) {
@@ -232,11 +239,11 @@ export function validateCompositeGroups(
   }
 
   const validTaskCount = groups.reduce((count, group) => {
-    const filledCount = getFilledSlotEntries(group, scenario).length
-    if (filledCount === 0 || groupErrors[group.id]?.length) {
+    const filledTaskCount = getAllFilledFiles(group, scenario).length
+    if (filledTaskCount === 0 || groupErrors[group.id]?.length) {
       return count
     }
-    return count + 1
+    return count + filledTaskCount
   }, 0)
 
   return {
@@ -265,7 +272,9 @@ export function getSubmittableCompositeUploadFiles(
 
   getSubmittableCompositeGroups(groups, scenario).forEach(group => {
     getFilledSlotEntries(group, scenario).forEach(([, file]) => {
-      fileMap.set(getUploadedFileIdentity(file), file)
+      file.forEach((slotFile) => {
+        fileMap.set(getUploadedFileIdentity(slotFile), slotFile)
+      })
     })
   })
 
@@ -281,7 +290,7 @@ export function buildCompositeBatchPayload(params: {
   const items: BatchProcessItem[] = []
   const fileCustomPushNameMap: Record<string, string> = {}
 
-  const getDocumentId = (file: CompositeUploadedFile | null) => {
+  const getDocumentId = (file: CompositeUploadedFile | undefined) => {
     if (!file) return undefined
     return params.uploadResults[file.id]?.document_id || file.documentId
   }
@@ -291,18 +300,20 @@ export function buildCompositeBatchPayload(params: {
     const customPushName = (params.groupCustomPushNames[group.id] || '').trim() || getDefaultCompositeGroupPushName(group, params.scenario)
 
     if (customPushName) {
-      filledEntries.forEach(([, file]) => {
-        fileCustomPushNameMap[file.id] = customPushName
+      filledEntries.forEach(([, files]) => {
+        files.forEach((file) => {
+          fileCustomPushNameMap[file.id] = customPushName
+        })
       })
     }
 
     if (filledEntries.length >= 2) {
-      const [primarySlotKey, primaryFile] = filledEntries[0]
-      const [pairedSlotKey, pairedFile] = filledEntries[1]
+      const [primarySlotKey, primaryFiles] = filledEntries[0]
+      const [pairedSlotKey, pairedFiles] = filledEntries[1]
       const primaryTemplateId = getEffectiveTemplateId(group, params.scenario, primarySlotKey)
       const pairedTemplateId = getEffectiveTemplateId(group, params.scenario, pairedSlotKey)
-      const primaryDocumentId = getDocumentId(primaryFile)
-      const pairedDocumentId = getDocumentId(pairedFile)
+      const primaryDocumentId = getDocumentId(primaryFiles[0])
+      const pairedDocumentId = getDocumentId(pairedFiles[0])
 
       if (primaryDocumentId && pairedDocumentId && primaryTemplateId && pairedTemplateId) {
         items.push({
@@ -318,17 +329,22 @@ export function buildCompositeBatchPayload(params: {
     }
 
     if (filledEntries.length === 1) {
-      const [slotKey, file] = filledEntries[0]
+      const [slotKey, files] = filledEntries[0]
       const templateId = getEffectiveTemplateId(group, params.scenario, slotKey)
-      const documentId = getDocumentId(file)
-
-      if (documentId && templateId) {
-        items.push({
-          document_id: documentId,
-          template_id: templateId,
-          custom_push_name: customPushName || undefined,
-        })
+      if (!templateId) {
+        return
       }
+
+      files.forEach((file) => {
+        const documentId = getDocumentId(file)
+        if (documentId) {
+          items.push({
+            document_id: documentId,
+            template_id: templateId,
+            custom_push_name: customPushName || undefined,
+          })
+        }
+      })
     }
   })
 

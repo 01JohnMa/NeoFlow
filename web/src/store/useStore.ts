@@ -46,9 +46,11 @@ interface ProfileState {
 interface UIState {
   sidebarOpen: boolean
   theme: 'dark' | 'light'
+  pairedBatchMode: boolean
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
   setTheme: (theme: 'dark' | 'light') => void
+  setPairedBatchMode: (enabled: boolean) => void
 }
 
 interface UploadState {
@@ -92,9 +94,11 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       sidebarOpen: !isMobile(),
       theme: 'dark',
+      pairedBatchMode: false,
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setTheme: (theme) => set({ theme }),
+      setPairedBatchMode: (enabled) => set({ pairedBatchMode: enabled }),
     }),
     {
       name: 'ui-storage',

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useProfileStore } from '@/store/useStore'
+import { useProfileStore, useUIStore } from '@/store/useStore'
 import { api } from '@/services/api'
 import * as adminApi from '@/services/admin'
 import type { AdminTemplate } from '@/types'
@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
-import { Settings } from 'lucide-react'
+import { Settings, ToggleLeft, ToggleRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FeishuConfigTab } from './AdminFeishuTab'
 import { FieldsTab } from './AdminFieldsTab'
@@ -27,6 +27,8 @@ export function AdminConfig() {
   const { profile } = useProfileStore()
   const isSuperAdmin = profile?.role === 'super_admin'
   const isTenantAdmin = profile?.role === 'tenant_admin' || isSuperAdmin
+
+  const { pairedBatchMode, setPairedBatchMode } = useUIStore()
 
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
@@ -93,6 +95,28 @@ export function AdminConfig() {
           <p className="text-sm text-text-muted">配置文档模板的识别字段、审核规则和 Few-shot 示例</p>
         </div>
       </div>
+
+      <Card className="p-4">
+        <div className="flex items-center justify-between rounded-lg border border-border-default bg-bg-secondary p-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">配对批处理</p>
+            <p className="text-xs text-text-muted">
+              开启后，批量上传每组支持上传两个文件合并处理；关闭时每组仅上传一个文件
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPairedBatchMode(!pairedBatchMode)}
+            className="text-primary-400 hover:text-primary-300 transition-colors"
+          >
+            {pairedBatchMode ? (
+              <ToggleRight className="h-8 w-8" />
+            ) : (
+              <ToggleLeft className="h-8 w-8 text-text-muted" />
+            )}
+          </button>
+        </div>
+      </Card>
 
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-4">

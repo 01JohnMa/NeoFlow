@@ -34,6 +34,7 @@ export interface AdminTemplate {
   auto_approve: boolean
   push_attachment: boolean
   extraction_mode: 'ocr_llm' | 'vlm'
+  per_page_extraction: boolean
   feishu_bitable_token: string | null
   feishu_table_id: string | null
 }
@@ -66,6 +67,7 @@ export interface UpdateTemplateConfigPayload {
   auto_approve?: boolean
   push_attachment?: boolean
   extraction_mode?: 'ocr_llm' | 'vlm'
+  per_page_extraction?: boolean
 }
 
 export interface ReorderItem {

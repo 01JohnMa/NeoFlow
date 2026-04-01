@@ -25,7 +25,42 @@ describe('resolveUploadCapabilities', () => {
     expect(result.compositeScenarios).toEqual([])
   })
 
-  it('有激活模板时启用单文件上传，并暴露通用批处理场景', () => {
+  it('默认单文件模式（pairedBatchMode 未传）：每组仅 1 个槽位', () => {
+    const result = resolveUploadCapabilities({
+      tenantCode: 'quality',
+      templates: [
+        createTemplate({ id: 'tpl-a', code: 'integrating_sphere', name: '积分球模板' }),
+        createTemplate({ id: 'tpl-b', code: 'light_distribution', name: '光分布模板' }),
+      ],
+    })
+
+    expect(result.uploadMode).toBe('single')
+    expect(result.canUseSingleUpload).toBe(true)
+    expect(result.canUseCompositeUpload).toBe(true)
+    expect(result.compositeScenarios).toHaveLength(1)
+    expect(result.compositeScenarios[0].slotDefinitions).toEqual([
+      { slotKey: 'slotA', label: '文档', required: false },
+    ])
+  })
+
+  it('pairedBatchMode=false：每组仅 1 个槽位（单文件模式）', () => {
+    const result = resolveUploadCapabilities({
+      tenantCode: 'quality',
+      templates: [createTemplate({ id: 'tpl-only', code: 'quality_report', name: '质量报告模板' })],
+      pairedBatchMode: false,
+    })
+
+    expect(result.compositeScenarios).toHaveLength(1)
+    expect(result.compositeScenarios[0].slotDefinitions).toEqual([
+      { slotKey: 'slotA', label: '文档', required: false },
+    ])
+    expect(result.compositeScenarios[0].templateOptions).toEqual([
+      { id: 'tpl-only', name: '质量报告模板', code: 'quality_report' },
+    ])
+    expect(result.compositeScenarios[0].description).toContain('单组支持多图片处理')
+  })
+
+  it('pairedBatchMode=true：每组 2 个槽位（配对模式）', () => {
     const result = resolveUploadCapabilities({
       tenantCode: 'quality',
       templates: [
@@ -33,6 +68,7 @@ describe('resolveUploadCapabilities', () => {
         createTemplate({ id: 'tpl-b', code: 'light_distribution', name: '光分布模板' }),
         createTemplate({ id: 'tpl-c', code: 'other_template', name: '其他模板' }),
       ],
+      pairedBatchMode: true,
     })
 
     expect(result.uploadMode).toBe('single')
@@ -61,31 +97,20 @@ describe('resolveUploadCapabilities', () => {
     })
   })
 
-  it('只有一个模板时仍暴露通用批处理场景，供用户做单文件批处理', () => {
+  it('只有一个模板时仍暴露通用批处理场景', () => {
     const result = resolveUploadCapabilities({
       tenantCode: 'quality',
       templates: [createTemplate({ id: 'tpl-only', code: 'quality_report', name: '质量报告模板' })],
+      pairedBatchMode: true,
     })
 
     expect(result.compositeScenarios).toHaveLength(1)
     expect(result.compositeScenarios[0].slotDefinitions).toEqual([
-      {
-        slotKey: 'slotA',
-        label: '文档 A',
-        required: false,
-      },
-      {
-        slotKey: 'slotB',
-        label: '文档 B',
-        required: false,
-      },
+      { slotKey: 'slotA', label: '文档 A', required: false },
+      { slotKey: 'slotB', label: '文档 B', required: false },
     ])
     expect(result.compositeScenarios[0].templateOptions).toEqual([
-      {
-        id: 'tpl-only',
-        name: '质量报告模板',
-        code: 'quality_report',
-      },
+      { id: 'tpl-only', name: '质量报告模板', code: 'quality_report' },
     ])
   })
 })

@@ -44,7 +44,7 @@ describe('CompositeUploadPanel', () => {
   it('将文档槽位标题合并进类型选择文案以减少纵向信息', () => {
     const html = renderToStaticMarkup(<CompositeUploadPanel scenario={scenario} />)
 
-    expect(html).toContain('aria-label="分组 1 推送文件名"')
+    expect(html).toContain('aria-label="推送文件名"')
     expect(html).toContain('推送名')
     expect(html).toContain('aria-label="删除当前分组"')
     expect(html).toContain('text-error-400')
@@ -66,5 +66,22 @@ describe('CompositeUploadPanel', () => {
     expect(html).not.toContain('任务摘要')
     expect(html).not.toContain('当前组自定义文件名')
     expect(html).not.toContain('实际生效名称')
+  })
+
+  it('单槽位批处理场景启用多选文件输入', () => {
+    const singleSlotScenario: CompositeScenarioConfig = {
+      ...scenario,
+      slotDefinitions: [
+        {
+          slotKey: 'slotA',
+          label: '文档',
+          required: false,
+        },
+      ],
+    }
+    const html = renderToStaticMarkup(<CompositeUploadPanel scenario={singleSlotScenario} />)
+
+    expect(html).toContain('type="file"')
+    expect(html).toContain('multiple=""')
   })
 })

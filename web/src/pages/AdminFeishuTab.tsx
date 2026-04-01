@@ -18,6 +18,7 @@ export function FeishuConfigTab({
   const [tableId, setTableId] = useState(template.feishu_table_id ?? '')
   const [autoApprove, setAutoApprove] = useState(template.auto_approve)
   const [pushAttachment, setPushAttachment] = useState(template.push_attachment ?? true)
+  const [perPageExtraction, setPerPageExtraction] = useState(template.per_page_extraction ?? false)
   const [extractionMode, setExtractionMode] = useState<'ocr_llm' | 'vlm'>(template.extraction_mode ?? 'ocr_llm')
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -27,6 +28,7 @@ export function FeishuConfigTab({
     setTableId(template.feishu_table_id ?? '')
     setAutoApprove(template.auto_approve)
     setPushAttachment(template.push_attachment ?? true)
+    setPerPageExtraction(template.per_page_extraction ?? false)
     setExtractionMode(template.extraction_mode ?? 'ocr_llm')
   }, [template])
 
@@ -39,6 +41,7 @@ export function FeishuConfigTab({
         feishu_table_id: tableId,
         auto_approve: autoApprove,
         push_attachment: pushAttachment,
+        per_page_extraction: perPageExtraction,
         extraction_mode: extractionMode,
       })
       onSaved({ ...template, ...updated })
@@ -134,6 +137,23 @@ export function FeishuConfigTab({
             className="text-primary-400 hover:text-primary-300 transition-colors"
           >
             {pushAttachment ? (
+              <ToggleRight className="h-8 w-8" />
+            ) : (
+              <ToggleLeft className="h-8 w-8 text-text-muted" />
+            )}
+          </button>
+        </div>
+        <div className="flex items-center justify-between rounded-lg border border-border-default bg-bg-secondary p-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">逐页提取</p>
+            <p className="text-xs text-text-muted">开启后将按页独立识别，每页产生一个样品结果（适用于每页一个样品的报告）</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPerPageExtraction((v) => !v)}
+            className="text-primary-400 hover:text-primary-300 transition-colors"
+          >
+            {perPageExtraction ? (
               <ToggleRight className="h-8 w-8" />
             ) : (
               <ToggleLeft className="h-8 w-8 text-text-muted" />

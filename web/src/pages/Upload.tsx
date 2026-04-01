@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { resolveUploadCapabilities } from '@/features/composite-upload/config/resolveCompositeScenario'
 import { CompositeUploadPanel } from '@/features/composite-upload/CompositeUploadPanel'
-import { SingleUploadPanel } from '@/features/upload/single/SingleUploadPanel'
 import { useProfile } from '@/hooks/useProfile'
+import { useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
@@ -14,23 +14,21 @@ import {
 } from 'lucide-react'
 
 export function Upload() {
-  const { tenantName, tenantCode, templates, isLoading: profileLoading } = useProfile()
+  const { tenantCode, templates, isLoading: profileLoading } = useProfile()
+  const pairedBatchMode = useUIStore(state => state.pairedBatchMode)
   const capabilities = useMemo(
-    () => resolveUploadCapabilities({ tenantCode, templates }),
-    [tenantCode, templates],
+    () => resolveUploadCapabilities({ tenantCode, templates, pairedBatchMode }),
+    [tenantCode, templates, pairedBatchMode],
   )
-  const [requestedTab, setRequestedTab] = useState<string>('single')
+  const [requestedTab, setRequestedTab] = useState<string>(capabilities.compositeScenarios[0]?.scenarioKey || '')
 
   const availableTabs = useMemo(
-    () => [
-      ...(capabilities.canUseSingleUpload ? ['single'] : []),
-      ...capabilities.compositeScenarios.map(scenario => scenario.scenarioKey),
-    ],
-    [capabilities.canUseSingleUpload, capabilities.compositeScenarios],
+    () => capabilities.compositeScenarios.map(scenario => scenario.scenarioKey),
+    [capabilities.compositeScenarios],
   )
   const activeTab = availableTabs.includes(requestedTab)
     ? requestedTab
-    : availableTabs[0] || 'single'
+    : availableTabs[0] || ''
   const activeScenario = capabilities.compositeScenarios.find(
     scenario => scenario.scenarioKey === activeTab,
   )
@@ -94,7 +92,7 @@ export function Upload() {
         </Card>
       )}
 
-      {tenantCode && !capabilities.canUseSingleUpload && capabilities.compositeScenarios.length === 0 && !profileLoading && (
+      {tenantCode && capabilities.compositeScenarios.length === 0 && !profileLoading && (
         <Card className="border-warning-500/50">
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 text-warning-500">
@@ -108,13 +106,6 @@ export function Upload() {
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {tenantCode && capabilities.canUseSingleUpload && activeTab === 'single' && (
-        <SingleUploadPanel
-          tenantName={tenantName}
-          templates={capabilities.singleTemplates}
-        />
       )}
 
       {tenantCode && activeScenario && (
@@ -136,7 +127,7 @@ export function Upload() {
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />
               <span>
                 {tenantCode
-                  ? '根据当前部门已配置的单文档模板或组合场景进行上传与识别'
+                  ? '根据当前部门已配置的批处理场景进行上传与识别'
                   : '请先选择所属部门'}
               </span>
             </li>
