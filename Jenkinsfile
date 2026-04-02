@@ -14,7 +14,7 @@ pipeline {
 
         // 目标服务器配置
         DEPLOY_SERVER = '10.10.80.37'
-        DEPLOY_USER = 'cdz'
+        DEPLOY_USER = 'caigou'
         DEPLOY_PATH = '/opt/neoflow'
     }
 
