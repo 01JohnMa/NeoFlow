@@ -4,7 +4,7 @@ import type { CompositeScenarioConfig } from '@/features/composite-upload/core/t
 export const INTEGRATING_SPHERE_TEMPLATE_CODE = 'integrating_sphere'
 export const LIGHT_DISTRIBUTION_TEMPLATE_CODE = 'light_distribution'
 export const LIGHTING_SCENARIO_KEY = 'lighting_pair'
-export const LIGHTING_MAX_GROUPS = 5
+export const LIGHTING_MAX_GROUPS = 10
 
 export function resolveLightingScenario(templates: Template[]): CompositeScenarioConfig | null {
   const integratingSphereTemplate =

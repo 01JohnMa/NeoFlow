@@ -56,8 +56,8 @@ class BatchProcessRequest(BaseModel):
     def validate_items_count(cls, v):
         if len(v) == 0:
             raise ValueError("至少需要一个任务项")
-        if len(v) > 5:
-            raise ValueError("单次批量最多 5 个任务项")
+        if len(v) > 10:
+            raise ValueError("单次批量最多 10 个任务项")
         return v
 
 
@@ -195,16 +195,64 @@ async def _process_single_item(
     )
 
     if result.get("success") and result.get("extraction_data"):
-        await handle_processing_success(
-            document_id=item.document_id,
-            result=result,
-            template_id=item.template_id,
-            tenant_id=user.tenant_id,
-            generate_display_name=True,
-            auto_approve=auto_approve,
-            source_file_path=file_path,
-            custom_push_name=item.custom_push_name or (doc.get("custom_push_name") if doc else None),
-        )
+        extraction_results = result.get("extraction_results")  # 逐页多样品时存在
+        base_push_name = item.custom_push_name or (doc.get("custom_push_name") if doc else None)
+
+        if extraction_results and len(extraction_results) > 1 and auto_approve:
+            # 逐页多样品 + auto_approve：每个样品单独推送
+            template_detail = await template_service.get_template_with_details(item.template_id)
+            sample_count = len(extraction_results)
+            for sample_result in extraction_results:
+                sample_index = sample_result.get("sample_index", 1)
+                sample_data = sample_result.get("data", {})
+                if not sample_data:
+                    continue
+                if sample_count > 1 and base_push_name:
+                    custom_push_name = f"{base_push_name}_{sample_index}"
+                else:
+                    custom_push_name = base_push_name
+                try:
+                    await push_to_feishu(
+                        template=template_detail,
+                        extraction_data=sample_data,
+                        display_name=supabase_service.generate_display_name(
+                            document_type=template_detail.get("name", ""),
+                            extraction_data=sample_data,
+                        ),
+                        document_id=f"{item.document_id}-sample-{sample_index}",
+                        source_file_path=file_path if template_detail.get("push_attachment", True) else None,
+                        log_prefix=f"[job={job_id}] single 样品{sample_index} ",
+                        custom_push_name=custom_push_name,
+                        dedupe_key=build_feishu_push_dedupe_key(
+                            f"single:{item.document_id}:sample:{sample_index}",
+                            item.template_id,
+                            sample_data,
+                        ),
+                    )
+                except Exception as feishu_err:
+                    logger.warning(f"[job={job_id}] 飞书推送失败(样品{sample_index}): {feishu_err}")
+            # 保存第一个样品的提取结果到原文档
+            await handle_processing_success(
+                document_id=item.document_id,
+                result=result,
+                template_id=item.template_id,
+                tenant_id=user.tenant_id,
+                generate_display_name=True,
+                auto_approve=auto_approve,
+                source_file_path=file_path,
+                custom_push_name=None,  # 已在上面逐样品推送，这里不再重复
+            )
+        else:
+            await handle_processing_success(
+                document_id=item.document_id,
+                result=result,
+                template_id=item.template_id,
+                tenant_id=user.tenant_id,
+                generate_display_name=True,
+                auto_approve=auto_approve,
+                source_file_path=file_path,
+                custom_push_name=base_push_name,
+            )
         await update_batch_item(job_id, idx, "completed", document_ids=[item.document_id])
     else:
         error_msg = result.get("error", "处理失败")

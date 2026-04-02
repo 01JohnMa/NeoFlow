@@ -12,7 +12,7 @@ export interface UploadCapabilities {
 }
 
 const GENERIC_BATCH_SCENARIO_KEY = 'generic_batch'
-const GENERIC_BATCH_MAX_GROUPS = 5
+const GENERIC_BATCH_MAX_GROUPS = 10
 
 function resolveGenericBatchScenario(templates: Template[], pairedMode: boolean): CompositeScenarioConfig | null {
   if (templates.length === 0) {

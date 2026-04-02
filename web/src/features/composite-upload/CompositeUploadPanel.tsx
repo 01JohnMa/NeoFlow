@@ -68,19 +68,21 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
     return () => { stopBatchTimer() }
   }, [stopBatchTimer])
 
-  // 当分组有文件后自动填入默认推送名（仅首次，用户清空后不再回填）
+  // 当分组第一次有文件时填入默认推送名，之后无论文件如何变化都不再修改
   useEffect(() => {
     setGroupCustomPushNames(prev => {
       const next = { ...prev }
       let changed = false
       groups.forEach(group => {
-        if (!(group.id in next)) {
-          const defaultName = getDefaultCompositeGroupPushName(group, scenario)
-          if (defaultName) {
-            next[group.id] = defaultName
-            changed = true
-          }
+        if (pushNameInitializedRef.current.has(group.id)) return
+        const defaultName = getDefaultCompositeGroupPushName(group, scenario)
+        if (defaultName) {
+          // 有文件才标记已初始化，并填入默认推送名
+          pushNameInitializedRef.current.add(group.id)
+          next[group.id] = defaultName
+          changed = true
         }
+        // 没有文件时不标记，等待用户上传文件后再填
       })
       return changed ? next : prev
     })
@@ -310,6 +312,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
   const clearBatch = () => {
     setGroups([createEmptyCompositeGroup(scenario)])
     setGroupCustomPushNames({})
+    pushNameInitializedRef.current = new Set()
     setBatchPhase('idle')
     setBatchProgress(0)
     setUploadError(null)
@@ -393,6 +396,7 @@ export function CompositeUploadPanel({ scenario }: CompositeUploadPanelProps) {
                 delete next[groupId]
                 return next
               })
+              pushNameInitializedRef.current.delete(groupId)
             }}
           />
 

@@ -9,7 +9,7 @@ import type {
   CompositeUploadedFile,
 } from './types'
 
-const DEFAULT_MAX_GROUPS = 5
+const DEFAULT_MAX_GROUPS = 10
 
 export interface BuiltCompositeBatchPayload {
   items: BatchProcessItem[]

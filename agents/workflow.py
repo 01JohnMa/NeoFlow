@@ -343,15 +343,64 @@ class OCRWorkflow:
             )
 
             mode = template.get("extraction_mode", settings.DOC_PROCESS_MODE)
-            if mode == "vlm":
-                # ── VLM 路径：直接从图片提取 ──────────────────────────────
+            per_page = template.get("per_page_extraction", False)
+
+            if per_page:
+                # ── 逐页提取路径：每页独立提取，每页产生一个样品 ──────────
+                if mode == "vlm":
+                    from services.vlm_service import vlm_service
+                    logger.info(f"VLM逐页处理: {file_path}")
+                    vlm_pages = await vlm_service.extract_per_page(file_path, template)
+                    page_results = [vp["data"] for vp in vlm_pages]
+                    ocr_text = ""
+                    ocr_confidence = 0.0
+                else:
+                    logger.info(f"逐页OCR处理: {file_path}")
+                    raw_pages = await ocr_service.process_document_per_page(file_path)
+                    ocr_text = "\n".join(p["text"] for p in raw_pages)
+                    ocr_confidence = raw_pages[0]["confidence"] if raw_pages else 0.0
+                    page_results = []
+                    for page in raw_pages:
+                        extracted = parse_llm_json(
+                            await self._llm_invoke_with_retry(
+                                template_service.build_extraction_prompt(template, page["text"])
+                            )
+                        )
+                        page_results.append(extracted)
+                        logger.info(f"第{page['page']}页提取完成: {len(extracted)}个字段")
+
+                processing_time = self._elapsed(processing_start)
+                logger.info(f"逐页提取完成: {len(page_results)}个样品，耗时{processing_time:.2f}s")
+
+                extraction_results = [
+                    {"sample_index": i + 1, "data": data}
+                    for i, data in enumerate(page_results)
+                ]
+                # 用第一页数据作为主 extraction_data（向后兼容）
+                extraction_data = page_results[0] if page_results else {}
+                result = build_single_success(
+                    document_id=document_id,
+                    document_type=template.get("code", ""),
+                    extraction_data=extraction_data,
+                    ocr_text=ocr_text,
+                    ocr_confidence=ocr_confidence,
+                    processing_time=processing_time,
+                    template_id=template_id,
+                    template_name=template.get("name"),
+                )
+                # 多样品时附带完整列表供调用方使用
+                if len(extraction_results) > 1:
+                    result["extraction_results"] = extraction_results
+                return result
+            elif mode == "vlm":
+                # ── VLM 整体路径：直接从图片提取 ──────────────────────────
                 from services.vlm_service import vlm_service
 
                 extraction_data = await vlm_service.extract_from_image(file_path, template)
                 ocr_text = ""
                 ocr_confidence = 0.0
             else:
-                # ── OCR+LLM 路径（默认）──────────────────────────────────
+                # ── OCR+LLM 整体路径（默认）──────────────────────────────
                 logger.info(f"开始OCR处理: {file_path}")
                 ocr_result = await ocr_service.process_document(file_path)
                 ocr_text = ocr_result["text"]
