@@ -17,10 +17,7 @@ vi.mock('@/store/useStore', () => ({
 
 vi.mock('@/features/composite-upload/config/resolveCompositeScenario', () => ({
   resolveUploadCapabilities: () => ({
-    uploadMode: 'single',
-    canUseSingleUpload: true,
     canUseCompositeUpload: true,
-    singleTemplates: [{ id: 'tpl-a', code: 'tpl_a', name: '模板A' }],
     compositeScenarios: [
       {
         scenarioKey: 'generic_batch',
@@ -38,10 +35,6 @@ vi.mock('@/features/composite-upload/config/resolveCompositeScenario', () => ({
 
 vi.mock('@/features/composite-upload/CompositeUploadPanel', () => ({
   CompositeUploadPanel: () => <div>CompositeUploadPanel</div>,
-}))
-
-vi.mock('@/features/upload/single/SingleUploadPanel', () => ({
-  SingleUploadPanel: () => <div>SingleUploadPanel</div>,
 }))
 
 describe('Upload page', () => {

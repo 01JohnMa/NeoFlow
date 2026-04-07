@@ -7,7 +7,6 @@ import { useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
-  Camera,
   FileText,
   FolderUp,
   Image as ImageIcon,
@@ -45,19 +44,6 @@ export function Upload() {
 
       {showTabs && (
         <div className="flex gap-2 border-b border-border-default pb-2 flex-wrap">
-          {capabilities.canUseSingleUpload && (
-            <button
-              onClick={() => setRequestedTab('single')}
-              className={cn(
-                'px-4 py-2 text-sm rounded-t-lg transition-colors',
-                activeTab === 'single'
-                  ? 'bg-primary-500/10 text-primary-400 border-b-2 border-primary-500'
-                  : 'text-text-secondary hover:text-text-primary',
-              )}
-            >
-              单文件上传
-            </button>
-          )}
           {capabilities.compositeScenarios.map(scenario => (
             <button
               key={scenario.scenarioKey}
@@ -120,8 +106,8 @@ export function Upload() {
               <span>上传清晰的文档图片或PDF文件，确保文字清晰可读</span>
             </li>
             <li className="flex items-start gap-2">
-              <Camera className="h-4 w-4 mt-0.5 text-primary-400" />
-              <span>移动端可直接使用相机拍照，建议在良好光线下拍摄</span>
+              <ImageIcon className="h-4 w-4 mt-0.5 text-primary-400" />
+              <span>移动端可直接拍照上传，建议在良好光线下拍摄</span>
             </li>
             <li className="flex items-start gap-2">
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />

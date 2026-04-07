@@ -11,6 +11,9 @@ import {
   X,
 } from 'lucide-react'
 
+const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+const FILE_ACCEPT = isMobile ? 'image/*,application/pdf' : '.pdf,.png,.jpg,.jpeg,.tiff,.bmp'
+
 interface CompositeGroupEditorProps {
   scenario: CompositeScenarioConfig
   groups: CompositeGroup[]
@@ -116,7 +119,7 @@ function FileSlot({
       <label className="block cursor-pointer">
         <input
           type="file"
-          accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp"
+          accept={FILE_ACCEPT}
           multiple={allowMultiple}
           className="hidden"
           disabled={disabled}

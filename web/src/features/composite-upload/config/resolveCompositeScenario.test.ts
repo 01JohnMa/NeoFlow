@@ -14,14 +14,13 @@ function createTemplate(partial: Partial<Template>): Template {
 }
 
 describe('resolveUploadCapabilities', () => {
-  it('无 tenantCode 时返回 unknown 且不暴露任何场景', () => {
+  it('无 tenantCode 时不暴露任何场景', () => {
     const result = resolveUploadCapabilities({
       tenantCode: null,
       templates: [createTemplate({ code: 'integrating_sphere' })],
     })
 
-    expect(result.uploadMode).toBe('unknown')
-    expect(result.canUseSingleUpload).toBe(false)
+    expect(result.canUseCompositeUpload).toBe(false)
     expect(result.compositeScenarios).toEqual([])
   })
 
@@ -34,8 +33,6 @@ describe('resolveUploadCapabilities', () => {
       ],
     })
 
-    expect(result.uploadMode).toBe('single')
-    expect(result.canUseSingleUpload).toBe(true)
     expect(result.canUseCompositeUpload).toBe(true)
     expect(result.compositeScenarios).toHaveLength(1)
     expect(result.compositeScenarios[0].slotDefinitions).toEqual([
@@ -71,20 +68,13 @@ describe('resolveUploadCapabilities', () => {
       pairedBatchMode: true,
     })
 
-    expect(result.uploadMode).toBe('single')
-    expect(result.canUseSingleUpload).toBe(true)
     expect(result.canUseCompositeUpload).toBe(true)
-    expect(result.singleTemplates.map(template => template.id)).toEqual([
-      'tpl-a',
-      'tpl-b',
-      'tpl-c',
-    ])
     expect(result.compositeScenarios).toHaveLength(1)
     expect(result.compositeScenarios[0]).toMatchObject({
       scenarioKey: 'generic_batch',
       displayName: '批量处理',
       enabled: true,
-      maxGroups: 5,
+      maxGroups: 10,
       slotDefinitions: [
         { slotKey: 'slotA', label: '文档 A' },
         { slotKey: 'slotB', label: '文档 B' },

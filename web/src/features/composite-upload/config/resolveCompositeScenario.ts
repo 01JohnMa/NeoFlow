@@ -1,13 +1,8 @@
 import type { Template } from '@/store/useStore'
 import type { CompositeScenarioConfig } from '@/features/composite-upload/core/types'
 
-export type UploadMode = 'single' | 'batch' | 'unknown'
-
 export interface UploadCapabilities {
-  uploadMode: UploadMode
-  canUseSingleUpload: boolean
   canUseCompositeUpload: boolean
-  singleTemplates: Template[]
   compositeScenarios: CompositeScenarioConfig[]
 }
 
@@ -61,10 +56,7 @@ export function resolveUploadCapabilities(params: {
     : []
 
   return {
-    uploadMode: hasTenant && singleTemplates.length > 0 ? 'single' : 'unknown',
-    canUseSingleUpload: hasTenant && singleTemplates.length > 0,
     canUseCompositeUpload: compositeScenarios.length > 0,
-    singleTemplates,
     compositeScenarios,
   }
 }
