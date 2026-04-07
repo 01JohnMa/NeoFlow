@@ -25,8 +25,8 @@ ON CONFLICT (code) DO NOTHING;
 -- ############################################################
 
 -- 2.1 检测报告模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', '检测报告', 'inspection_report', '产品质量检测报告', 1, TRUE, 1)
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, push_attachment, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', '检测报告', 'inspection_report', '产品质量检测报告', 1, TRUE, TRUE, 1)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- 2.2 快递单模板
@@ -34,9 +34,9 @@ INSERT INTO document_templates (id, tenant_id, name, code, description, required
     ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', '快递单', 'express', '外部机构寄达文件快递单', 1, FALSE, TRUE, 2)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
--- 2.3 抽样单模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', '抽样单', 'sampling', '市场监督抽样单', 1, TRUE, 3)
+-- 2.3 抽样单模板（extraction_mode=vlm）
+INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, push_attachment, extraction_mode, is_active, sort_order) VALUES
+    ('b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001', '抽样单', 'sampling', '市场监督抽样单', 1, TRUE, 'vlm', TRUE, 3)
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 
@@ -251,7 +251,7 @@ ON CONFLICT (id) DO UPDATE SET example_input = EXCLUDED.example_input, example_o
 -- 9.1 抽样单 → 质量管理中心多维表格
 UPDATE document_templates
 SET feishu_bitable_token = 'WNYMbxfiIaY7rasaO44caKxznxd',
-    feishu_table_id = 'tbla5E3OmiO1qY0a'
+    feishu_table_id = 'tblV1HgMnDRQH0eg'
 WHERE id = 'b0000000-0000-0000-0000-000000000003';
 
 -- 9.2 积分球测试（合并主模板）→ 照明事业部多维表格
@@ -263,7 +263,7 @@ WHERE id = 'b0000000-0000-0000-0000-000000000010';
 -- 9.3 检测报告 → 质量管理中心多维表格
 UPDATE document_templates
 SET feishu_bitable_token = 'WNYMbxfiIaY7rasaO44caKxznxd',
-    feishu_table_id = 'tblu4KCbSRBhlZr7'
+    feishu_table_id = 'tblqjX6PRcLMFhUU'
 WHERE id = 'b0000000-0000-0000-0000-000000000001';
 
 -- 快递单（express）当前无飞书推送需求，feishu_bitable_token / feishu_table_id 保持 NULL。
