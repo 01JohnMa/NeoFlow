@@ -195,53 +195,87 @@ async def _process_single_item(
     )
 
     if result.get("success") and result.get("extraction_data"):
-        extraction_results = result.get("extraction_results")  # 逐页多样品时存在
+        extraction_results = result.get("extraction_results")
         base_push_name = item.custom_push_name or (doc.get("custom_push_name") if doc else None)
+        is_multi_sample = bool(extraction_results and len(extraction_results) > 1)
 
-        if extraction_results and len(extraction_results) > 1 and auto_approve:
-            # 逐页多样品 + auto_approve：每个样品单独推送
+        if is_multi_sample:
             template_detail = await template_service.get_template_with_details(item.template_id)
+            doc_code = template_detail.get("code", "")
+            template_name = template_detail.get("name", "")
             sample_count = len(extraction_results)
-            for sample_result in extraction_results:
-                sample_index = sample_result.get("sample_index", 1)
+            created_doc_ids = []
+
+            for i, sample_result in enumerate(extraction_results):
+                sample_index = sample_result.get("sample_index", i + 1)
                 sample_data = sample_result.get("data", {})
                 if not sample_data:
                     continue
-                if sample_count > 1 and base_push_name:
-                    custom_push_name = f"{base_push_name}_{sample_index}"
+
+                display_name = supabase_service.generate_display_name(
+                    document_type=template_name, extraction_data=sample_data,
+                )
+                doc_status = "completed" if auto_approve else "pending_review"
+
+                if i == 0:
+                    current_doc_id = item.document_id
+                    await supabase_service.update_document(current_doc_id, {
+                        "status": doc_status,
+                        "template_id": item.template_id,
+                        "tenant_id": user.tenant_id,
+                        "display_name": display_name,
+                        "processed_at": datetime.now().isoformat(),
+                    })
                 else:
-                    custom_push_name = base_push_name
-                try:
-                    await push_to_feishu(
-                        template=template_detail,
-                        extraction_data=sample_data,
-                        display_name=supabase_service.generate_display_name(
-                            document_type=template_detail.get("name", ""),
+                    current_doc_id = str(uuid.uuid4())
+                    created_doc_ids.append(current_doc_id)
+                    await supabase_service.create_document({
+                        "id": current_doc_id,
+                        "user_id": user.user_id,
+                        "tenant_id": user.tenant_id,
+                        "template_id": item.template_id,
+                        "document_type": doc_code,
+                        "status": doc_status,
+                        "display_name": f"{display_name}_样品{sample_index}",
+                        "original_file_name": f"{display_name}_样品{sample_index}",
+                        "file_name": f"sample_{current_doc_id}",
+                        "file_path": file_path,
+                        "source_document_ids": [item.document_id],
+                        "processed_at": datetime.now().isoformat(),
+                    })
+
+                await supabase_service.save_extraction_result(
+                    document_id=current_doc_id,
+                    document_type=doc_code,
+                    extraction_data=sample_data,
+                    template_id=item.template_id,
+                )
+
+                if auto_approve:
+                    custom_push_name = f"{base_push_name}_{sample_index}" if base_push_name else None
+                    try:
+                        await push_to_feishu(
+                            template=template_detail,
                             extraction_data=sample_data,
-                        ),
-                        document_id=f"{item.document_id}-sample-{sample_index}",
-                        source_file_path=file_path if template_detail.get("push_attachment", True) else None,
-                        log_prefix=f"[job={job_id}] single 样品{sample_index} ",
-                        custom_push_name=custom_push_name,
-                        dedupe_key=build_feishu_push_dedupe_key(
-                            f"single:{item.document_id}:sample:{sample_index}",
-                            item.template_id,
-                            sample_data,
-                        ),
-                    )
-                except Exception as feishu_err:
-                    logger.warning(f"[job={job_id}] 飞书推送失败(样品{sample_index}): {feishu_err}")
-            # 保存第一个样品的提取结果到原文档
-            await handle_processing_success(
-                document_id=item.document_id,
-                result=result,
-                template_id=item.template_id,
-                tenant_id=user.tenant_id,
-                generate_display_name=True,
-                auto_approve=auto_approve,
-                source_file_path=file_path,
-                custom_push_name=None,  # 已在上面逐样品推送，这里不再重复
-            )
+                            display_name=display_name,
+                            document_id=current_doc_id,
+                            source_file_path=file_path if template_detail.get("push_attachment", True) else None,
+                            log_prefix=f"[job={job_id}] single 样品{sample_index} ",
+                            custom_push_name=custom_push_name,
+                            dedupe_key=build_feishu_push_dedupe_key(
+                                f"single:{item.document_id}:sample:{sample_index}",
+                                item.template_id,
+                                sample_data,
+                            ),
+                        )
+                    except Exception as feishu_err:
+                        logger.warning(f"[job={job_id}] 飞书推送失败(样品{sample_index}): {feishu_err}")
+
+            all_doc_ids = [item.document_id] + created_doc_ids
+            await update_batch_item(job_id, idx, "completed", document_ids=all_doc_ids)
+            logger.info(f"[job={job_id}] single 逐页任务 {idx} 完成, docs={all_doc_ids}")
+            return
+
         else:
             await handle_processing_success(
                 document_id=item.document_id,
@@ -253,7 +287,7 @@ async def _process_single_item(
                 source_file_path=file_path,
                 custom_push_name=base_push_name,
             )
-        await update_batch_item(job_id, idx, "completed", document_ids=[item.document_id])
+            await update_batch_item(job_id, idx, "completed", document_ids=[item.document_id])
     else:
         error_msg = result.get("error", "处理失败")
         await handle_processing_failure(item.document_id, error_msg)
@@ -317,34 +351,69 @@ async def _process_merge_item(
         await update_batch_item(job_id, idx, "failed", error="未提取到有效字段")
         return
 
-    sub_results = result.get("sub_results", {})
-    results_a = sub_results.get("results_a", [])
-    results_b = sub_results.get("results_b", [])
-
     doc_a_id = item.document_id
     doc_b_id = item.paired_document_id
     created_doc_ids = []
 
-    if auto_approve:
-        base_push_name = item.custom_push_name or (doc_a.get("custom_push_name") if doc_a else None)
-        sample_count = len(extraction_results)
-        for sample_result in extraction_results:
-            sample_index = sample_result.get("sample_index", 1)
-            sample_data = sample_result.get("data", {})
-            if not sample_data:
-                continue
-            display_name = supabase_service.generate_display_name(
-                document_type=template_name, extraction_data=sample_data,
-            )
-            if sample_count > 1:
-                display_name = f"{display_name}_样品{sample_index}"
-            # 多样品时推送名拼接序号，单样品保持原样
+    # 统一逻辑：auto_approve 只控制是否推飞书，文档记录创建方式相同
+    sub_a_code = sub_template_a.get("code", "")
+    sample_count = len(extraction_results)
+    base_push_name = item.custom_push_name or (doc_a.get("custom_push_name") if doc_a else None)
+
+    for i, sample_result in enumerate(extraction_results):
+        sample_index = sample_result.get("sample_index", i + 1)
+        sample_data = sample_result.get("data", {})
+        if not sample_data:
+            continue
+
+        display_name = supabase_service.generate_display_name(
+            document_type=template_name, extraction_data=sample_data,
+        )
+        if sample_count > 1:
+            display_name = f"{display_name}_样品{sample_index}"
+
+        doc_status = "completed" if auto_approve else "pending_review"
+
+        if i == 0:
+            current_doc_id = doc_a_id
+            await supabase_service.update_document(current_doc_id, {
+                "status": doc_status,
+                "template_id": item.template_id,
+                "tenant_id": user.tenant_id,
+                "display_name": display_name,
+                "processed_at": datetime.now().isoformat(),
+            })
+        else:
+            current_doc_id = str(uuid.uuid4())
+            created_doc_ids.append(current_doc_id)
+            await supabase_service.create_document({
+                "id": current_doc_id,
+                "user_id": user.user_id,
+                "tenant_id": user.tenant_id,
+                "template_id": item.template_id,
+                "document_type": sub_a_code,
+                "status": doc_status,
+                "display_name": display_name,
+                "original_file_name": display_name,
+                "file_name": f"sample_{current_doc_id}",
+                "file_path": fp_a,
+                "source_document_ids": [doc_a_id, doc_b_id],
+                "processed_at": datetime.now().isoformat(),
+            })
+
+        await supabase_service.save_extraction_result(
+            document_id=current_doc_id,
+            document_type=sub_a_code,
+            extraction_data=sample_data,
+            template_id=item.template_id,
+        )
+
+        if auto_approve:
             if sample_count > 1 and base_push_name:
                 custom_push_name = f"{base_push_name}_{sample_index}"
             else:
                 custom_push_name = base_push_name
             try:
-                # 根据各自模板的 push_attachment 决定推哪些文件
                 merge_file_paths = []
                 if sub_template_a.get("push_attachment", True) and fp_a:
                     merge_file_paths.append(fp_a)
@@ -354,7 +423,7 @@ async def _process_merge_item(
                     template=sub_template_a,
                     extraction_data=sample_data,
                     display_name=display_name,
-                    document_id=f"batch-merge-{job_id}-{idx}-{sample_index}",
+                    document_id=current_doc_id,
                     source_file_path=merge_file_paths or None,
                     log_prefix=f"[job={job_id}] batch-merge 样品{sample_index} ",
                     extra_template=sub_template_b,
@@ -368,75 +437,6 @@ async def _process_merge_item(
             except Exception as feishu_err:
                 logger.warning(f"[job={job_id}] 飞书推送失败: {feishu_err}")
 
-        await _set_item_documents_status(item, "completed")
-        await update_batch_item(job_id, idx, "completed", document_ids=[doc_a_id, doc_b_id])
-        logger.info(f"[job={job_id}] merge 任务项 {idx} auto_approve 推送完成")
-        return
-
-    # 非 auto_approve：各文档只存自己的原始字段，记录配对关系
-    first_doc_a_id = None
-    sub_a_code = sub_template_a.get("code", "")
-    for i, result_a_data in enumerate(results_a):
-        sample_index = i + 1
-        if not result_a_data:
-            continue
-
-        if len(results_a) <= 1:
-            current_doc_a_id = doc_a_id
-        else:
-            current_doc_a_id = str(uuid.uuid4())
-            created_doc_ids.append(current_doc_a_id)
-            display_name = supabase_service.generate_display_name(
-                document_type=template_name, extraction_data=result_a_data,
-            )
-            await supabase_service.create_document({
-                "id": current_doc_a_id,
-                "user_id": user.user_id,
-                "tenant_id": user.tenant_id,
-                "template_id": item.template_id,
-                "document_type": sub_a_code,
-                "status": "pending_review",
-                "display_name": f"{display_name}_样品{sample_index}",
-                "original_file_name": f"{display_name}_样品{sample_index}",
-                "file_name": f"sample_{current_doc_a_id}",
-                "file_path": "",
-                "source_document_ids": [doc_a_id],
-                "processed_at": datetime.now().isoformat(),
-            })
-
-        if first_doc_a_id is None:
-            first_doc_a_id = current_doc_a_id
-
-        await supabase_service.save_extraction_result(
-            document_id=current_doc_a_id,
-            document_type=sub_a_code,
-            extraction_data=result_a_data,
-            template_id=item.template_id,
-        )
-        await supabase_service.update_document(current_doc_a_id, {
-            "status": "pending_review",
-            "paired_document_id": doc_b_id,
-            "merge_template_id": item.template_id,
-        })
-
-    if results_b and doc_b_id:
-        sub_b_code = sub_template_b.get("code", "")
-        # 合并所有 B 页结果后存（保持一条 extraction_result 记录）
-        merged_b = {}
-        for rb in results_b:
-            merged_b.update(rb)
-        await supabase_service.save_extraction_result(
-            document_id=doc_b_id,
-            document_type=sub_b_code,
-            extraction_data=merged_b,
-            template_id=item.paired_template_id,
-        )
-        await supabase_service.update_document(doc_b_id, {
-            "status": "pending_review",
-            "paired_document_id": first_doc_a_id,
-            "merge_template_id": item.template_id,
-        })
-
-    all_doc_ids = [doc_a_id] + created_doc_ids + ([doc_b_id] if doc_b_id else [])
+    all_doc_ids = [doc_a_id] + created_doc_ids
     await update_batch_item(job_id, idx, "completed", document_ids=all_doc_ids)
     logger.info(f"[job={job_id}] merge 任务项 {idx} 完成, docs={all_doc_ids}")

@@ -181,6 +181,7 @@ async def handle_processing_success(
     auto_approve: bool = False,
     source_file_path: Optional[str] = None,
     custom_push_name: Optional[str] = None,
+    skip_feishu_push: bool = False,
 ) -> None:
     """处理成功时的统一逻辑"""
     await supabase_service.save_extraction_result(
@@ -218,7 +219,7 @@ async def handle_processing_success(
         + (f", 显示名称: {display_name}" if display_name else "")
     )
 
-    if auto_approve:
+    if auto_approve and not skip_feishu_push:
         try:
             template = None
             if template_id:

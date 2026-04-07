@@ -3,10 +3,14 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
 WORKDIR /app
 
 # Install system dependencies required by PaddlePaddle/PaddleOCR and pdf2image (poppler)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i "s|http://deb.debian.org|${APT_MIRROR}|g; s|http://security.debian.org/debian-security|${APT_MIRROR}/debian-security|g" /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libgl1 \
     libglib2.0-0 \
@@ -17,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir -i ${PIP_INDEX_URL} -r /app/requirements.txt
 
 COPY . /app
 
