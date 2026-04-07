@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useProfileStore, useUIStore } from '@/store/useStore'
+import { useProfileStore } from '@/store/useStore'
 import { api } from '@/services/api'
 import * as adminApi from '@/services/admin'
 import type { AdminTemplate } from '@/types'
@@ -28,9 +28,10 @@ export function AdminConfig() {
   const isSuperAdmin = profile?.role === 'super_admin'
   const isTenantAdmin = profile?.role === 'tenant_admin' || isSuperAdmin
 
-  const { pairedBatchMode, setPairedBatchMode } = useUIStore()
-
   const [tenants, setTenants] = useState<Tenant[]>([])
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('')
+  const [pairedBatchMode, setPairedBatchMode] = useState(false)
+  const [savingSettings, setSavingSettings] = useState(false)
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
   const [templates, setTemplates] = useState<AdminTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
@@ -64,7 +65,29 @@ export function AdminConfig() {
       .fetchAdminTemplates(selectedTenantId)
       .then(setTemplates)
       .finally(() => setLoadingTemplates(false))
+
+    // 加载部门配置
+    api.get<Tenant>(`/tenants/${selectedTenantId}`).then(({ data }) => {
+      const settings = (data as Tenant & { settings?: { paired_batch_mode?: boolean } }).settings
+      setPairedBatchMode(settings?.paired_batch_mode ?? false)
+    })
   }, [selectedTenantId])
+
+  const handleTogglePairedBatchMode = async () => {
+    if (!selectedTenantId || savingSettings) return
+    const newValue = !pairedBatchMode
+    setSavingSettings(true)
+    try {
+      await api.put(`/tenants/${selectedTenantId}/settings`, {
+        paired_batch_mode: newValue,
+      })
+      setPairedBatchMode(newValue)
+    } catch (error) {
+      console.error('更新部门配置失败:', error)
+    } finally {
+      setSavingSettings(false)
+    }
+  }
 
   const handleTemplateChange = (id: string) => {
     setSelectedTemplateId(id)
@@ -106,8 +129,9 @@ export function AdminConfig() {
           </div>
           <button
             type="button"
-            onClick={() => setPairedBatchMode(!pairedBatchMode)}
-            className="text-primary-400 hover:text-primary-300 transition-colors"
+            onClick={handleTogglePairedBatchMode}
+            disabled={!selectedTenantId || savingSettings}
+            className="text-primary-400 hover:text-primary-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {pairedBatchMode ? (
               <ToggleRight className="h-8 w-8" />

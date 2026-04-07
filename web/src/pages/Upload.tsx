@@ -3,7 +3,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { resolveUploadCapabilities } from '@/features/composite-upload/config/resolveCompositeScenario'
 import { CompositeUploadPanel } from '@/features/composite-upload/CompositeUploadPanel'
 import { useProfile } from '@/hooks/useProfile'
-import { useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
@@ -13,8 +12,7 @@ import {
 } from 'lucide-react'
 
 export function Upload() {
-  const { tenantCode, templates, isLoading: profileLoading } = useProfile()
-  const pairedBatchMode = useUIStore(state => state.pairedBatchMode)
+  const { tenantCode, templates, isLoading: profileLoading, pairedBatchMode } = useProfile()
   const capabilities = useMemo(
     () => resolveUploadCapabilities({ tenantCode, templates, pairedBatchMode }),
     [tenantCode, templates, pairedBatchMode],

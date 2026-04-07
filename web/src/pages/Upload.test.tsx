@@ -8,11 +8,8 @@ vi.mock('@/hooks/useProfile', () => ({
     tenantCode: 'quality',
     templates: [],
     isLoading: false,
+    pairedBatchMode: false,
   }),
-}))
-
-vi.mock('@/store/useStore', () => ({
-  useUIStore: (selector: (state: { pairedBatchMode: boolean }) => boolean) => selector({ pairedBatchMode: false }),
 }))
 
 vi.mock('@/features/composite-upload/config/resolveCompositeScenario', () => ({
