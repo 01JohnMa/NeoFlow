@@ -32,7 +32,6 @@ export function AdminConfig() {
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
   const [pairedBatchMode, setPairedBatchMode] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
-  const [selectedTenantId, setSelectedTenantId] = useState<string>('')
   const [templates, setTemplates] = useState<AdminTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
   const [selectedTemplate, setSelectedTemplate] = useState<AdminTemplate | null>(null)
