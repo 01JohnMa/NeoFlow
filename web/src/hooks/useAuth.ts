@@ -35,7 +35,7 @@ async function ensureAuthInitialized() {
     }
 
     if (!authSubscription) {
-      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      const { data } = supabase.auth.onAuthStateChange((_event: import('@supabase/supabase-js').AuthChangeEvent, session: Session | null) => {
         applySessionToStore(session)
       })
       authSubscription = data.subscription
