@@ -115,14 +115,6 @@ pipeline {
                     set -e
                     cd ${DEPLOY_PATH}
 
-                    echo '拉取最新镜像...'
-                    docker login ${NEXUS_REGISTRY} -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD}
-                    docker pull ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER}
-                    docker pull ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER}
-
-                    docker tag ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-api:latest
-                    docker tag ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-web:latest
-
                     echo '停止旧容器...'
                     docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml down || true
 
