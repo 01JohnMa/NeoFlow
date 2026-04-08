@@ -24,7 +24,7 @@ pipeline {
                 echo '=========================================='
                 echo '开始构建流程'
                 echo "构建编号: ${BUILD_NUMBER}"
-                echo "构建时间: ${BUILD_TIMESTAMP}"
+                echo "构建时间: ${BUILD_ID}"
                 echo '=========================================='
             }
         }
