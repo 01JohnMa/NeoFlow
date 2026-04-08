@@ -23,8 +23,8 @@ pipeline {
             steps {
                 echo '=========================================='
                 echo '开始构建流程'
-                echo '构建编号: ${BUILD_NUMBER}'
-                echo '构建时间: ${BUILD_TIMESTAMP}'
+                echo "构建编号: ${BUILD_NUMBER}"
+                echo "构建时间: ${BUILD_TIMESTAMP}"
                 echo '=========================================='
             }
         }
@@ -119,7 +119,7 @@ pipeline {
                             docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml down || true
 
                             echo '启动新容器...'
-                            docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d --build
+                            docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
 
                             echo '清理旧镜像...'
                             docker image prune -f
@@ -143,7 +143,7 @@ pipeline {
         success {
             echo '=========================================='
             echo '构建和部署成功！'
-            echo '构建编号: ${BUILD_NUMBER}'
+            echo "构建编号: ${BUILD_NUMBER}"
             echo '=========================================='
         }
         failure {
