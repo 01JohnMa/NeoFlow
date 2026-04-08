@@ -38,6 +38,28 @@ pipeline {
             }
         }
 
+        stage('同步代码到目标目录') {
+            steps {
+                echo '同步代码到部署目录...'
+                sh """
+                    set -e
+                    # 检查目标目录是否为 git 仓库
+                    if [ -d "${DEPLOY_PATH}/.git" ]; then
+                        echo '目标目录已是 Git 仓库，执行 git pull...'
+                        cd ${DEPLOY_PATH}
+                        git pull origin ${GITEA_BRANCH}
+                    else
+                        echo '克隆代码到目标目录...'
+                        rm -rf ${DEPLOY_PATH}
+                        git clone ${GITEA_URL} ${DEPLOY_PATH}
+                        cd ${DEPLOY_PATH}
+                        git checkout ${GITEA_BRANCH}
+                    fi
+                    echo '代码同步完成'
+                """
+            }
+        }
+
         stage('构建 Docker 镜像') {
             steps {
                 echo '构建 Docker 镜像...'
@@ -71,9 +93,6 @@ pipeline {
                 sh """
                     set -e
                     cd ${DEPLOY_PATH}
-
-                    echo '拉取最新代码...'
-                    git pull origin ${GITEA_BRANCH}
 
                     echo '拉取最新镜像...'
                     docker login ${NEXUS_REGISTRY} -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD}
