@@ -60,6 +60,27 @@ pipeline {
             }
         }
 
+        stage('配置环境变量') {
+            steps {
+                echo '配置环境变量文件...'
+                sh """
+                    set -e
+                    cd ${DEPLOY_PATH}
+                    # 如果 .env 不存在，从 .env.prod 复制
+                    if [ ! -f .env ]; then
+                        echo '复制 .env.prod 为 .env...'
+                        cp .env.prod .env
+                    fi
+                    # 如果 supabase/.env 不存在，从 supabase/.env.example 复制
+                    if [ ! -f supabase/.env ] && [ -f supabase/.env.example ]; then
+                        echo '复制 supabase/.env...'
+                        cp supabase/.env.example supabase/.env
+                    fi
+                    echo '环境变量配置完成'
+                """
+            }
+        }
+
         stage('构建 Docker 镜像') {
             steps {
                 echo '构建 Docker 镜像...'
