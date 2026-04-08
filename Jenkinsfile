@@ -67,39 +67,35 @@ pipeline {
 
         stage('部署到目标服务器') {
             steps {
-                echo '部署到服务器 ${DEPLOY_SERVER}...'
-                sshagent(credentials: ['server-ssh-key']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_SERVER} << 'EOF'
-                            set -e
-                            cd ${DEPLOY_PATH}
+                echo '在本地节点部署...'
+                sh """
+                    set -e
+                    cd ${DEPLOY_PATH}
 
-                            echo '拉取最新代码...'
-                            git pull origin ${GITEA_BRANCH}
+                    echo '拉取最新代码...'
+                    git pull origin ${GITEA_BRANCH}
 
-                            echo '拉取最新镜像...'
-                            docker login ${NEXUS_REGISTRY} -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD}
-                            docker pull ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER}
-                            docker pull ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER}
+                    echo '拉取最新镜像...'
+                    docker login ${NEXUS_REGISTRY} -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD}
+                    docker pull ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER}
+                    docker pull ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER}
 
-                            docker tag ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-api:latest
-                            docker tag ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-web:latest
+                    docker tag ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-api:latest
+                    docker tag ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-web:latest
 
-                            echo '停止旧容器...'
-                            docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml down || true
+                    echo '停止旧容器...'
+                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml down || true
 
-                            echo '启动新容器...'
-                            docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+                    echo '启动新容器...'
+                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
 
-                            echo '清理旧镜像...'
-                            docker image prune -f
+                    echo '清理旧镜像...'
+                    docker image prune -f
 
-                            echo '=========================================='
-                            echo '部署完成！构建编号: \${BUILD_NUMBER}'
-                            echo '=========================================='
-                        EOF
-                    """
-                }
+                    echo '=========================================='
+                    echo '部署完成！构建编号: \${BUILD_NUMBER}'
+                    echo '=========================================='
+                """
             }
         }
     }
