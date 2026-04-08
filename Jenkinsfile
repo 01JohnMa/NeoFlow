@@ -10,7 +10,7 @@ pipeline {
         NEXUS_URL = 'http://10.10.80.35:8081'
         NEXUS_REGISTRY = '10.10.80.35:8082'
         NEXUS_USERNAME = 'admin'
-        NEXUS_PASSWORD = 'admin123'
+        NEXUS_PASSWORD = '123456'
 
         // 目标服务器配置
         DEPLOY_SERVER = '10.10.80.37'
