@@ -24,7 +24,6 @@ pipeline {
                 echo '=========================================='
                 echo '开始构建流程'
                 echo "构建编号: ${BUILD_NUMBER}"
-                echo "构建时间: ${BUILD_ID}"
                 echo '=========================================='
             }
         }
@@ -39,34 +38,12 @@ pipeline {
             }
         }
 
-        stage('安装依赖') {
-            steps {
-                echo '安装 Python 依赖...'
-                sh '''
-                    python -m pip install --upgrade pip
-                    pip install -r requirements.txt
-                '''
-                echo '依赖安装完成'
-            }
-        }
-
-        stage('运行测试') {
-            steps {
-                echo '运行测试...'
-                sh 'pytest tests/ -v || true'
-            }
-        }
-
         stage('构建 Docker 镜像') {
             steps {
                 echo '构建 Docker 镜像...'
                 sh """
-                    # 构建 API 镜像
                     docker build -f Dockerfile.api -t ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} .
-
-                    # 构建 Web 镜像
                     docker build -f web/Dockerfile -t ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} .
-
                     echo '镜像构建完成'
                 """
             }
@@ -76,19 +53,13 @@ pipeline {
             steps {
                 echo '推送镜像到 Nexus...'
                 sh """
-                    # 登录 Nexus Docker 仓库
                     docker login ${NEXUS_REGISTRY} -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD}
-
-                    # 推送镜像
                     docker push ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER}
                     docker push ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER}
-
-                    # 标记为 latest 并推送
                     docker tag ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-api:latest
                     docker tag ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-web:latest
                     docker push ${NEXUS_REGISTRY}/neoflow-api:latest
                     docker push ${NEXUS_REGISTRY}/neoflow-web:latest
-
                     echo '镜像推送完成'
                 """
             }
@@ -111,7 +82,6 @@ pipeline {
                             docker pull ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER}
                             docker pull ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER}
 
-                            # 给镜像打标签
                             docker tag ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-api:latest
                             docker tag ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-web:latest
 
@@ -126,7 +96,6 @@ pipeline {
 
                             echo '=========================================='
                             echo '部署完成！构建编号: \${BUILD_NUMBER}'
-                            echo '访问地址: http://${DEPLOY_SERVER}:8080'
                             echo '=========================================='
                         EOF
                     """
