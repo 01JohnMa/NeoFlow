@@ -60,33 +60,6 @@ pipeline {
             }
         }
 
-        stage('构建 Docker 镜像') {
-            steps {
-                echo '构建 Docker 镜像...'
-                sh """
-                    docker build -f Dockerfile.api -t ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} .
-                    docker build -f web/Dockerfile -t ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} .
-                    echo '镜像构建完成'
-                """
-            }
-        }
-
-        stage('推送镜像到 Nexus') {
-            steps {
-                echo '推送镜像到 Nexus...'
-                sh """
-                    docker login ${NEXUS_REGISTRY} -u ${NEXUS_USERNAME} -p ${NEXUS_PASSWORD}
-                    docker push ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER}
-                    docker push ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER}
-                    docker tag ${NEXUS_REGISTRY}/neoflow-api:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-api:latest
-                    docker tag ${NEXUS_REGISTRY}/neoflow-web:\${BUILD_NUMBER} ${NEXUS_REGISTRY}/neoflow-web:latest
-                    docker push ${NEXUS_REGISTRY}/neoflow-api:latest
-                    docker push ${NEXUS_REGISTRY}/neoflow-web:latest
-                    echo '镜像推送完成'
-                """
-            }
-        }
-
         stage('部署到目标服务器') {
             steps {
                 echo '在本地节点部署...'
@@ -97,8 +70,8 @@ pipeline {
                     echo '停止旧容器...'
                     docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml stop || true
 
-                    echo '启动新容器...'
-                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+                    echo '构建并启动新容器...'
+                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d --build
 
                     echo '清理旧镜像...'
                     docker image prune -f
