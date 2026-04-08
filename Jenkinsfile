@@ -95,7 +95,7 @@ pipeline {
                     cd ${DEPLOY_PATH}
 
                     echo '停止旧容器...'
-                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml down || true
+                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml stop || true
 
                     echo '启动新容器...'
                     docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
