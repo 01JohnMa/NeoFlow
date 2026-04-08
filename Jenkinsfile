@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent { label '10.10.80.37' }
 
     environment {
         // Gitea 配置
