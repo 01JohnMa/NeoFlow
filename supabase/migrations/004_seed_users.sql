@@ -100,4 +100,24 @@ INSERT INTO auth.users (
     )
 ON CONFLICT (id) DO NOTHING;
 
+-- 补插 auth.identities（email 登录必须有此记录）
+INSERT INTO auth.identities (
+    id,
+    user_id,
+    identity_data,
+    provider,
+    provider_id,
+    created_at,
+    updated_at
+) VALUES
+    ('4377360e-3965-497b-a333-044398d1d0f5', '4377360e-3965-497b-a333-044398d1d0f5', '{"sub": "4377360e-3965-497b-a333-044398d1d0f5", "email": "123@gn.com"}', 'email', '123@gn.com', NOW(), NOW()),
+    ('bc350d6f-edfd-488d-a9c5-1e6b1d9e5305', 'bc350d6f-edfd-488d-a9c5-1e6b1d9e5305', '{"sub": "bc350d6f-edfd-488d-a9c5-1e6b1d9e5305", "email": "admin123@gongniu.cn"}', 'email', 'admin123@gongniu.cn', NOW(), NOW()),
+    ('5484211a-7bb5-4f5c-bb4f-5fb13b2b83aa', '5484211a-7bb5-4f5c-bb4f-5fb13b2b83aa', '{"sub": "5484211a-7bb5-4f5c-bb4f-5fb13b2b83aa", "email": "27694@gn.cn"}', 'email', '27694@gn.cn', NOW(), NOW()),
+    ('68ac78c2-9e7d-4071-bda0-02bda6e0ce32', '68ac78c2-9e7d-4071-bda0-02bda6e0ce32', '{"sub": "68ac78c2-9e7d-4071-bda0-02bda6e0ce32", "email": "244233@gongniu.cn"}', 'email', '244233@gongniu.cn', NOW(), NOW()),
+    ('cd56d93b-7d74-4194-b019-059117e68035', 'cd56d93b-7d74-4194-b019-059117e68035', '{"sub": "cd56d93b-7d74-4194-b019-059117e68035", "email": "276946@gn.cn"}', 'email', '276946@gn.cn', NOW(), NOW()),
+    ('d307e0b5-96f2-4045-b567-fcafb94bf13d', 'd307e0b5-96f2-4045-b567-fcafb94bf13d', '{"sub": "d307e0b5-96f2-4045-b567-fcafb94bf13d", "email": "929938267@qq.com"}', 'email', '929938267@qq.com', NOW(), NOW()),
+    ('9a85d26a-12aa-497f-b605-b600318a256f', '9a85d26a-12aa-497f-b605-b600318a256f', '{"sub": "9a85d26a-12aa-497f-b605-b600318a256f", "email": "277046@gongniu.cn"}', 'email', '277046@gongniu.cn', NOW(), NOW()),
+    ('c6c8cad7-42d0-4b48-9d86-bd40a558b1fb', 'c6c8cad7-42d0-4b48-9d86-bd40a558b1fb', '{"sub": "c6c8cad7-42d0-4b48-9d86-bd40a558b1fb", "email": "273794@gongniu.cn"}', 'email', '273794@gongniu.cn', NOW(), NOW())
+ON CONFLICT (provider, provider_id) DO NOTHING;
+
 SELECT '004_seed_users.sql: 预置用户导入完成，共 8 个用户' AS message;
