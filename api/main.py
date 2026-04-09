@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from loguru import logger
+import asyncio
 import os
 
 from api.exceptions import AppException
@@ -25,6 +26,33 @@ logger.add(
     retention="7 days",
     level=settings.LOG_LEVEL
 )
+
+
+# ============ 超时恢复任务 ============
+
+STUCK_RECOVERY_INTERVAL_SECONDS = 600  # 每 10 分钟执行一次
+STUCK_RECOVERY_TIMEOUT_MINUTES = 30    # processing 超过 30 分钟视为超时
+
+
+async def _run_stuck_document_recovery() -> None:
+    """重置超时的 processing 文档，防止永久卡死。"""
+    try:
+        count = await supabase_service.reset_stuck_processing_documents(
+            timeout_minutes=STUCK_RECOVERY_TIMEOUT_MINUTES
+        )
+        if count:
+            logger.warning(f"[恢复任务] 重置了 {count} 个超时 processing 文档")
+        else:
+            logger.debug("[恢复任务] 无超时 processing 文档")
+    except Exception as e:
+        logger.error(f"[恢复任务] 执行失败: {e}")
+
+
+async def _stuck_recovery_loop() -> None:
+    """后台循环，每隔 STUCK_RECOVERY_INTERVAL_SECONDS 秒执行一次恢复任务。"""
+    while True:
+        await asyncio.sleep(STUCK_RECOVERY_INTERVAL_SECONDS)
+        await _run_stuck_document_recovery()
 
 
 @asynccontextmanager
@@ -56,7 +84,11 @@ async def lifespan(app: FastAPI):
         logger.info("✓ Supabase服务初始化成功")
     except Exception as e:
         logger.opt(exception=e).warning("Supabase服务初始化失败，请检查配置")
-    
+
+    # 启动超时文档恢复后台任务
+    asyncio.create_task(_stuck_recovery_loop())
+    logger.info("✓ 超时文档恢复任务已启动（每 10 分钟执行一次）")
+
     logger.info("=" * 50)
     logger.info(f"✓ {settings.APP_NAME} 启动完成")
     logger.info(f"  API文档: http://{settings.HOST}:{settings.PORT}/docs")
