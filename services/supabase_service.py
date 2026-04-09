@@ -287,6 +287,41 @@ class SupabaseService(SupabaseClientMixin):
         
         return await self.update_document(document_id, data)
 
+    async def reset_stuck_processing_documents(self, timeout_minutes: int = 30) -> int:
+        """
+        将超过 timeout_minutes 分钟仍处于 processing 状态的文档重置为 failed。
+        返回受影响的文档数量。
+        """
+        from datetime import timedelta
+
+        cutoff = (
+            datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        ).isoformat()
+
+        result = await self._run_sync(
+            lambda: self.client.table("documents")
+            .select("id")
+            .eq("status", "processing")
+            .lt("updated_at", cutoff)
+            .execute()
+        )
+        stuck_docs = result.data or []
+        if not stuck_docs:
+            return 0
+
+        stuck_ids = [doc["id"] for doc in stuck_docs]
+        error_msg = f"处理超时（超过 {timeout_minutes} 分钟），已自动重置"
+
+        await self._run_sync(
+            lambda: self.client.table("documents")
+            .update({"status": "failed", "error_message": error_msg, "updated_at": datetime.utcnow().isoformat()})
+            .in_("id", stuck_ids)
+            .execute()
+        )
+
+        logger.warning(f"已重置 {len(stuck_ids)} 个超时 processing 文档: {stuck_ids}")
+        return len(stuck_ids)
+
     async def get_job_metrics(self) -> Dict[str, Any]:
         """获取当前任务观测指标。"""
         try:
