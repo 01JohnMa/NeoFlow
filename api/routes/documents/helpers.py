@@ -255,8 +255,17 @@ async def handle_processing_failure(document_id: str, error_message: str) -> Non
 
 async def handle_processing_exception(document_id: str, exception: Exception) -> None:
     """处理异常时的统一逻辑"""
-    logger.error(f"后台任务异常: {exception}")
-    try:
-        await supabase_service.update_document_status(document_id, "failed", str(exception))
-    except Exception as update_err:
-        logger.warning(f"更新失败状态时出错: {update_err}")
+    logger.error(f"后台任务异常: {document_id} — {exception}")
+    for attempt in range(2):
+        try:
+            await supabase_service.update_document_status(document_id, "failed", str(exception))
+            return
+        except Exception as update_err:
+            if attempt == 0:
+                logger.error(
+                    f"更新失败状态时出错（将重试）: {document_id} — {update_err}"
+                )
+            else:
+                logger.critical(
+                    f"更新失败状态重试仍失败，文档可能永久卡死: {document_id} — {update_err}"
+                )

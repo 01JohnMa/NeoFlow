@@ -141,7 +141,7 @@ function FileSlot({
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs text-text-primary">{file.file.name}</p>
+                  <p className="break-all text-xs text-text-primary leading-snug">{file.file.name}</p>
                   <p className="text-[11px] text-text-muted">{formatFileSize(file.file.size)}</p>
                 </div>
                 <Button
