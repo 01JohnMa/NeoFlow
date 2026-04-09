@@ -21,7 +21,7 @@ RUN sed -i "s|http://deb.debian.org|${APT_MIRROR}|g; s|http://security.debian.or
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -i ${PIP_INDEX_URL} -r /app/requirements.txt
+RUN pip install --no-cache-dir -i ${PIP_INDEX_URL} --timeout 600 --retries 5 -r /app/requirements.txt
 
 COPY . /app
 

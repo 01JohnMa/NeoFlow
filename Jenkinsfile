@@ -71,7 +71,7 @@ pipeline {
                     docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml stop || true
 
                     echo '构建并启动新容器...'
-                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml build --no-cache
+                    docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml build
                     docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
 
                     echo '清理旧镜像...'
