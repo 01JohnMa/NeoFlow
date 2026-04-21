@@ -31,13 +31,13 @@ class TenantService(SupabaseClientMixin):
             租户列表
         """
         try:
-            query = self._get_client().table("tenants").select("id, name, code, description")
+            query = self._get_client().table("tenants").select("id, name, code, description, settings")
             
             if active_only:
                 query = query.eq("is_active", True)
             
             query = query.order("name")
-            result = query.execute()
+            result = await self._run_sync(query.execute)
             
             return result.data or []
         except Exception as e:
@@ -55,7 +55,9 @@ class TenantService(SupabaseClientMixin):
             租户信息
         """
         try:
-            result = self._get_client().table("tenants").select("*").eq("id", tenant_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("tenants").select("*").eq("id", tenant_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取租户失败: {e}")
@@ -72,7 +74,9 @@ class TenantService(SupabaseClientMixin):
             租户信息
         """
         try:
-            result = self._get_client().table("tenants").select("*").eq("code", code).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("tenants").select("*").eq("code", code).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取租户失败: {e}")
@@ -89,7 +93,9 @@ class TenantService(SupabaseClientMixin):
             创建的租户信息
         """
         try:
-            result = self._get_client().table("tenants").insert(data).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("tenants").insert(data).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"创建租户失败: {e}")
@@ -107,12 +113,34 @@ class TenantService(SupabaseClientMixin):
             更新后的租户信息
         """
         try:
-            result = self._get_client().table("tenants").update(data).eq("id", tenant_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("tenants").update(data).eq("id", tenant_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"更新租户失败: {e}")
             raise
     
+    async def update_tenant_settings(self, tenant_id: str, settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        更新租户的 settings 配置
+
+        Args:
+            tenant_id: 租户ID
+            settings: 配置数据（JSONB）
+
+        Returns:
+            更新后的租户信息
+        """
+        try:
+            result = await self._run_sync(
+                lambda: self._get_client().table("tenants").update({"settings": settings}).eq("id", tenant_id).execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"更新租户配置失败: {e}")
+            raise
+
     # ============ 用户 Profile 操作 ============
     
     async def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -126,18 +154,20 @@ class TenantService(SupabaseClientMixin):
             用户 profile 信息
         """
         try:
-            # 先查询 profile 基础信息
-            result = self._get_client().table("profiles").select("*").eq("id", user_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("profiles").select("*").eq("id", user_id).execute()
+            )
             if not result.data:
                 return None
-            
+
             profile = result.data[0]
-            
-            # 如果有 tenant_id，单独查询租户信息
+
             if profile.get("tenant_id"):
-                tenant_result = self._get_client().table("tenants").select(
-                    "id, name, code"
-                ).eq("id", profile["tenant_id"]).execute()
+                tenant_result = await self._run_sync(
+                    lambda: self._get_client().table("tenants").select(
+                        "id, name, code"
+                    ).eq("id", profile["tenant_id"]).execute()
+                )
                 if tenant_result.data:
                     profile["tenants"] = tenant_result.data[0]
             
@@ -213,7 +243,9 @@ class TenantService(SupabaseClientMixin):
             if not data:
                 return await self.get_user_profile(user_id)
             
-            result = self._get_client().table("profiles").update(data).eq("id", user_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("profiles").update(data).eq("id", user_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"更新用户 profile 失败: {e}")
@@ -246,7 +278,9 @@ class TenantService(SupabaseClientMixin):
                 "display_name": display_name
             }
             
-            result = self._get_client().table("profiles").upsert(data).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("profiles").upsert(data).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"创建用户 profile 失败: {e}")
@@ -265,9 +299,11 @@ class TenantService(SupabaseClientMixin):
             用户列表
         """
         try:
-            result = self._get_client().table("profiles").select(
-                "id, tenant_id, role, display_name, created_at"
-            ).eq("tenant_id", tenant_id).order("created_at", desc=True).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("profiles").select(
+                    "id, tenant_id, role, display_name, created_at"
+                ).eq("tenant_id", tenant_id).order("created_at", desc=True).execute()
+            )
             
             return result.data or []
         except Exception as e:

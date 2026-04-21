@@ -187,6 +187,8 @@ export function DocumentDetail() {
     )
   }
 
+  const isUploaded = status.status === 'uploaded'
+  const isQueued = status.status === 'queued'
   const isProcessing = status.status === 'processing' || processMutation.isPending
   const isPendingReview = status.status === 'pending_review'
   const isCompleted = status.status === 'completed'
@@ -319,7 +321,7 @@ export function DocumentDetail() {
             </div>
           </div>
 
-          {/* Error Message - 只有状态为 failed 时才显示 */}
+          {/* 状态补充说明 */}
           {isFailed && status.error_message && (
             <div className="mt-4 p-4 rounded-lg bg-error-500/10 border border-error-500/20">
               <div className="flex items-start gap-3">
@@ -331,17 +333,55 @@ export function DocumentDetail() {
               </div>
             </div>
           )}
+
+          {isUploaded && (
+            <div className="mt-4 p-4 rounded-lg bg-accent-400/10 border border-accent-400/20">
+              <div className="flex items-start gap-3">
+                <FileText className="h-5 w-5 text-accent-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-accent-400">文档已上传，等待处理</p>
+                  <p className="text-sm text-text-secondary mt-1">如果长时间停留在该状态，可手动点击“重新处理”。</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isQueued && (
+            <div className="mt-4 p-4 rounded-lg bg-accent-400/10 border border-accent-400/20">
+              <div className="flex items-start gap-3">
+                <RefreshCw className="h-5 w-5 text-accent-400 flex-shrink-0 mt-0.5 animate-spin" />
+                <div>
+                  <p className="font-medium text-accent-400">文档排队中</p>
+                  <p className="text-sm text-text-secondary mt-1">当前有其他任务正在执行，系统会自动开始处理，请勿重复提交。</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isProcessing && (
+            <div className="mt-4 p-4 rounded-lg bg-accent-400/10 border border-accent-400/20">
+              <div className="flex items-start gap-3">
+                <RefreshCw className="h-5 w-5 text-accent-400 flex-shrink-0 mt-0.5 animate-spin" />
+                <div>
+                  <p className="font-medium text-accent-400">文档处理中</p>
+                  <p className="text-sm text-text-secondary mt-1">高峰期可能需要 2-5 分钟，系统会自动轮询最新状态，请勿重复提交。</p>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Processing Status */}
-      {isProcessing && (
+      {(isQueued || isProcessing) && (
         <Card>
           <CardContent className="py-12 text-center">
             <Spinner size="lg" className="mx-auto" />
-            <p className="mt-4 text-text-primary font-medium">正在处理文档...</p>
+            <p className="mt-4 text-text-primary font-medium">{isQueued ? '任务正在排队...' : '正在处理文档...'}</p>
             <p className="text-sm text-text-muted mt-1">
-              系统正在进行OCR识别和字段提取，请稍候
+              {isQueued
+                ? '系统会在前序任务完成后自动开始处理，请勿重复提交'
+                : '系统正在进行识别和字段提取，高峰期可能需要 2-5 分钟，请勿重复提交'}
             </p>
           </CardContent>
         </Card>

@@ -343,15 +343,64 @@ class OCRWorkflow:
             )
 
             mode = template.get("extraction_mode", settings.DOC_PROCESS_MODE)
-            if mode == "vlm":
-                # ── VLM 路径：直接从图片提取 ──────────────────────────────
+            per_page = template.get("per_page_extraction", False)
+
+            if per_page:
+                # ── 逐页提取路径：每页独立提取，每页产生一个样品 ──────────
+                if mode == "vlm":
+                    from services.vlm_service import vlm_service
+                    logger.info(f"VLM逐页处理: {file_path}")
+                    vlm_pages = await vlm_service.extract_per_page(file_path, template)
+                    page_results = [vp["data"] for vp in vlm_pages]
+                    ocr_text = ""
+                    ocr_confidence = 0.0
+                else:
+                    logger.info(f"逐页OCR处理: {file_path}")
+                    raw_pages = await ocr_service.process_document_per_page(file_path)
+                    ocr_text = "\n".join(p["text"] for p in raw_pages)
+                    ocr_confidence = raw_pages[0]["confidence"] if raw_pages else 0.0
+                    page_results = []
+                    for page in raw_pages:
+                        extracted = parse_llm_json(
+                            await self._llm_invoke_with_retry(
+                                template_service.build_extraction_prompt(template, page["text"])
+                            )
+                        )
+                        page_results.append(extracted)
+                        logger.info(f"第{page['page']}页提取完成: {len(extracted)}个字段")
+
+                processing_time = self._elapsed(processing_start)
+                logger.info(f"逐页提取完成: {len(page_results)}个样品，耗时{processing_time:.2f}s")
+
+                extraction_results = [
+                    {"sample_index": i + 1, "data": data}
+                    for i, data in enumerate(page_results)
+                ]
+                # 用第一页数据作为主 extraction_data（向后兼容）
+                extraction_data = page_results[0] if page_results else {}
+                result = build_single_success(
+                    document_id=document_id,
+                    document_type=template.get("code", ""),
+                    extraction_data=extraction_data,
+                    ocr_text=ocr_text,
+                    ocr_confidence=ocr_confidence,
+                    processing_time=processing_time,
+                    template_id=template_id,
+                    template_name=template.get("name"),
+                )
+                # 多样品时附带完整列表供调用方使用
+                if len(extraction_results) > 1:
+                    result["extraction_results"] = extraction_results
+                return result
+            elif mode == "vlm":
+                # ── VLM 整体路径：直接从图片提取 ──────────────────────────
                 from services.vlm_service import vlm_service
 
                 extraction_data = await vlm_service.extract_from_image(file_path, template)
                 ocr_text = ""
                 ocr_confidence = 0.0
             else:
-                # ── OCR+LLM 路径（默认）──────────────────────────────────
+                # ── OCR+LLM 整体路径（默认）──────────────────────────────
                 logger.info(f"开始OCR处理: {file_path}")
                 ocr_result = await ocr_service.process_document(file_path)
                 ocr_text = ocr_result["text"]
@@ -426,63 +475,123 @@ class OCRWorkflow:
             )
 
             results_a = []
-            result_b = None
+            results_b = []
 
-            # files[0] → sub_template_a（支持多样品逐页提取）
+            # files[0] → sub_template_a
             if len(files) > 0:
                 file_path_a = files[0].get("file_path", "")
                 if file_path_a:
                     mode_a = sub_template_a.get("extraction_mode", settings.DOC_PROCESS_MODE)
-                    if mode_a == "vlm":
-                        from services.vlm_service import vlm_service
-                        logger.info(f"VLM逐页处理文档A: {file_path_a}")
-                        vlm_pages = await vlm_service.extract_per_page(file_path_a, sub_template_a)
-                        for vp in vlm_pages:
-                            results_a.append(vp["data"])
-                            logger.info(f"文档A 第{vp['page']}页VLM提取完成: {len(vp['data'])}个字段")
+                    per_page_a = sub_template_a.get("per_page_extraction", False)
+
+                    if per_page_a:
+                        # 逐页提取：每页独立 OCR + LLM，每页产生一个样品
+                        if mode_a == "vlm":
+                            from services.vlm_service import vlm_service
+                            logger.info(f"VLM逐页处理文档A: {file_path_a}")
+                            vlm_pages = await vlm_service.extract_per_page(file_path_a, sub_template_a)
+                            for vp in vlm_pages:
+                                results_a.append(vp["data"])
+                                logger.info(f"文档A 第{vp['page']}页VLM提取完成: {len(vp['data'])}个字段")
+                        else:
+                            logger.info(f"逐页OCR处理文档A: {file_path_a}")
+                            page_results = await ocr_service.process_document_per_page(file_path_a)
+                            for page in page_results:
+                                extracted = parse_llm_json(
+                                    await self._llm_invoke_with_retry(
+                                        template_service.build_extraction_prompt(sub_template_a, page["text"])
+                                    )
+                                )
+                                results_a.append(extracted)
+                                logger.info(f"文档A 第{page['page']}页提取完成: {len(extracted)}个字段")
                     else:
-                        logger.info(f"逐页OCR处理文档A: {file_path_a}")
-                        page_results = await ocr_service.process_document_per_page(file_path_a)
-                        for page in page_results:
+                        # 整体提取：所有页拼接后一次 LLM
+                        if mode_a == "vlm":
+                            from services.vlm_service import vlm_service
+                            logger.info(f"VLM整体处理文档A: {file_path_a}")
+                            extracted = await vlm_service.extract_from_image(file_path_a, sub_template_a)
+                        else:
+                            logger.info(f"整体OCR处理文档A: {file_path_a}")
+                            ocr_result = await ocr_service.process_document(file_path_a)
                             extracted = parse_llm_json(
                                 await self._llm_invoke_with_retry(
-                                    template_service.build_extraction_prompt(sub_template_a, page["text"])
+                                    template_service.build_extraction_prompt(sub_template_a, ocr_result["text"])
                                 )
                             )
-                            results_a.append(extracted)
-                            logger.info(f"文档A 第{page['page']}页提取完成: {len(extracted)}个字段")
+                        results_a.append(extracted)
+                        logger.info(f"文档A 整体提取完成: {len(extracted)}个字段")
+
                     logger.info(f"文档A 共提取 {len(results_a)} 个样品")
 
-            # files[1] → sub_template_b（整体处理）
+            # files[1] → sub_template_b
             if len(files) > 1:
                 file_path_b = files[1].get("file_path", "")
                 if file_path_b:
                     mode_b = sub_template_b.get("extraction_mode", settings.DOC_PROCESS_MODE)
-                    if mode_b == "vlm":
-                        from services.vlm_service import vlm_service
-                        logger.info(f"VLM处理文档B: {file_path_b}")
-                        result_b = await vlm_service.extract_from_image(file_path_b, sub_template_b)
-                    else:
-                        logger.info(f"OCR处理文档B: {file_path_b}")
-                        ocr_result = await ocr_service.process_document(file_path_b)
-                        result_b = parse_llm_json(
-                            await self._llm_invoke_with_retry(
-                                template_service.build_extraction_prompt(sub_template_b, ocr_result["text"])
-                            )
-                        )
-                    logger.info(f"文档B 提取完成: {len(result_b)}个字段")
+                    per_page_b = sub_template_b.get("per_page_extraction", False)
 
-            # 合并结果
-            if results_a:
+                    if per_page_b:
+                        # 逐页提取
+                        if mode_b == "vlm":
+                            from services.vlm_service import vlm_service
+                            logger.info(f"VLM逐页处理文档B: {file_path_b}")
+                            vlm_pages = await vlm_service.extract_per_page(file_path_b, sub_template_b)
+                            for vp in vlm_pages:
+                                results_b.append(vp["data"])
+                                logger.info(f"文档B 第{vp['page']}页VLM提取完成: {len(vp['data'])}个字段")
+                        else:
+                            logger.info(f"逐页OCR处理文档B: {file_path_b}")
+                            page_results = await ocr_service.process_document_per_page(file_path_b)
+                            for page in page_results:
+                                extracted = parse_llm_json(
+                                    await self._llm_invoke_with_retry(
+                                        template_service.build_extraction_prompt(sub_template_b, page["text"])
+                                    )
+                                )
+                                results_b.append(extracted)
+                                logger.info(f"文档B 第{page['page']}页提取完成: {len(extracted)}个字段")
+                    else:
+                        # 整体提取
+                        if mode_b == "vlm":
+                            from services.vlm_service import vlm_service
+                            logger.info(f"VLM处理文档B: {file_path_b}")
+                            extracted = await vlm_service.extract_from_image(file_path_b, sub_template_b)
+                        else:
+                            logger.info(f"OCR处理文档B: {file_path_b}")
+                            ocr_result = await ocr_service.process_document(file_path_b)
+                            extracted = parse_llm_json(
+                                await self._llm_invoke_with_retry(
+                                    template_service.build_extraction_prompt(sub_template_b, ocr_result["text"])
+                                )
+                            )
+                        results_b.append(extracted)
+                        logger.info(f"文档B 整体提取完成: {len(extracted)}个字段")
+
+                    logger.info(f"文档B 共提取 {len(results_b)} 个样品")
+
+            # 合并结果：一对文件只有一方会逐页，用有多个结果的一方驱动样品数
+            if len(results_a) >= len(results_b):
+                # A 驱动：每个 A 页 merge 同一个 B
+                b_single = results_b[0] if results_b else {}
                 extraction_results = [
                     {
                         "sample_index": i + 1,
-                        "data": template_service.merge_extraction_results(result_a, result_b),
+                        "data": template_service.merge_extraction_results(result_a, b_single),
                     }
                     for i, result_a in enumerate(results_a)
                 ]
+            elif results_b:
+                # B 驱动：同一个 A merge 每个 B 页
+                a_single = results_a[0] if results_a else {}
+                extraction_results = [
+                    {
+                        "sample_index": i + 1,
+                        "data": template_service.merge_extraction_results(a_single, result_b_item),
+                    }
+                    for i, result_b_item in enumerate(results_b)
+                ]
             else:
-                extraction_results = [{"sample_index": 1, "data": result_b or {}}]
+                extraction_results = []
 
             processing_time = self._elapsed(processing_start)
             logger.info(f"合并提取完成: {len(extraction_results)}个样品，耗时{processing_time:.2f}s")
@@ -494,7 +603,7 @@ class OCRWorkflow:
                 document_type=sub_template_a.get("code", ""),
                 extraction_results=extraction_results,
                 results_a=results_a,
-                result_b=result_b,
+                results_b=results_b,
                 processing_time=processing_time,
             )
 

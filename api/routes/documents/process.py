@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime
+import asyncio
 from pydantic import BaseModel
 from loguru import logger
 import uuid
@@ -28,6 +29,9 @@ from .helpers import (
 _handle_processing_success = handle_processing_success
 _handle_processing_failure = handle_processing_failure
 _handle_processing_exception = handle_processing_exception
+
+# 重任务并发限制：避免多用户同时触发时拖垮 API 进程
+_DOC_PROCESS_SEMAPHORE = asyncio.Semaphore(max(1, settings.DOC_PROCESS_MAX_CONCURRENCY))
 
 
 # ============ 请求模型 ============
@@ -83,6 +87,24 @@ async def process_document(
         template_id = document.get("template_id") if document else None
         # 优先使用当前用户的 tenant_id（支持重新处理时使用更新后的租户）
         tenant_id = user.tenant_id or document.get("tenant_id")
+
+        current_status = document.get("status") if document else None
+        if not sync and current_status == "queued":
+            return {
+                "document_id": document_id,
+                "status": "queued",
+                "message": "文档已在队列中，请勿重复提交",
+                "estimated_time": "2-5分钟",
+                "use_template": template_id is not None,
+            }
+        if not sync and current_status == "processing":
+            return {
+                "document_id": document_id,
+                "status": "processing",
+                "message": "文档已在处理中，请勿重复提交",
+                "estimated_time": "2-5分钟",
+                "use_template": template_id is not None,
+            }
         
         # 如果文档的 tenant_id 为空，更新为当前用户的 tenant_id
         if document and not document.get("tenant_id") and user.tenant_id:
@@ -130,6 +152,11 @@ async def process_document(
             return result
         else:
             # 异步处理
+            job_id = await create_job(
+                job_type="template" if template_id else "single",
+                created_by=user.user_id,
+                related_document_ids=[document_id],
+            )
             background_tasks.add_task(
                 process_document_task,
                 document_id=document_id,
@@ -137,19 +164,20 @@ async def process_document(
                 template_id=template_id,
                 tenant_id=tenant_id,
                 custom_push_name=document.get("custom_push_name") if document else None,
+                job_id=job_id,
             )
-            
-            # 更新状态
+
             try:
-                await supabase_service.update_document_status(document_id, "processing")
+                await supabase_service.update_document_status(document_id, "queued")
             except Exception as status_err:
-                logger.warning(f"更新处理状态失败: {status_err}")
-            
+                logger.warning(f"更新排队状态失败: {status_err}")
+
             return {
                 "document_id": document_id,
-                "status": "processing",
-                "message": "文档处理已开始（后台任务）",
-                "estimated_time": "30-60秒",
+                "job_id": job_id,
+                "status": "queued",
+                "message": "文档已加入处理队列",
+                "estimated_time": "2-5分钟",
                 "use_template": template_id is not None
             }
         
@@ -166,49 +194,61 @@ async def process_document_task(
     template_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
     custom_push_name: Optional[str] = None,
+    job_id: Optional[str] = None,
 ):
     """后台处理任务"""
     try:
-        logger.info(f"开始后台处理: {document_id}, 模板: {template_id or '无(自动分类)'}")
-        
-        # 根据是否有模板选择处理方式
-        if template_id:
-            result = await ocr_workflow.process_with_template(
-                document_id=document_id,
-                file_path=file_path,
-                template_id=template_id,
-                tenant_id=tenant_id
-            )
-        else:
-            result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
-        
-        if result["success"] and result.get("extraction_data"):
-            auto_approve = False
-            template = None
-            if template_id:
-                template = await template_service.get_template(template_id)
-            elif tenant_id and result.get("document_type"):
-                template = await template_service.get_template_by_code(tenant_id, result.get("document_type"))
-            if template:
-                auto_approve = bool(template.get("auto_approve", False))
+        async with _DOC_PROCESS_SEMAPHORE:
+            if job_id:
+                await update_job(job_id, "ocr")
+            await supabase_service.update_document_status(document_id, "processing")
+            logger.info(f"开始后台处理: {document_id}, 模板: {template_id or '无(自动分类)'}")
 
-            await handle_processing_success(
-                document_id=document_id,
-                result=result,
-                template_id=template_id or (template.get("id") if template else None),
-                tenant_id=tenant_id,
-                generate_display_name=True,
-                auto_approve=auto_approve,
-                source_file_path=file_path,
-                custom_push_name=custom_push_name,
-            )
-        else:
-            await _handle_processing_failure(
-                document_id,
-                result.get("error", "处理失败")
-            )
+            # 根据是否有模板选择处理方式
+            if template_id:
+                result = await ocr_workflow.process_with_template(
+                    document_id=document_id,
+                    file_path=file_path,
+                    template_id=template_id,
+                    tenant_id=tenant_id
+                )
+            else:
+                result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
+
+            if result["success"] and result.get("extraction_data"):
+                auto_approve = False
+                template = None
+                if template_id:
+                    template = await template_service.get_template(template_id)
+                elif tenant_id and result.get("document_type"):
+                    template = await template_service.get_template_by_code(tenant_id, result.get("document_type"))
+                if template:
+                    auto_approve = bool(template.get("auto_approve", False))
+
+                await handle_processing_success(
+                    document_id=document_id,
+                    result=result,
+                    template_id=template_id or (template.get("id") if template else None),
+                    tenant_id=tenant_id,
+                    generate_display_name=True,
+                    auto_approve=auto_approve,
+                    source_file_path=file_path,
+                    custom_push_name=custom_push_name,
+                )
+                if job_id:
+                    await update_job(job_id, "completed", document_ids=[document_id], error=None)
+            else:
+                error_message = result.get("error") or "未提取到有效字段"
+                await _handle_processing_failure(
+                    document_id,
+                    error_message
+                )
+                if job_id:
+                    await update_job(job_id, "failed", error=error_message)
 
     except Exception as e:
+        if job_id:
+            await update_job(job_id, "failed", error=str(e))
         await _handle_processing_exception(document_id, e)
 
 
@@ -280,6 +320,22 @@ async def process_document_with_template(
         auto_approve = bool(template.get("auto_approve", False))
         custom_push_name = document.get("custom_push_name")
 
+        current_status = document.get("status")
+        if not request.sync and current_status == "queued":
+            return JSONResponse(status_code=200, content={
+                "document_id": document_id,
+                "template_id": request.template_id,
+                "status": "queued",
+                "message": "文档已在队列中，请勿重复提交"
+            })
+        if not request.sync and current_status == "processing":
+            return JSONResponse(status_code=200, content={
+                "document_id": document_id,
+                "template_id": request.template_id,
+                "status": "processing",
+                "message": "文档已在处理中，请勿重复提交"
+            })
+
         if request.sync:
             # 同步处理
             result = await ocr_workflow.process_with_template(
@@ -304,6 +360,11 @@ async def process_document_with_template(
             return result
         else:
             # 异步处理
+            job_id = await create_job(
+                job_type="template",
+                created_by=user.user_id,
+                related_document_ids=[document_id],
+            )
             background_tasks.add_task(
                 process_document_with_template_task,
                 document_id=document_id,
@@ -312,15 +373,17 @@ async def process_document_with_template(
                 tenant_id=user.tenant_id,
                 auto_approve=auto_approve,
                 custom_push_name=custom_push_name,
+                job_id=job_id,
             )
-            
-            await supabase_service.update_document_status(document_id, "processing")
-            
+
+            await supabase_service.update_document_status(document_id, "queued")
+
             return JSONResponse(status_code=202, content={
                 "document_id": document_id,
                 "template_id": request.template_id,
-                "status": "processing",
-                "message": "文档处理已开始（后台任务）"
+                "job_id": job_id,
+                "status": "queued",
+                "message": "文档已加入处理队列"
             })
         
     except (DocumentNotFoundError, FileNotFoundError, HTTPException):
@@ -337,36 +400,48 @@ async def process_document_with_template_task(
     tenant_id: str,
     auto_approve: bool = False,
     custom_push_name: Optional[str] = None,
+    job_id: Optional[str] = None,
 ):
     """模板化处理后台任务"""
     try:
-        logger.info(f"开始模板化后台处理: {document_id}, 模板: {template_id}")
+        async with _DOC_PROCESS_SEMAPHORE:
+            if job_id:
+                await update_job(job_id, "ocr")
+            await supabase_service.update_document_status(document_id, "processing")
+            logger.info(f"开始模板化后台处理: {document_id}, 模板: {template_id}")
 
-        result = await ocr_workflow.process_with_template(
-            document_id=document_id,
-            file_path=file_path,
-            template_id=template_id,
-            tenant_id=tenant_id
-        )
-
-        if result["success"] and result.get("extraction_data"):
-            await handle_processing_success(
+            result = await ocr_workflow.process_with_template(
                 document_id=document_id,
-                result=result,
+                file_path=file_path,
                 template_id=template_id,
-                tenant_id=tenant_id,
-                generate_display_name=False,
-                auto_approve=auto_approve,
-                source_file_path=file_path,
-                custom_push_name=custom_push_name,
+                tenant_id=tenant_id
             )
-        else:
-            await _handle_processing_failure(
-                document_id,
-                result.get("error", "处理失败")
-            )
+
+            if result["success"] and result.get("extraction_data"):
+                await handle_processing_success(
+                    document_id=document_id,
+                    result=result,
+                    template_id=template_id,
+                    tenant_id=tenant_id,
+                    generate_display_name=False,
+                    auto_approve=auto_approve,
+                    source_file_path=file_path,
+                    custom_push_name=custom_push_name,
+                )
+                if job_id:
+                    await update_job(job_id, "completed", document_ids=[document_id], error=None)
+            else:
+                error_message = result.get("error") or "未提取到有效字段"
+                await _handle_processing_failure(
+                    document_id,
+                    error_message
+                )
+                if job_id:
+                    await update_job(job_id, "failed", error=error_message)
             
     except Exception as e:
+        if job_id:
+            await update_job(job_id, "failed", error=str(e))
         await _handle_processing_exception(document_id, e)
 
 
@@ -380,14 +455,14 @@ async def get_merge_job_status(
     Returns:
         {
             "job_id": "...",
-            "status": "pending|processing|completed|failed",
-            "stage": "pending|ocr|llm|saving|completed|failed",
+            "status": "queued|processing|completed|failed",
+            "stage": "queued|ocr|llm|saving|completed|failed",
             "progress": 0~100,
             "document_ids": [...],   # completed 时填入
             "error": "..."           # failed 时填入
         }
     """
-    job = get_job(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return job

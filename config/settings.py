@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     VLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     VLM_TEMPERATURE: float = 0.1
 
+    # ============ 文档处理并发控制 ============
+    DOC_PROCESS_MAX_CONCURRENCY: int = 2
+
     @property
     def allowed_extensions_list(self) -> List[str]:
         return [ext.strip() for ext in self.ALLOWED_EXTENSIONS.split(",")]

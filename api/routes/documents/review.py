@@ -4,6 +4,7 @@
 from fastapi import APIRouter, Depends
 from datetime import datetime
 from loguru import logger
+import inspect
 
 from services.supabase_service import supabase_service
 from services.template_service import template_service
@@ -19,6 +20,19 @@ from .helpers import normalize_review_value, parse_allowed_values, push_to_feish
 from .query import _check_document_access
 
 router = APIRouter()
+
+
+async def _run_supabase(fn):
+    runner = getattr(supabase_service, "_run_sync", None)
+    if runner is not None and inspect.iscoroutinefunction(runner):
+        return await runner(fn)
+    return fn()
+
+
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def _validate_review_rules(template: dict, data: dict) -> None:
@@ -57,7 +71,9 @@ async def validate_document(
     """
     try:
         # 使用 service_role 查询，手动验证权限
-        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        doc_result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
@@ -86,23 +102,27 @@ async def validate_document(
             update_data["validation_notes"] = request.validation_notes
         
         # 根据文档类型更新对应表（优先用 template_id 查 target_table）
-        table_name = supabase_service.resolve_table_name(
+        table_name = await _maybe_await(supabase_service.resolve_table_name(
             template_id=document.get("template_id"),
             document_type=request.document_type,
-        )
+        ))
 
         if not table_name:
             raise DocumentTypeError(request.document_type)
 
-        result = supabase_service.client.table(table_name).update(update_data).eq("document_id", document_id).execute()
+        result = await _run_supabase(
+            lambda: supabase_service.client.table(table_name).update(update_data).eq("document_id", document_id).execute()
+        )
 
         if not result.data:
             raise ProcessingError("更新失败")
 
         # 审核通过后，更新文档主表状态为 completed
-        supabase_service.client.table("documents").update({
-            "status": "completed"
-        }).eq("id", document_id).execute()
+        await _run_supabase(
+            lambda: supabase_service.client.table("documents").update({
+                "status": "completed"
+            }).eq("id", document_id).execute()
+        )
 
         logger.info(f"文档审核通过: {document_id}, 用户: {user.user_id}")
 
@@ -118,7 +138,9 @@ async def validate_document(
 
         if paired_id and merge_template_id:
             # merge 模式：检查配对文档是否也已审核完成
-            paired_doc = supabase_service.client.table("documents").select("status, template_id").eq("id", paired_id).execute()
+            paired_doc = await _run_supabase(
+                lambda: supabase_service.client.table("documents").select("status, template_id").eq("id", paired_id).execute()
+            )
             paired_status = paired_doc.data[0].get("status") if paired_doc.data else None
 
             if paired_status == "completed":
@@ -130,16 +152,20 @@ async def validate_document(
                         paired_template_id = paired_doc.data[0].get("template_id") if paired_doc.data else None
                         paired_doc_type = None
                         if not paired_template_id:
-                            paired_doc_full = supabase_service.client.table("documents").select("document_type").eq("id", paired_id).execute()
+                            paired_doc_full = await _run_supabase(
+                                lambda: supabase_service.client.table("documents").select("document_type").eq("id", paired_id).execute()
+                            )
                             paired_doc_type = paired_doc_full.data[0].get("document_type", "") if paired_doc_full.data else ""
-                        paired_table_name = supabase_service.resolve_table_name(
+                        paired_table_name = await _maybe_await(supabase_service.resolve_table_name(
                             template_id=paired_template_id,
                             document_type=paired_doc_type,
-                        )
+                        ))
 
                         paired_data = {}
                         if paired_table_name:
-                            paired_result = supabase_service.client.table(paired_table_name).select("*").eq("document_id", paired_id).execute()
+                            paired_result = await _run_supabase(
+                                lambda: supabase_service.client.table(paired_table_name).select("*").eq("document_id", paired_id).execute()
+                            )
                             paired_data = paired_result.data[0] if paired_result.data else {}
 
                         # 合并当前文档数据 + 配对文档数据，当前文档字段优先
@@ -209,7 +235,9 @@ async def rename_document(
             raise ValidationError("显示名称不能超过255个字符")
         
         # 使用 service_role 查询，手动验证权限
-        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        doc_result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
@@ -219,9 +247,11 @@ async def rename_document(
         _check_document_access(document, user, document_id)
         
         # 更新显示名称
-        supabase_service.client.table("documents").update({
-            "display_name": request.display_name.strip()
-        }).eq("id", document_id).execute()
+        await _run_supabase(
+            lambda: supabase_service.client.table("documents").update({
+                "display_name": request.display_name.strip()
+            }).eq("id", document_id).execute()
+        )
         
         logger.info(f"文档重命名: {document_id} -> {request.display_name}")
         
@@ -253,7 +283,9 @@ async def reject_document(
     """
     try:
         # 使用 service_role 查询，手动验证权限
-        doc_result = supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        doc_result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
         document = doc_result.data[0] if doc_result.data else None
         
         if not document:
@@ -263,10 +295,12 @@ async def reject_document(
         _check_document_access(document, user, document_id)
         
         # 更新文档状态为失败
-        supabase_service.client.table("documents").update({
-            "status": "failed",
-            "error_message": f"审核打回: {request.reason}"
-        }).eq("id", document_id).execute()
+        await _run_supabase(
+            lambda: supabase_service.client.table("documents").update({
+                "status": "failed",
+                "error_message": f"审核打回: {request.reason}"
+            }).eq("id", document_id).execute()
+        )
         
         logger.info(f"文档审核打回: {document_id}, 用户: {user.user_id}, 原因: {request.reason}")
         

@@ -38,6 +38,11 @@ class UpdateProfileRequest(BaseModel):
     display_name: Optional[str] = None
 
 
+class TenantSettings(BaseModel):
+    """部门级配置"""
+    paired_batch_mode: bool = False
+
+
 class UserProfileResponse(BaseModel):
     """用户信息响应"""
     user_id: str
@@ -46,6 +51,12 @@ class UserProfileResponse(BaseModel):
     tenant_code: Optional[str] = None
     role: str = "user"
     display_name: Optional[str] = None
+    tenant_settings: TenantSettings = TenantSettings()
+
+
+class UpdateTenantSettingsRequest(BaseModel):
+    """更新部门配置请求"""
+    paired_batch_mode: Optional[bool] = None
 
 
 # ============ 公开接口（无需登录） ============
@@ -77,15 +88,25 @@ async def get_tenant(tenant_id: str):
 @router.get("/me/profile", response_model=UserProfileResponse)
 async def get_my_profile(user: CurrentUser = Depends(get_current_user)):
     """
-    获取当前用户的 profile 信息（含租户和角色）
+    获取当前用户的 profile 信息（含租户、角色和部门配置）
     """
+    tenant_settings = TenantSettings()
+    if user.tenant_id:
+        tenant = await tenant_service.get_tenant(user.tenant_id)
+        if tenant and tenant.get("settings"):
+            raw = tenant["settings"]
+            tenant_settings = TenantSettings(
+                paired_batch_mode=raw.get("paired_batch_mode", False),
+            )
+
     return UserProfileResponse(
         user_id=user.user_id,
         tenant_id=user.tenant_id,
         tenant_name=user.tenant_name,
         tenant_code=user.tenant_code,
         role=user.role,
-        display_name=user.display_name
+        display_name=user.display_name,
+        tenant_settings=tenant_settings,
     )
 
 
@@ -134,6 +155,32 @@ async def update_my_profile(
     except Exception as e:
         logger.error(f"更新用户 profile 失败: {e}")
         raise HTTPException(status_code=500, detail="更新失败，请稍后重试")
+
+
+@router.put("/{tenant_id}/settings")
+async def update_tenant_settings(
+    tenant_id: str,
+    request: UpdateTenantSettingsRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    更新部门配置（仅管理员可操作）
+    """
+    if not user.is_tenant_admin():
+        raise HTTPException(status_code=403, detail="仅管理员可修改部门配置")
+    if not user.can_access_tenant(tenant_id):
+        raise HTTPException(status_code=403, detail="无权修改该部门配置")
+
+    tenant = await tenant_service.get_tenant(tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="部门不存在")
+
+    current_settings = tenant.get("settings") or {}
+    if request.paired_batch_mode is not None:
+        current_settings["paired_batch_mode"] = request.paired_batch_mode
+
+    await tenant_service.update_tenant_settings(tenant_id, current_settings)
+    return {"success": True, "settings": current_settings}
 
 
 @router.get("/me/templates", response_model=List[TemplateResponse])

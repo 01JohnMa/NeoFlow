@@ -6,6 +6,8 @@
 避免每次入库都查询 information_schema。
 """
 
+import ast
+import json
 import threading
 from typing import Optional, Set, Dict, Any
 from loguru import logger
@@ -57,7 +59,7 @@ class SchemaSyncService(SupabaseClientMixin):
             self._columns_cache.pop(table_name, None)
         logger.debug(f"列名缓存已失效: {table_name}")
 
-    def get_columns(self, table_name: str) -> Set[str]:
+    async def get_columns(self, table_name: str) -> Set[str]:
         """
         获取结果表的实际物理列名集合（带本地缓存）。
 
@@ -69,11 +71,9 @@ class SchemaSyncService(SupabaseClientMixin):
                 return self._columns_cache[table_name]
 
         try:
-            result = self._get_client().rpc(
+            data = await self._execute_rpc_jsonb(
                 "get_result_table_columns", {"p_table": table_name}
-            ).execute()
-
-            data = self._parse_rpc_response(result.data)
+            )
 
             if data.get("success") and data.get("columns") is not None:
                 cols: Set[str] = set(data["columns"]) if data["columns"] else set()
@@ -93,6 +93,70 @@ class SchemaSyncService(SupabaseClientMixin):
     # ── RPC 辅助 ──────────────────────────────────────────────────────
 
     @staticmethod
+    def _parse_dict_from_str(s: str) -> Optional[Dict[str, Any]]:
+        """
+        解析可能是 JSON 或 Python repr 的 dict 字符串（如单引号、True/False）。
+        """
+        s = s.strip()
+        if not s.startswith("{"):
+            return None
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, dict) and "success" in parsed:
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+        try:
+            parsed = ast.literal_eval(s)
+            if isinstance(parsed, dict) and "success" in parsed:
+                return parsed
+        except (ValueError, SyntaxError, TypeError):
+            pass
+        return None
+
+    @staticmethod
+    def _try_extract_jsonb_body_from_exception(e: BaseException) -> Optional[Dict[str, Any]]:
+        """
+        从 postgrest / supabase-py 抛出的异常中提取 JSONB 函数返回体。
+
+        supabase-py 2.11 + PostgREST 11.x 下，部分 JSONB 返回值会被包装成异常，
+        实际结果可能在 e.args[0]（dict 或 **Python repr 字符串**）、或整段 str(e) 中。
+        仅当提取到含 `success` 键的 dict 时才返回，避免误判真实网络错误。
+        """
+        for arg in e.args:
+            if isinstance(arg, dict) and "success" in arg:
+                return arg
+            if isinstance(arg, str):
+                parsed = SchemaSyncService._parse_dict_from_str(arg)
+                if parsed is not None:
+                    return parsed
+
+        for attr in ("json", "details", "body", "message"):
+            if not hasattr(e, attr):
+                continue
+            val = getattr(e, attr)
+            if isinstance(val, dict) and "success" in val:
+                return val
+            if isinstance(val, str):
+                parsed = SchemaSyncService._parse_dict_from_str(val)
+                if parsed is not None:
+                    return parsed
+
+        # 整段 str(e) 可能仅为 dict 的 repr（单引号、True），或前面带前缀文案
+        whole = str(e).strip()
+        if "success" in whole:
+            candidates = [whole]
+            i, j = whole.find("{"), whole.rfind("}")
+            if 0 <= i < j:
+                candidates.insert(0, whole[i : j + 1])
+            for cand in candidates:
+                parsed = SchemaSyncService._parse_dict_from_str(cand)
+                if parsed is not None:
+                    return parsed
+
+        return None
+
+    @staticmethod
     def _parse_rpc_response(raw: Any) -> Dict[str, Any]:
         """
         将 supabase-py RPC 返回的 data 统一解析为 dict。
@@ -101,29 +165,89 @@ class SchemaSyncService(SupabaseClientMixin):
         - dict（直接）
         - list 中的第一个 dict
         - list 中的第一个 dict，其唯一 value 才是真正结果（函数名作为 key 的嵌套格式）
+        - str：JSON 字符串
         """
+        if raw is None:
+            logger.debug("RPC 响应 data 为 None")
+            return {}
+
+        if isinstance(raw, str):
+            s = raw.strip()
+            if s.startswith(("{", "[")):
+                try:
+                    loaded = json.loads(s)
+                    return SchemaSyncService._parse_rpc_response(loaded)
+                except json.JSONDecodeError:
+                    try:
+                        loaded = ast.literal_eval(s)
+                        return SchemaSyncService._parse_rpc_response(loaded)
+                    except (ValueError, SyntaxError, TypeError):
+                        logger.warning(f"RPC 响应字符串解析失败: {s[:200]}")
+                        return {}
+            return {}
+
+        out: Dict[str, Any] = {}
         if isinstance(raw, dict):
-            return raw
-        if isinstance(raw, list) and raw:
+            out = raw
+        elif isinstance(raw, list) and raw:
             first = raw[0]
             if not isinstance(first, dict):
-                return {}
-            # 处理 supabase-py 将函数名作为 key 的嵌套格式：
-            # [{'func_name': {'success': True, ...}}]
-            values = list(first.values())
-            if len(first) == 1 and isinstance(values[0], dict):
-                return values[0]
-            return first
-        return {}
+                out = {}
+            else:
+                # 处理 supabase-py 将函数名作为 key 的嵌套格式：
+                # [{'func_name': {'success': True, ...}}]
+                values = list(first.values())
+                if len(first) == 1 and isinstance(values[0], dict):
+                    out = values[0]
+                else:
+                    out = first
+        else:
+            out = {}
 
-    def _call_ddl_rpc(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(out, dict):
+            logger.warning(
+                f"RPC 解析结果非 dict；raw_type={type(raw).__name__} "
+                f"repr={repr(raw)[:200]}"
+            )
+            return {}
+
+        if "success" not in out and raw is not None:
+            logger.warning(
+                f"RPC 解析结果缺少 success 键；raw_type={type(raw).__name__} "
+                f"repr={repr(raw)[:200]}"
+            )
+        return out
+
+    async def _execute_rpc_jsonb(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行返回 JSONB 的 RPC，并统一处理 execute() 正常返回与「异常体即结果」的情况。
+        """
+        try:
+            result = await self._run_sync(
+                lambda: self._get_client().rpc(func_name, params).execute()
+            )
+            data = self._parse_rpc_response(result.data)
+            if data == {} and result.data is not None:
+                logger.warning(
+                    f"RPC {func_name} 解析为空 dict；"
+                    f"raw_type={type(result.data).__name__} "
+                    f"raw_repr={repr(result.data)[:400]}"
+                )
+            return data
+        except Exception as e:
+            body = self._try_extract_jsonb_body_from_exception(e)
+            if isinstance(body, dict) and "success" in body:
+                logger.debug(f"RPC {func_name} 从 execute() 异常体解析出 JSONB: {body}")
+                return body
+            raise
+
+    async def _call_ddl_rpc(self, func_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """执行 DDL 类 RPC 并返回解析后的结果 dict"""
-        result = self._get_client().rpc(func_name, params).execute()
-        return self._parse_rpc_response(result.data)
+        return await self._execute_rpc_jsonb(func_name, params)
 
     # ── DDL 操作 ──────────────────────────────────────────────────────
 
-    def add_column(self, table_name: str, field_key: str) -> None:
+    async def add_column(self, table_name: str, field_key: str) -> None:
         """
         向结果表新增 TEXT 列。
 
@@ -132,7 +256,7 @@ class SchemaSyncService(SupabaseClientMixin):
         """
         logger.info(f"DDL ADD COLUMN: {table_name}.{field_key}")
         try:
-            data = self._call_ddl_rpc("add_result_column", {
+            data = await self._call_ddl_rpc("add_result_column", {
                 "p_table": table_name,
                 "p_column": field_key,
                 "p_col_type": "TEXT",
@@ -146,7 +270,7 @@ class SchemaSyncService(SupabaseClientMixin):
         except Exception as e:
             raise SchemaError(f"新增列 {field_key} 时遇到异常: {e}")
 
-    def rename_column(self, table_name: str, old_key: str, new_key: str) -> None:
+    async def rename_column(self, table_name: str, old_key: str, new_key: str) -> None:
         """
         重命名结果表列。
 
@@ -157,7 +281,7 @@ class SchemaSyncService(SupabaseClientMixin):
             return
         logger.info(f"DDL RENAME COLUMN: {table_name}.{old_key} -> {new_key}")
         try:
-            data = self._call_ddl_rpc("rename_result_column", {
+            data = await self._call_ddl_rpc("rename_result_column", {
                 "p_table": table_name,
                 "p_old_col": old_key,
                 "p_new_col": new_key,
@@ -171,7 +295,7 @@ class SchemaSyncService(SupabaseClientMixin):
         except Exception as e:
             raise SchemaError(f"重命名列 {old_key} -> {new_key} 时遇到异常: {e}")
 
-    def drop_column(self, table_name: str, field_key: str, force: bool = False) -> None:
+    async def drop_column(self, table_name: str, field_key: str, force: bool = False) -> None:
         """
         删除结果表列。
 
@@ -181,7 +305,7 @@ class SchemaSyncService(SupabaseClientMixin):
         """
         logger.info(f"DDL DROP COLUMN: {table_name}.{field_key} (force={force})")
         try:
-            data = self._call_ddl_rpc("drop_result_column", {
+            data = await self._call_ddl_rpc("drop_result_column", {
                 "p_table": table_name,
                 "p_column": field_key,
                 "p_force": force,

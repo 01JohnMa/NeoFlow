@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
-import { Settings } from 'lucide-react'
+import { Settings, ToggleLeft, ToggleRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FeishuConfigTab } from './AdminFeishuTab'
 import { FieldsTab } from './AdminFieldsTab'
@@ -30,6 +30,8 @@ export function AdminConfig() {
 
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
+  const [pairedBatchMode, setPairedBatchMode] = useState(false)
+  const [savingSettings, setSavingSettings] = useState(false)
   const [templates, setTemplates] = useState<AdminTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
   const [selectedTemplate, setSelectedTemplate] = useState<AdminTemplate | null>(null)
@@ -62,7 +64,29 @@ export function AdminConfig() {
       .fetchAdminTemplates(selectedTenantId)
       .then(setTemplates)
       .finally(() => setLoadingTemplates(false))
+
+    // 加载部门配置
+    api.get<Tenant>(`/tenants/${selectedTenantId}`).then(({ data }) => {
+      const settings = (data as Tenant & { settings?: { paired_batch_mode?: boolean } }).settings
+      setPairedBatchMode(settings?.paired_batch_mode ?? false)
+    })
   }, [selectedTenantId])
+
+  const handleTogglePairedBatchMode = async () => {
+    if (!selectedTenantId || savingSettings) return
+    const newValue = !pairedBatchMode
+    setSavingSettings(true)
+    try {
+      await api.put(`/tenants/${selectedTenantId}/settings`, {
+        paired_batch_mode: newValue,
+      })
+      setPairedBatchMode(newValue)
+    } catch (error) {
+      console.error('更新部门配置失败:', error)
+    } finally {
+      setSavingSettings(false)
+    }
+  }
 
   const handleTemplateChange = (id: string) => {
     setSelectedTemplateId(id)
@@ -93,6 +117,29 @@ export function AdminConfig() {
           <p className="text-sm text-text-muted">配置文档模板的识别字段、审核规则和 Few-shot 示例</p>
         </div>
       </div>
+
+      <Card className="p-4">
+        <div className="flex items-center justify-between rounded-lg border border-border-default bg-bg-secondary p-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">配对批处理</p>
+            <p className="text-xs text-text-muted">
+              开启后，批量上传每组支持上传两个文件合并处理；关闭时每组仅上传一个文件
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleTogglePairedBatchMode}
+            disabled={!selectedTenantId || savingSettings}
+            className="text-primary-400 hover:text-primary-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {pairedBatchMode ? (
+              <ToggleRight className="h-8 w-8" />
+            ) : (
+              <ToggleLeft className="h-8 w-8 text-text-muted" />
+            )}
+          </button>
+        </div>
+      </Card>
 
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-4">

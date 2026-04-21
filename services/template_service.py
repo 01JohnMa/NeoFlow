@@ -69,7 +69,7 @@ class TemplateService(SupabaseClientMixin):
                 query = query.eq("is_active", True)
             
             query = query.order("sort_order").order("name")
-            result = query.execute()
+            result = await self._run_sync(query.execute)
             
             return result.data or []
         except Exception as e:
@@ -95,7 +95,9 @@ class TemplateService(SupabaseClientMixin):
             logger.debug(f"get_template: 非 UUID 格式，跳过查询: {template_id!r}")
             return None
         try:
-            result = self._get_client().table("document_templates").select("*").eq("id", template_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("document_templates").select("*").eq("id", template_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取模板失败: {e}")
@@ -131,15 +133,18 @@ class TemplateService(SupabaseClientMixin):
             mapped_code = self.DOC_TYPE_TO_CODE.get(code, code)
             
             # 先按 code 查询
-            result = self._get_client().table("document_templates").select(
-                "*, template_fields(*), template_examples(*)"
-            ).eq("tenant_id", tenant_id).eq("code", mapped_code).execute()
-            
-            # 如果没找到，再按 name 查询
-            if not result.data:
-                result = self._get_client().table("document_templates").select(
+            result = await self._run_sync(
+                lambda: self._get_client().table("document_templates").select(
                     "*, template_fields(*), template_examples(*)"
-                ).eq("tenant_id", tenant_id).eq("name", code).execute()
+                ).eq("tenant_id", tenant_id).eq("code", mapped_code).execute()
+            )
+
+            if not result.data:
+                result = await self._run_sync(
+                    lambda: self._get_client().table("document_templates").select(
+                        "*, template_fields(*), template_examples(*)"
+                    ).eq("tenant_id", tenant_id).eq("name", code).execute()
+                )
             
             if not result.data:
                 logger.warning(f"未找到模板: tenant={tenant_id}, code/name={code}, mapped={mapped_code}")
@@ -179,9 +184,11 @@ class TemplateService(SupabaseClientMixin):
             Exception: 数据库查询异常（向上抛出，让调用者处理）
         """
         try:
-            result = self._get_client().table("document_templates").select(
-                "*, template_fields(*), template_examples(*)"
-            ).eq("id", template_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("document_templates").select(
+                    "*, template_fields(*), template_examples(*)"
+                ).eq("id", template_id).execute()
+            )
             
             if not result.data:
                 logger.debug(f"模板不存在: {template_id}")
@@ -218,9 +225,11 @@ class TemplateService(SupabaseClientMixin):
             字段列表
         """
         try:
-            result = self._get_client().table("template_fields").select(
-                "*"
-            ).eq("template_id", template_id).order("sort_order").execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_fields").select(
+                    "*"
+                ).eq("template_id", template_id).order("sort_order").execute()
+            )
             
             return result.data or []
         except Exception as e:
@@ -253,7 +262,7 @@ class TemplateService(SupabaseClientMixin):
                 query = query.eq("is_active", True)
             
             query = query.order("sort_order")
-            result = query.execute()
+            result = await self._run_sync(query.execute)
             
             return result.data or []
         except Exception as e:
@@ -363,7 +372,7 @@ class TemplateService(SupabaseClientMixin):
         if field_key:
             table_name = await self._get_result_table_for_template(template_id)
             if table_name:
-                schema_sync_service.add_column(table_name, field_key)
+                await schema_sync_service.add_column(table_name, field_key)
                 # SchemaError 向上传播 -> 前端收到 422
 
         # 2. DDL 成功后写模板字段配置
@@ -379,7 +388,9 @@ class TemplateService(SupabaseClientMixin):
                 "review_enforced": data.get("review_enforced", False),
                 "review_allowed_values": data.get("review_allowed_values", None),
             }
-            result = self._get_client().table("template_fields").insert(payload).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_fields").insert(payload).execute()
+            )
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"新增模板字段失败: {e}")
@@ -407,7 +418,7 @@ class TemplateService(SupabaseClientMixin):
             template_id = old_field.get("template_id", "")
             table_name = await self._get_result_table_for_template(template_id)
             if table_name:
-                schema_sync_service.rename_column(table_name, old_key, new_key)
+                await schema_sync_service.rename_column(table_name, old_key, new_key)
                 # SchemaError 向上传播
 
         try:
@@ -416,7 +427,9 @@ class TemplateService(SupabaseClientMixin):
                 "feishu_column", "sort_order", "review_enforced", "review_allowed_values",
             }
             payload = {k: v for k, v in data.items() if k in allowed_keys}
-            result = self._get_client().table("template_fields").update(payload).eq("id", field_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_fields").update(payload).eq("id", field_id).execute()
+            )
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"更新模板字段失败: {e}")
@@ -447,11 +460,13 @@ class TemplateService(SupabaseClientMixin):
         if field_key:
             table_name = await self._get_result_table_for_template(template_id)
             if table_name:
-                schema_sync_service.drop_column(table_name, field_key, force=force)
+                await schema_sync_service.drop_column(table_name, field_key, force=force)
 
         # 2. 列删除成功后再删除字段配置
         try:
-            self._get_client().table("template_fields").delete().eq("id", field_id).execute()
+            await self._run_sync(
+                lambda: self._get_client().table("template_fields").delete().eq("id", field_id).execute()
+            )
             return True
         except Exception as e:
             logger.error(f"删除模板字段失败: {e}")
@@ -467,9 +482,11 @@ class TemplateService(SupabaseClientMixin):
         """
         try:
             for item in order_list:
-                self._get_client().table("template_fields").update(
-                    {"sort_order": item["sort_order"]}
-                ).eq("id", item["id"]).eq("template_id", template_id).execute()
+                await self._run_sync(
+                    lambda item=item: self._get_client().table("template_fields").update(
+                        {"sort_order": item["sort_order"]}
+                    ).eq("id", item["id"]).eq("template_id", template_id).execute()
+                )
             return True
         except Exception as e:
             logger.error(f"批量排序字段失败: {e}")
@@ -478,7 +495,9 @@ class TemplateService(SupabaseClientMixin):
     async def get_field_by_id(self, field_id: str) -> Optional[Dict[str, Any]]:
         """根据 ID 获取单个字段（含 template_id，供权限校验用）"""
         try:
-            result = self._get_client().table("template_fields").select("*").eq("id", field_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_fields").select("*").eq("id", field_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取字段失败: {e}")
@@ -496,7 +515,9 @@ class TemplateService(SupabaseClientMixin):
                 "sort_order": data.get("sort_order", 0),
                 "is_active": data.get("is_active", True),
             }
-            result = self._get_client().table("template_examples").insert(payload).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_examples").insert(payload).execute()
+            )
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"新增示例失败: {e}")
@@ -507,7 +528,9 @@ class TemplateService(SupabaseClientMixin):
         try:
             allowed_keys = {"example_input", "example_output", "sort_order", "is_active"}
             payload = {k: v for k, v in data.items() if k in allowed_keys}
-            result = self._get_client().table("template_examples").update(payload).eq("id", example_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_examples").update(payload).eq("id", example_id).execute()
+            )
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"更新示例失败: {e}")
@@ -516,7 +539,9 @@ class TemplateService(SupabaseClientMixin):
     async def delete_example(self, example_id: str) -> bool:
         """删除 few-shot 示例"""
         try:
-            self._get_client().table("template_examples").delete().eq("id", example_id).execute()
+            await self._run_sync(
+                lambda: self._get_client().table("template_examples").delete().eq("id", example_id).execute()
+            )
             return True
         except Exception as e:
             logger.error(f"删除示例失败: {e}")
@@ -525,7 +550,9 @@ class TemplateService(SupabaseClientMixin):
     async def get_example_by_id(self, example_id: str) -> Optional[Dict[str, Any]]:
         """根据 ID 获取单个示例（含 template_id，供权限校验用）"""
         try:
-            result = self._get_client().table("template_examples").select("*").eq("id", example_id).execute()
+            result = await self._run_sync(
+                lambda: self._get_client().table("template_examples").select("*").eq("id", example_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取示例失败: {e}")
@@ -547,12 +574,12 @@ class TemplateService(SupabaseClientMixin):
             query = self._get_client().table("document_templates").select(
                 "id, tenant_id, name, code, description, "
                 "required_doc_count, sort_order, is_active, auto_approve, "
-                "push_attachment, extraction_mode, feishu_bitable_token, feishu_table_id"
+                "push_attachment, extraction_mode, per_page_extraction, feishu_bitable_token, feishu_table_id"
             )
             if tenant_id:
                 query = query.eq("tenant_id", tenant_id)
             query = query.order("sort_order").order("name")
-            result = query.execute()
+            result = await self._run_sync(query.execute)
             return result.data or []
         except Exception as e:
             logger.error(f"获取管理模板列表失败: {e}")
@@ -567,18 +594,22 @@ class TemplateService(SupabaseClientMixin):
             data: 包含 feishu_bitable_token, feishu_table_id, auto_approve, extraction_mode 的字典
         """
         try:
-            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve", "extraction_mode", "push_attachment"}
+            allowed_keys = {"feishu_bitable_token", "feishu_table_id", "auto_approve", "extraction_mode", "push_attachment", "per_page_extraction"}
             payload = {k: v for k, v in data.items() if k in allowed_keys}
             if not payload:
                 return {}
 
             # 先更新，再显式回读，避免 PostgREST 返回最小化响应导致前端拿到空对象
-            self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
-            fresh = self._get_client().table("document_templates").select(
-                "id, tenant_id, name, code, description, required_doc_count, "
-                "sort_order, is_active, auto_approve, push_attachment, extraction_mode, "
-                "feishu_bitable_token, feishu_table_id"
-            ).eq("id", template_id).execute()
+            await self._run_sync(
+                lambda: self._get_client().table("document_templates").update(payload).eq("id", template_id).execute()
+            )
+            fresh = await self._run_sync(
+                lambda: self._get_client().table("document_templates").select(
+                    "id, tenant_id, name, code, description, required_doc_count, "
+                    "sort_order, is_active, auto_approve, push_attachment, extraction_mode, per_page_extraction, "
+                    "feishu_bitable_token, feishu_table_id"
+                ).eq("id", template_id).execute()
+            )
             return fresh.data[0] if fresh.data else {}
         except Exception as e:
             logger.error("更新模板配置失败: {}", e)

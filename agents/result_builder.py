@@ -92,7 +92,7 @@ def build_merge_success(
     document_type: str,
     extraction_results: List[Dict[str, Any]],
     results_a: List[dict],
-    result_b: Optional[dict],
+    results_b: List[dict],
     processing_time: float,
 ) -> Dict[str, Any]:
     """构造合并模式成功结果
@@ -106,7 +106,7 @@ def build_merge_success(
         document_type: 文档类型（模板 code）
         extraction_results: 各样品合并后的结果列表 [{"sample_index": n, "data": {...}}, ...]
         results_a: doc_type_a（如积分球）的提取结果列表
-        result_b: doc_type_b（如光分布）的提取结果
+        results_b: doc_type_b（如光分布）的提取结果列表
         processing_time: 处理耗时（秒）
 
     Returns:
@@ -123,7 +123,7 @@ def build_merge_success(
         "sample_count": len(extraction_results),
         "sub_results": {
             "results_a": results_a,
-            "result_b": result_b,
+            "results_b": results_b,
         },
         "processing_time": processing_time,
         "step": "completed",

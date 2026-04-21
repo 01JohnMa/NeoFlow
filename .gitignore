@@ -12,6 +12,7 @@ eggs/
 .eggs/
 lib/
 lib64/
+!web/src/lib/
 parts/
 sdist/
 var/
@@ -54,12 +55,15 @@ supabase/volumes/
 model/
 
 # 测试
+tests/
+pytest.ini
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Cursor 计划文件
+# 计划文件
 .cursor/plans/
+docs/plans/
 
 # SVN 工作副本（与 Git 共存时勿提交）
 .svn/
@@ -70,3 +74,4 @@ Thumbs.db
 *.bak
 
 supabase/docker-compose.yml
+CLAUDE.md

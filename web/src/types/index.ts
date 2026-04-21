@@ -34,6 +34,7 @@ export interface AdminTemplate {
   auto_approve: boolean
   push_attachment: boolean
   extraction_mode: 'ocr_llm' | 'vlm'
+  per_page_extraction: boolean
   feishu_bitable_token: string | null
   feishu_table_id: string | null
 }
@@ -66,6 +67,7 @@ export interface UpdateTemplateConfigPayload {
   auto_approve?: boolean
   push_attachment?: boolean
   extraction_mode?: 'ocr_llm' | 'vlm'
+  per_page_extraction?: boolean
 }
 
 export interface ReorderItem {
@@ -98,7 +100,7 @@ export interface Document {
   processed_at: string | null
 }
 
-export type DocumentStatus = 'pending' | 'uploaded' | 'processing' | 'pending_review' | 'completed' | 'failed'
+export type DocumentStatus = 'pending' | 'uploaded' | 'queued' | 'processing' | 'pending_review' | 'completed' | 'failed'
 
 // API Response types
 export interface UploadResponse {
@@ -113,6 +115,7 @@ export interface UploadResponse {
 
 export interface ProcessResponse {
   document_id: string
+  job_id?: string
   status: string
   message: string
   estimated_time?: string
@@ -168,19 +171,20 @@ export interface BatchProcessItem {
   template_id: string
   paired_document_id?: string
   paired_template_id?: string
+  custom_push_name?: string
 }
 
 export interface BatchJobItemStatus {
   index: number
   type: 'single' | 'merge'
   document_ids: string[]
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'queued' | 'pending' | 'processing' | 'completed' | 'failed'
   error?: string
 }
 
 export interface BatchJobStatus {
   job_id: string
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'queued' | 'pending' | 'processing' | 'completed' | 'failed'
   stage: string
   progress: number
   document_ids: string[]

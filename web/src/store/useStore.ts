@@ -10,6 +10,9 @@ export interface UserProfile {
   tenant_code: string | null
   role: 'super_admin' | 'tenant_admin' | 'user'
   display_name: string | null
+  tenant_settings?: {
+    paired_batch_mode?: boolean
+  }
 }
 
 // 模板类型

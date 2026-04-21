@@ -79,7 +79,7 @@ export function Dashboard() {
   const stats = {
     total: documents?.total || 0,
     completed: documents?.items.filter((d) => d.status === 'completed').length || 0,
-    processing: documents?.items.filter((d) => d.status === 'processing').length || 0,
+    processing: documents?.items.filter((d) => d.status === 'queued' || d.status === 'processing').length || 0,
     failed: documents?.items.filter((d) => d.status === 'failed').length || 0,
   }
 

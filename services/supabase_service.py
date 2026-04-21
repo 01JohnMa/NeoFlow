@@ -10,9 +10,10 @@ from supabase import create_client, Client
 
 from config.settings import settings
 from constants.document_types import DocumentTypeTable, DOC_TYPE_TABLE_MAP
+from services.base import SupabaseClientMixin
 
 
-class SupabaseService:
+class SupabaseService(SupabaseClientMixin):
     """Supabase 服务封装"""
     
     _instance: Optional['SupabaseService'] = None
@@ -91,7 +92,7 @@ class SupabaseService:
 
         return normalized
     
-    def _filter_allowed_fields(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
+    async def _filter_allowed_fields(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
         """
         过滤数据，只保留结果表中实际存在的物理列。
 
@@ -103,10 +104,9 @@ class SupabaseService:
         """
         from services.schema_sync_service import schema_sync_service
 
-        actual_columns = schema_sync_service.get_columns(table_name)
+        actual_columns = await schema_sync_service.get_columns(table_name)
 
         if not actual_columns:
-            # 列查询失败时降级：放行所有字段，由数据库层报错
             logger.warning(f"无法获取表 {table_name} 的列名，跳过字段过滤（降级模式）")
             return data
 
@@ -203,7 +203,7 @@ class SupabaseService:
         """根据文档类型获取表名（支持中文和英文）"""
         return self.TABLE_MAP.get(document_type)
 
-    def resolve_table_name(
+    async def resolve_table_name(
         self,
         template_id: Optional[str] = None,
         document_type: Optional[str] = None,
@@ -216,7 +216,9 @@ class SupabaseService:
         2. fallback 到 TABLE_MAP 静态映射（兼容旧数据）
         """
         if template_id:
-            row = self.client.table("document_templates").select("target_table").eq("id", template_id).execute()
+            row = await self._run_sync(
+                lambda: self.client.table("document_templates").select("target_table").eq("id", template_id).execute()
+            )
             target = (row.data[0].get("target_table") or "") if row.data else ""
             if target:
                 return target
@@ -227,7 +229,9 @@ class SupabaseService:
     async def create_document(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """创建文档记录"""
         try:
-            result = self.client.table("documents").insert(data).execute()
+            result = await self._run_sync(
+                lambda: self.client.table("documents").insert(data).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error("创建文档失败: {}", e)
@@ -236,7 +240,9 @@ class SupabaseService:
     async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         """获取文档"""
         try:
-            result = self.client.table("documents").select("*").eq("id", document_id).execute()
+            result = await self._run_sync(
+                lambda: self.client.table("documents").select("*").eq("id", document_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取文档失败: {e}")
@@ -245,7 +251,9 @@ class SupabaseService:
     async def update_document(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """更新文档"""
         try:
-            result = self.client.table("documents").update(data).eq("id", document_id).execute()
+            result = await self._run_sync(
+                lambda: self.client.table("documents").update(data).eq("id", document_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"更新文档失败: {e}")
@@ -254,7 +262,9 @@ class SupabaseService:
     async def delete_document(self, document_id: str) -> bool:
         """删除文档"""
         try:
-            self.client.table("documents").delete().eq("id", document_id).execute()
+            await self._run_sync(
+                lambda: self.client.table("documents").delete().eq("id", document_id).execute()
+            )
             return True
         except Exception as e:
             logger.error(f"删除文档失败: {e}")
@@ -268,12 +278,117 @@ class SupabaseService:
     ) -> Optional[Dict[str, Any]]:
         """更新文档状态"""
         data = {"status": status}
-        if error_message:
+        if error_message is not None:
             data["error_message"] = error_message
+        elif status in ("queued", "processing", "completed", "pending_review"):
+            data["error_message"] = None
         if status == "completed":
             data["processed_at"] = datetime.now().isoformat()
         
         return await self.update_document(document_id, data)
+
+    async def reset_stuck_processing_documents(self, timeout_minutes: int = 30) -> int:
+        """
+        将超过 timeout_minutes 分钟仍处于 processing 状态的文档重置为 failed。
+        返回受影响的文档数量。
+        """
+        from datetime import timedelta
+
+        cutoff = (
+            datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        ).isoformat()
+
+        result = await self._run_sync(
+            lambda: self.client.table("documents")
+            .select("id")
+            .eq("status", "processing")
+            .lt("updated_at", cutoff)
+            .execute()
+        )
+        stuck_docs = result.data or []
+        if not stuck_docs:
+            return 0
+
+        stuck_ids = [doc["id"] for doc in stuck_docs]
+        error_msg = f"处理超时（超过 {timeout_minutes} 分钟），已自动重置"
+
+        await self._run_sync(
+            lambda: self.client.table("documents")
+            .update({"status": "failed", "error_message": error_msg, "updated_at": datetime.utcnow().isoformat()})
+            .in_("id", stuck_ids)
+            .execute()
+        )
+
+        logger.warning(f"已重置 {len(stuck_ids)} 个超时 processing 文档: {stuck_ids}")
+        return len(stuck_ids)
+
+    async def get_job_metrics(self) -> Dict[str, Any]:
+        """获取当前任务观测指标。"""
+        try:
+            pending_result = await self._run_sync(
+                lambda: self.client.table("processing_jobs").select("job_id", count="exact").in_("status", ["queued", "pending", "processing"]).execute()
+            )
+            failed_result = await self._run_sync(
+                lambda: self.client.table("processing_jobs").select("job_id", count="exact").eq("status", "failed").execute()
+            )
+            completed_result = await self._run_sync(
+                lambda: self.client.table("processing_jobs").select("job_id", count="exact").eq("status", "completed").execute()
+            )
+            recent_queue_result = await self._run_sync(
+                lambda: self.client.table("processing_jobs").select("created_at,updated_at,status").order("created_at", desc=True).limit(20).execute()
+            )
+
+            queue_durations = []
+            for row in recent_queue_result.data or []:
+                if row.get("status") in ("processing", "completed", "failed") and row.get("created_at") and row.get("updated_at"):
+                    try:
+                        created_at = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+                        updated_at = datetime.fromisoformat(str(row["updated_at"]).replace("Z", "+00:00"))
+                        queue_durations.append(max(0, int((updated_at - created_at).total_seconds())))
+                    except ValueError:
+                        continue
+
+            avg_queue_seconds = int(sum(queue_durations) / len(queue_durations)) if queue_durations else 0
+            active_jobs = pending_result.count or 0
+            failed_jobs = failed_result.count or 0
+            completed_jobs = completed_result.count or 0
+
+            escalation_reasons: list[str] = []
+            recommended_action = "stay_on_current_architecture"
+            if avg_queue_seconds >= 300:
+                escalation_reasons.append("任务平均排队时长已超过 5 分钟")
+            if active_jobs > max(4, settings.DOC_PROCESS_MAX_CONCURRENCY * 2):
+                escalation_reasons.append("当前活跃任务数持续高于 API 进程可舒适承载范围")
+            if failed_jobs > completed_jobs and failed_jobs > 0:
+                escalation_reasons.append("失败任务数量已超过完成任务数量")
+
+            if len(escalation_reasons) >= 2:
+                recommended_action = "consider_half_worker"
+            if avg_queue_seconds >= 600 and active_jobs > max(6, settings.DOC_PROCESS_MAX_CONCURRENCY * 3):
+                recommended_action = "consider_full_worker"
+
+            return {
+                "active_jobs": active_jobs,
+                "failed_jobs": failed_jobs,
+                "completed_jobs": completed_jobs,
+                "avg_queue_seconds": avg_queue_seconds,
+                "sample_size": len(queue_durations),
+                "recommended_action": recommended_action,
+                "escalation_reasons": escalation_reasons,
+                "observed_at": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"获取任务指标失败: {e}")
+            return {
+                "active_jobs": 0,
+                "failed_jobs": 0,
+                "completed_jobs": 0,
+                "avg_queue_seconds": 0,
+                "sample_size": 0,
+                "recommended_action": "stay_on_current_architecture",
+                "escalation_reasons": [],
+                "observed_at": datetime.now().isoformat(),
+            }
     
     async def list_documents(
         self,
@@ -297,7 +412,7 @@ class SupabaseService:
             offset = (page - 1) * limit
             query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
             
-            result = query.execute()
+            result = await self._run_sync(query.execute)
             return result.data or []
         except Exception as e:
             logger.error(f"列出文档失败: {e}")
@@ -320,7 +435,7 @@ class SupabaseService:
             if document_type:
                 query = query.eq("document_type", document_type)
             
-            result = query.execute()
+            result = await self._run_sync(query.execute)
             return result.count or 0
         except Exception as e:
             logger.error(f"统计文档失败: {e}")
@@ -347,21 +462,17 @@ class SupabaseService:
             保存后的记录，失败时抛出异常
         """
         try:
-            # 1. 过滤掉 AI 返回的额外字段
-            filtered_data = self._filter_allowed_fields(data, table_name)
-            # 2. 保存原始提取数据（含额外字段，用于调试）
+            filtered_data = await self._filter_allowed_fields(data, table_name)
             filtered_data["raw_extraction_data"] = data.copy()
-            # 3. 可选的数据规范化处理
             if normalize_func:
                 filtered_data = normalize_func(filtered_data)
-            # 4. 设置文档ID
             filtered_data["document_id"] = document_id
-            # 5. 清理数据，处理空日期字段
             cleaned_data = self._clean_data_for_db(filtered_data, table_name)
-            # 6. 执行 upsert
-            result = self.client.table(table_name).upsert(
-                cleaned_data, on_conflict="document_id"
-            ).execute()
+            result = await self._run_sync(
+                lambda: self.client.table(table_name).upsert(
+                    cleaned_data, on_conflict="document_id"
+                ).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"保存到 {table_name} 失败: {e}")
@@ -382,9 +493,11 @@ class SupabaseService:
             记录数据，不存在或失败时返回 None
         """
         try:
-            result = self.client.table(table_name).select("*").eq(
-                "document_id", document_id
-            ).execute()
+            result = await self._run_sync(
+                lambda: self.client.table(table_name).select("*").eq(
+                    "document_id", document_id
+                ).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"从 {table_name} 获取数据失败: {e}")
@@ -450,7 +563,9 @@ class SupabaseService:
     async def get_document_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
         """根据文件路径获取文档"""
         try:
-            result = self.client.table("documents").select("*").eq("file_path", file_path).execute()
+            result = await self._run_sync(
+                lambda: self.client.table("documents").select("*").eq("file_path", file_path).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"根据路径获取文档失败: {e}")
@@ -466,7 +581,7 @@ class SupabaseService:
         template_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """根据文档类型保存提取结果（优先 template_id → target_table，fallback TABLE_MAP）。"""
-        table_name = self.resolve_table_name(template_id=template_id, document_type=document_type)
+        table_name = await self.resolve_table_name(template_id=template_id, document_type=document_type)
         if not table_name:
             logger.error(
                 f"未知文档类型: {document_type}，无法保存提取结果。"
@@ -486,7 +601,9 @@ class SupabaseService:
             return None
         
         try:
-            result = self.client.table(table_name).select("*").eq("document_id", document_id).execute()
+            result = await self._run_sync(
+                lambda: self.client.table(table_name).select("*").eq("document_id", document_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"获取提取结果失败: {e}")
@@ -505,8 +622,9 @@ class SupabaseService:
                 logger.warning(f"未知文档类型: {document_type}")
                 return None
             
-            # 更新记录
-            result = self.client.table(table_name).update(data).eq("document_id", document_id).execute()
+            result = await self._run_sync(
+                lambda: self.client.table(table_name).update(data).eq("document_id", document_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"更新提取结果失败: {e}")
@@ -531,7 +649,9 @@ class SupabaseService:
                 "message": message,
                 "duration_ms": duration_ms
             }
-            result = self.client.table("processing_logs").insert(data).execute()
+            result = await self._run_sync(
+                lambda: self.client.table("processing_logs").insert(data).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"记录处理日志失败: {e}")
@@ -540,7 +660,9 @@ class SupabaseService:
     async def get_processing_logs(self, document_id: str) -> List[Dict[str, Any]]:
         """获取处理日志"""
         try:
-            result = self.client.table("processing_logs").select("*").eq("document_id", document_id).order("created_at").execute()
+            result = await self._run_sync(
+                lambda: self.client.table("processing_logs").select("*").eq("document_id", document_id).order("created_at").execute()
+            )
             return result.data or []
         except Exception as e:
             logger.error(f"获取处理日志失败: {e}")
