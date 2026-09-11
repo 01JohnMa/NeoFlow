@@ -8,7 +8,7 @@
 |------|----------|
 | **后端** | FastAPI + LangGraph + PaddleOCR + LLM (DeepSeek/GPT-4o/Claude) |
 | **前端** | React + TypeScript + Vite + Tailwind CSS + shadcn/ui |
-| **数据库** | Supabase (PostgreSQL + Auth + Storage) |
+| **数据库** | Supabase (PostgreSQL + Auth + PostgREST) |
 | **OCR模型** | PP-OCRv5 (PaddlePaddle) |
 | **AI Agent** | LangGraph 工作流编排 |
 
@@ -31,11 +31,6 @@
 ```bash
 cd supabase
 docker-compose up -d
-
-# 首次部署初始化 storage
-docker cp storage_base_tables.sql supabase-db:/tmp/
-docker exec supabase-db psql -U postgres -d postgres -f /tmp/storage_base_tables.sql
-docker restart supabase-storage
 ```
 
 ### 生产部署（单机一体化）
@@ -49,13 +44,13 @@ docker restart supabase-storage
 # Windows: copy env.example.txt .env
 # Linux/Mac: cp env.example.txt .env
 # 编辑 .env 后启动
-docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
 默认路由：
 - `/` → 前端页面
 - `/api` → 后端 API
-- `/supabase` → Supabase Kong 网关
+- `/supabase` → Supabase Auth / REST（ingress 直连）
 
 ### 2. 启动后端
 
@@ -87,8 +82,7 @@ npm run dev
 | 统一入口 | http://localhost | Nginx 入口 |
 | API | http://localhost/api | FastAPI 接口 |
 | API 文档 | http://localhost/docs | Swagger UI |
-| Supabase | http://localhost/supabase | Kong 网关 |
-| Studio | http://localhost:3001 | 数据库管理 |
+| Supabase | http://localhost/supabase | Auth / REST 直连 |
 
 ## 项目结构
 
@@ -240,7 +234,7 @@ GET /api/tenants
 # .env 文件（可复制 env.example.txt）
 
 # Supabase（与 supabase/.env 一致）
-SUPABASE_URL=http://localhost:8000
+SUPABASE_URL=http://localhost:3002
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-key
 

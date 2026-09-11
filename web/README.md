@@ -74,8 +74,8 @@ npm install
 # API URL (空则使用代理)
 VITE_API_URL=
 
-# Supabase 配置
-VITE_SUPABASE_URL=http://localhost:8000
+# Supabase 配置（开发环境经 Vite 代理直连 auth/rest）
+VITE_SUPABASE_URL=/supabase
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
@@ -99,8 +99,8 @@ npm run build
 |------|------|------|
 | Web Frontend | 3000 | Vite 开发服务器 |
 | FastAPI | 8080 | 后端 API |
-| Supabase API | 8000 | Kong 网关 |
-| Supabase Studio | 3001 | 数据库管理界面 |
+| Supabase Auth | 9999 | 认证服务（supabase compose） |
+| Supabase REST | 3002 | PostgREST（supabase compose） |
 
 ## API 代理
 
