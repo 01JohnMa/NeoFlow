@@ -267,8 +267,8 @@ export interface ReviewHintField {
   allowed_values: string[]
 }
 
-/** 后端 result 接口白名单字段，供详情页纯模板驱动渲染 */
-export interface TemplateFieldForDetail {
+/** 后端 result 接口白名单字段，供详情页由 Configuration 驱动渲染 */
+export interface ConfigurationFieldForDetail {
   field_key: string
   field_label: string
   field_type: 'text' | 'date' | 'number'
@@ -287,7 +287,7 @@ export interface ExtractionResultResponse {
   created_at: string
   is_validated: boolean
   review_hint_fields?: ReviewHintField[]
-  template_fields: TemplateFieldForDetail[]
+  fields: ConfigurationFieldForDetail[]
 }
 
 // ============ Parse Result / Job types ============

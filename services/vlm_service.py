@@ -139,20 +139,20 @@ class VLMService:
     # ── Prompt 构建 ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def build_vlm_prompt(template: Dict[str, Any]) -> str:
+    def build_vlm_prompt(configuration: Dict[str, Any]) -> str:
         """
-        根据模板字段配置构建 VLM 提取 prompt（纯字段提取，不含分类）。
+        根据 Configuration 字段构建 VLM 提取 prompt（纯字段提取，不含分类）。
 
         示例仅展示输出 JSON 的键结构，不暴露具体值，避免模型照抄示例数据。
         """
-        fields = template.get("template_fields", [])
+        fields = configuration.get("fields", [])
         field_list = build_field_table(fields)
 
-        examples = template.get("template_examples", [])
+        examples = configuration.get("examples", [])
         examples_section = _build_vlm_examples_section(examples)
 
         return VLM_EXTRACTION_PROMPT.format(
-            doc_type=template.get("name", "文档"),
+            doc_type=configuration.get("name", "文档"),
             field_list=field_list,
             examples_section=examples_section,
         )
@@ -185,7 +185,7 @@ class VLMService:
     # ── 主入口 ────────────────────────────────────────────────────────────────
 
     async def extract_from_image(
-        self, file_path: str, template: Dict[str, Any]
+        self, file_path: str, configuration: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         从图片/PDF 中提取结构化字段。
@@ -198,12 +198,12 @@ class VLMService:
         """
         from agents.json_cleaner import parse_llm_json
 
-        prompt = self.build_vlm_prompt(template)
+        prompt = self.build_vlm_prompt(configuration)
         b64_list = await self.get_image_base64_list(file_path)
 
         logger.info(
             f"VLM 提取开始: {file_path}，共 {len(b64_list)} 页，"
-            f"模板: {template.get('name')}"
+            f"配置: {configuration.get('name')}"
         )
 
         merged: Dict[str, Any] = {}
@@ -236,7 +236,7 @@ class VLMService:
         return merged
 
     async def extract_per_page(
-        self, file_path: str, template: Dict[str, Any]
+        self, file_path: str, configuration: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         逐页提取，每页独立返回一个结果（用于逐页提取的多样品场景）。
@@ -248,12 +248,12 @@ class VLMService:
         """
         from agents.json_cleaner import parse_llm_json
 
-        prompt = self.build_vlm_prompt(template)
+        prompt = self.build_vlm_prompt(configuration)
         b64_list = await self.get_image_base64_list(file_path)
 
         logger.info(
             f"VLM 逐页提取开始: {file_path}，共 {len(b64_list)} 页，"
-            f"模板: {template.get('name')}"
+            f"配置: {configuration.get('name')}"
         )
 
         results: List[Dict[str, Any]] = []

@@ -14,8 +14,9 @@ from fastapi import UploadFile
 from loguru import logger
 
 from config.settings import settings
+from services.base import build_field_mapping
+from services.configuration_service import configuration_service
 from services.supabase_service import supabase_service
-from services.template_service import template_service
 from services.result_service import result_service
 from sdk.excel_template import fill_excel_template
 from api.jobs import build_feishu_push_dedupe_key, has_feishu_push_record, record_feishu_push
@@ -109,16 +110,16 @@ def _build_excel_output_path(document_id: str, file_name_for_push: str) -> str:
 
 
 def _generate_excel_output_attachment(
-    template: dict,
+    configuration: dict,
     extraction_data: dict,
     document_id: str,
     file_name_for_push: str,
 ) -> Optional[str]:
-    output_mode = template.get("output_mode") or "bitable"
+    output_mode = configuration.get("output_mode") or "bitable"
     if output_mode not in {"excel_template", "both"}:
         return None
 
-    excel_template_path = template.get("excel_template_path")
+    excel_template_path = (configuration.get("excel") or {}).get("path")
     if not excel_template_path:
         return None
     if not os.path.exists(excel_template_path):
@@ -144,7 +145,7 @@ def _generate_excel_output_attachment(
 
 
 async def push_to_feishu(
-    template: dict,
+    configuration: dict,
     extraction_data: dict,
     display_name: Optional[str],
     document_id: str,
@@ -160,7 +161,7 @@ async def push_to_feishu(
 
     文件名优先级：
     1. custom_push_name（用户上传时指定）
-    2. 默认：{模板名}_YYYYMMDD_HHmmss
+    2. 默认：{配置名}_YYYYMMDD_HHmmss
 
     Args:
         source_file_path: 源文件路径
@@ -170,19 +171,20 @@ async def push_to_feishu(
     """
     from services.feishu_service import feishu_service
 
-    bitable_token = template.get("feishu_bitable_token")
-    table_id = template.get("feishu_table_id")
-    effective_dedupe_key = dedupe_key or build_feishu_push_dedupe_key(document_id, template.get("id"), extraction_data)
+    feishu_config = configuration.get("feishu") or {}
+    bitable_token = feishu_config.get("bitable_token")
+    table_id = feishu_config.get("table_id")
+    effective_dedupe_key = dedupe_key or build_feishu_push_dedupe_key(document_id, configuration.get("id"), extraction_data)
 
     if await has_feishu_push_record(effective_dedupe_key):
         logger.info(f"{log_prefix}检测到重复飞书推送，跳过: {document_id}")
         return True
 
     if not (bitable_token and table_id):
-        logger.info(f"{log_prefix}模板未配置飞书，跳过推送: {document_id}")
+        logger.info(f"{log_prefix}配置未配置飞书，跳过推送: {document_id}")
         return False
 
-    field_mapping = template_service.build_field_mapping(template)
+    field_mapping = build_field_mapping(configuration)
 
     if extra_field_mapping:
         field_mapping = {**field_mapping, **extra_field_mapping}
@@ -191,20 +193,20 @@ async def push_to_feishu(
     if extra_data:
         push_data.update(extra_data)
 
-    # 文件名优先使用用户自定义，否则按模板名+时间戳规则生成
+    # 文件名优先使用用户自定义，否则按配置名+时间戳规则生成
     if custom_push_name and custom_push_name.strip():
         file_name_for_push = custom_push_name.strip()
     else:
-        template_name = str(template.get("name") or "文档")
+        configuration_name = str(configuration.get("name") or "文档")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name_for_push = f"{template_name}_{timestamp}"
+        file_name_for_push = f"{configuration_name}_{timestamp}"
 
     if "file_name" not in field_mapping:
         field_mapping["file_name"] = "文件名"
     push_data["file_name"] = file_name_for_push
 
     generated_excel_path = _generate_excel_output_attachment(
-        template=template,
+        configuration=configuration,
         extraction_data=extraction_data,
         document_id=document_id,
         file_name_for_push=file_name_for_push,
@@ -229,7 +231,7 @@ async def push_to_feishu(
 
         success = await feishu_service.push_by_template(push_data, field_mapping, bitable_token, table_id)
         if success:
-            await record_feishu_push(effective_dedupe_key, document_id, template.get("id"))
+            await record_feishu_push(effective_dedupe_key, document_id, configuration.get("id"))
             logger.info(f"{log_prefix}飞书推送成功: {document_id}")
             return True
         else:
@@ -253,19 +255,9 @@ async def handle_processing_success(
     job_id: Optional[str] = None,
     configuration_revision_id: Optional[str] = None,
     source: Optional[str] = None,
+    configuration: Optional[dict] = None,
 ) -> None:
-    """处理成功时的统一逻辑
-
-    旧业务表镜像写入保持不变；同时把同一份抽取结果写入统一 Result 存储。
-    """
-    await supabase_service.save_extraction_result(
-        document_id=document_id,
-        document_type=result.get("document_type") or result.get("template_name", "未知"),
-        extraction_data=result["extraction_data"],
-        template_id=template_id,
-    )
-    logger.info(f"提取结果已保存(旧业务表镜像): {document_id}")
-
+    """处理成功时的统一逻辑：Result 是唯一的结果存储。"""
     await result_service.record_extraction_result(
         tenant_id=tenant_id,
         document_id=document_id,
@@ -305,16 +297,16 @@ async def handle_processing_success(
 
     if auto_approve and not skip_feishu_push:
         try:
-            template = None
-            if template_id:
-                template = await template_service.get_template_with_details(template_id)
-            elif tenant_id and (result.get("document_type") or result.get("template_name")):
-                template = await template_service.get_template_by_code(
-                    tenant_id,
-                    result.get("document_type") or result.get("template_name")
-                )
+            if configuration is None:
+                if template_id:
+                    configuration = await configuration_service.get_extraction_configuration(template_id)
+                elif tenant_id and (result.get("document_type") or result.get("template_name")):
+                    configuration = await configuration_service.resolve_extraction_configuration(
+                        tenant_id,
+                        result.get("document_type") or result.get("template_name"),
+                    )
 
-            if template:
+            if configuration:
                 # 飞书字段与固定 Excel 附件都从 Result 取值
                 result_row = await result_service.get_document_result(
                     document_id, tenant_id=tenant_id
@@ -324,7 +316,7 @@ async def handle_processing_success(
                     or result.get("extraction_data", {})
                 )
                 await push_to_feishu(
-                    template=template,
+                    configuration=configuration,
                     extraction_data=extraction_data,
                     display_name=display_name,
                     document_id=document_id,
@@ -332,7 +324,7 @@ async def handle_processing_success(
                     custom_push_name=custom_push_name,
                 )
             else:
-                logger.info(f"auto_approve 单模板模板未配置飞书，跳过推送: {document_id}")
+                logger.info(f"auto_approve 配置未配置飞书，跳过推送: {document_id}")
         except Exception as feishu_error:
             logger.warning(f"auto_approve 单模板飞书推送失败（不影响结果）: {feishu_error}")
 

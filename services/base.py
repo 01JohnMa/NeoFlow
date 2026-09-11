@@ -24,11 +24,32 @@ class SupabaseClientMixin:
         return await loop.run_in_executor(None, partial(fn, *args, **kwargs))
 
 
+EXTRACTION_PROMPT_TEMPLATE = """你是一个专业的数据提取助手，专门处理{doc_type}的OCR识别文本。请从用户提供的文本中精准提取以下字段。
+
+**目标字段：**
+{field_list}
+
+**处理规则：**
+1. 日期格式统一为 YYYY-MM-DD
+2. 缺失字段值设为空字符串 ""
+3. 数值保持原文精度，保留单位
+4. 确保 JSON 语法正确（使用英文双引号、英文逗号）
+
+{examples_section}
+
+**输出要求：**
+- 仅输出扁平的 JSON 对象，只包含上述目标字段，禁止添加任何其他字段
+- 不要包含任何解释、引言或 Markdown 代码块标记
+
+现在，请处理用户提供的OCR文本：
+{ocr_text}"""
+
+
 def build_field_table(fields: List[Dict[str, Any]]) -> str:
     """
-    将模板字段列表构建为 Markdown 表格字符串。
+    将字段列表构建为 Markdown 表格字符串。
 
-    供 template_service.build_extraction_prompt 和
+    供 build_extraction_prompt 和
     vlm_service.build_vlm_prompt 共同使用，保持两条路径的 prompt 风格一致。
     """
     field_lines = []
@@ -55,11 +76,42 @@ def build_field_table(fields: List[Dict[str, Any]]) -> str:
     )
 
 
+def build_extraction_prompt(config: Dict[str, Any], ocr_text: str) -> str:
+    """
+    根据 Extraction Configuration 构建 LLM 提取 Prompt。
+
+    Args:
+        config: 归一化后的抽取配置（name / fields / examples / extraction_prompt）
+        ocr_text: OCR 识别文本
+    """
+    custom_prompt = config.get("extraction_prompt")
+    if custom_prompt:
+        return custom_prompt.replace("{ocr_text}", ocr_text)
+
+    return EXTRACTION_PROMPT_TEMPLATE.format(
+        doc_type=config.get("name", "文档"),
+        field_list=build_field_table(config.get("fields") or []),
+        examples_section=build_examples_section(config.get("examples") or []),
+        ocr_text=ocr_text,
+    )
+
+
+def build_field_mapping(config: Dict[str, Any]) -> Dict[str, str]:
+    """构建字段到飞书列名的映射：{field_key: feishu_column}。"""
+    mapping: Dict[str, str] = {}
+    for field in config.get("fields") or []:
+        field_key = field.get("field_key")
+        feishu_column = field.get("feishu_column")
+        if field_key and feishu_column:
+            mapping[field_key] = feishu_column
+    return mapping
+
+
 def build_examples_section(examples: List[Dict[str, Any]]) -> str:
     """
     将 few-shot 示例列表构建为 Prompt 示例段落。
 
-    供 template_service 和 vlm_service 共同使用。
+    供 build_extraction_prompt 和 vlm_service 共同使用。
     """
     if not examples:
         return ""

@@ -52,20 +52,16 @@ async def test_push_to_feishu_attaches_filled_excel_template(tmp_path, monkeypat
     monkeypatch.setattr(helpers.settings, "UPLOAD_FOLDER", str(tmp_path / "uploads"))
     monkeypatch.setattr(helpers, "has_feishu_push_record", AsyncMock(return_value=False))
     monkeypatch.setattr(helpers, "record_feishu_push", AsyncMock())
-    mock_template_service = MagicMock()
-    mock_template_service.build_field_mapping.return_value = {"order_no": "订单号"}
-    monkeypatch.setattr(helpers, "template_service", mock_template_service)
 
     with patch("services.feishu_service.feishu_service", fake_feishu):
         await helpers.push_to_feishu(
-            template={
+            configuration={
                 "id": TEMPLATE_ID,
                 "name": "固定模板",
-                "feishu_bitable_token": "bitable-token",
-                "feishu_table_id": "table-id",
+                "fields": [{"field_key": "order_no", "feishu_column": "订单号"}],
+                "feishu": {"bitable_token": "bitable-token", "table_id": "table-id"},
                 "output_mode": "both",
-                "excel_template_path": str(template_path),
-                "excel_template_file_name": "template.xlsx",
+                "excel": {"path": str(template_path), "file_name": "template.xlsx"},
             },
             extraction_data={"order_no": "NOZS0311046"},
             display_name="推送文件",
@@ -112,9 +108,6 @@ async def test_push_to_feishu_fills_excel_from_result_adapter(tmp_path, monkeypa
     monkeypatch.setattr(helpers.settings, "UPLOAD_FOLDER", str(tmp_path / "uploads"))
     monkeypatch.setattr(helpers, "has_feishu_push_record", AsyncMock(return_value=False))
     monkeypatch.setattr(helpers, "record_feishu_push", AsyncMock())
-    mock_template_service = MagicMock()
-    mock_template_service.build_field_mapping.return_value = {"order_no": "订单号"}
-    monkeypatch.setattr(helpers, "template_service", mock_template_service)
 
     result_row = {
         "data": {"order_no": "NOZS0311046"},
@@ -123,14 +116,13 @@ async def test_push_to_feishu_fills_excel_from_result_adapter(tmp_path, monkeypa
 
     with patch("services.feishu_service.feishu_service", fake_feishu):
         pushed = await helpers.push_to_feishu(
-            template={
+            configuration={
                 "id": TEMPLATE_ID,
                 "name": "固定模板",
-                "feishu_bitable_token": "bitable-token",
-                "feishu_table_id": "table-id",
+                "fields": [{"field_key": "order_no", "feishu_column": "订单号"}],
+                "feishu": {"bitable_token": "bitable-token", "table_id": "table-id"},
                 "output_mode": "both",
-                "excel_template_path": str(template_path),
-                "excel_template_file_name": "template.xlsx",
+                "excel": {"path": str(template_path), "file_name": "template.xlsx"},
             },
             extraction_data=result_to_extraction_data(result_row, DOCUMENT_ID),
             display_name="推送文件",
@@ -149,17 +141,14 @@ async def test_push_to_feishu_merges_extra_crm_fields(monkeypatch):
 
     monkeypatch.setattr(helpers, "has_feishu_push_record", AsyncMock(return_value=False))
     monkeypatch.setattr(helpers, "record_feishu_push", AsyncMock())
-    mock_template_service = MagicMock()
-    mock_template_service.build_field_mapping.return_value = {"sample_name": "样品名称"}
-    monkeypatch.setattr(helpers, "template_service", mock_template_service)
 
     with patch("services.feishu_service.feishu_service", fake_feishu):
         pushed = await helpers.push_to_feishu(
-            template={
+            configuration={
                 "id": TEMPLATE_ID,
                 "name": "检测报告",
-                "feishu_bitable_token": "bitable-token",
-                "feishu_table_id": "table-id",
+                "fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
+                "feishu": {"bitable_token": "bitable-token", "table_id": "table-id"},
             },
             extraction_data={"sample_name": "LED灯"},
             display_name="推送文件",

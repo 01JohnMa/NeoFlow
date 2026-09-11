@@ -10,7 +10,7 @@ import pytest
 from services.configuration_service import (
     ConfigurationService,
     ConfigurationStateError,
-    build_definition_from_template,
+    build_extraction_config,
     merge_definition,
     normalize_definition,
 )
@@ -378,54 +378,113 @@ class TestDefinitionHelpers:
         assert definition["examples"] == []
 
 
-class TestTemplateMapping:
-    def test_build_definition_from_template_maps_content_and_counts(self):
-        template = {
-            "id": "t-1",
+class TestExtractionConfig:
+    def test_build_extraction_config_maps_definition_and_defaults(self):
+        configuration = {
+            "id": "c-1",
+            "tenant_id": TENANT_ID,
             "name": "检测报告",
-            "extraction_prompt_template": "请抽取检测报告字段",
-            "extraction_mode": "vlm",
-            "per_page_extraction": True,
-            "cleaner_module": "cleaners.inspection",
-            "output_mode": "both",
-            "push_attachment": False,
-            "auto_approve": True,
-            "feishu_bitable_token": "app-token",
-            "feishu_table_id": "tbl-1",
-            "excel_template_file_name": "模板.xlsx",
-            "excel_template_path": "/uploads/template.xlsx",
-            "excel_template_placeholders": [{"field_key": "sample_name"}],
+            "code": "inspection_report",
+            "type": "extract",
+            "status": "published",
+            "current_revision_id": "r-1",
+            "draft_definition": {
+                "fields": [{"field_key": "a", "field_label": "A"}],
+                "examples": [{"example_input": "输入", "example_output": {"a": 1}}],
+                "extraction_prompt": "请抽取字段",
+                "extraction_mode": "vlm",
+                "per_page_extraction": True,
+                "output_mode": "both",
+                "push_attachment": False,
+                "auto_approve": True,
+                "feishu": {"bitable_token": "app-token", "table_id": "tbl-1"},
+                "excel": {
+                    "file_name": "模板.xlsx",
+                    "path": "/uploads/template.xlsx",
+                    "placeholders": [{"field_key": "a"}],
+                },
+            },
         }
-        fields = [
-            {"field_key": "b", "field_label": "B", "sort_order": 2, "field_type": "date"},
-            {"field_key": "a", "field_label": "A", "sort_order": 1, "field_type": "text"},
-        ]
-        examples = [
-            {"example_input": "输入1", "example_output": {"a": 1}, "sort_order": 1, "is_active": True},
-            {"example_input": "禁用示例", "example_output": {"a": 2}, "sort_order": 2, "is_active": False},
-        ]
 
-        definition = build_definition_from_template(template, fields, examples)
+        config = build_extraction_config(configuration)
 
-        assert [f["field_key"] for f in definition["fields"]] == ["a", "b"]
-        assert len(definition["examples"]) == 2
-        assert definition["examples"][1]["is_active"] is False
-        assert definition["extraction_prompt"] == "请抽取检测报告字段"
-        assert definition["extraction_mode"] == "vlm"
-        assert definition["per_page_extraction"] is True
-        assert definition["cleaner_module"] == "cleaners.inspection"
-        assert definition["output_mode"] == "both"
-        assert definition["push_attachment"] is False
-        assert definition["auto_approve"] is True
-        assert definition["feishu"] == {"bitable_token": "app-token", "table_id": "tbl-1"}
-        assert definition["excel"]["file_name"] == "模板.xlsx"
-        assert definition["excel"]["path"] == "/uploads/template.xlsx"
-        assert definition["excel"]["placeholders"] == [{"field_key": "sample_name"}]
+        assert config["id"] == "c-1"
+        assert config["revision_id"] == "r-1"
+        assert config["fields"][0]["field_key"] == "a"
+        assert config["fields"][0]["field_type"] == "text"
+        assert config["examples"][0]["is_active"] is True
+        assert config["extraction_prompt"] == "请抽取字段"
+        assert config["extraction_mode"] == "vlm"
+        assert config["per_page_extraction"] is True
+        assert config["push_attachment"] is False
+        assert config["auto_approve"] is True
+        assert config["feishu"] == {"bitable_token": "app-token", "table_id": "tbl-1"}
+        assert config["excel"]["path"] == "/uploads/template.xlsx"
 
-    def test_build_definition_from_empty_template_uses_defaults(self):
-        definition = build_definition_from_template({}, [], [])
-        assert definition["fields"] == []
-        assert definition["examples"] == []
-        assert definition["extraction_mode"] == "ocr_llm"
-        assert definition["output_mode"] == "bitable"
-        assert definition["push_attachment"] is True
+    def test_build_extraction_config_empty_uses_defaults(self):
+        config = build_extraction_config({"id": "c-1", "draft_definition": {}})
+        assert config["fields"] == []
+        assert config["examples"] == []
+        assert config["extraction_mode"] == "ocr_llm"
+        assert config["output_mode"] == "bitable"
+        assert config["push_attachment"] is True
+
+    @pytest.mark.asyncio
+    async def test_get_extraction_configuration_prefers_published_revision(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(_create(definition={"extraction_prompt": "v1"}))
+        published = await svc.publish_configuration(created["id"])
+        await svc.update_configuration(created["id"], {"definition": {"extraction_prompt": "draft-v2"}})
+
+        config = await svc.get_extraction_configuration(created["id"])
+        assert config["extraction_prompt"] == "v1"
+        assert config["revision_id"] == published["revision"]["id"]
+
+    @pytest.mark.asyncio
+    async def test_get_extraction_configuration_by_revision_pins_definition(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(_create(definition={"extraction_prompt": "v1"}))
+        published = await svc.publish_configuration(created["id"])
+        await svc.update_configuration(created["id"], {"definition": {"extraction_prompt": "v2"}})
+        second = await svc.publish_configuration(created["id"])
+
+        old = await svc.get_extraction_configuration_by_revision(published["revision"]["id"])
+        new = await svc.get_extraction_configuration_by_revision(second["revision"]["id"])
+        assert old["extraction_prompt"] == "v1"
+        assert new["extraction_prompt"] == "v2"
+        assert old["revision_id"] == published["revision"]["id"]
+
+    @pytest.mark.asyncio
+    async def test_resolve_extraction_configuration_by_config_id_code_and_name(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(
+            _create(name="检测报告", code="inspection_report")
+        )
+        await svc.publish_configuration(created["id"])
+
+        by_id = await svc.resolve_extraction_configuration(TENANT_ID, created["id"])
+        by_code = await svc.resolve_extraction_configuration(TENANT_ID, "inspection_report")
+        by_name = await svc.resolve_extraction_configuration(TENANT_ID, "检测报告")
+
+        assert by_id["id"] == created["id"]
+        assert by_code["id"] == created["id"]
+        assert by_name["id"] == created["id"]
+        assert await svc.resolve_extraction_configuration(OTHER_TENANT_ID, created["id"]) is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_by_legacy_template_id_and_list_published(self, service):
+        svc, fake = service
+        legacy_id = "b0000000-0000-0000-0000-000000000001"
+        created = await svc.create_configuration(_create(name="检测报告", code="inspection_report"))
+        await svc.publish_configuration(created["id"])
+        fake.tables["configurations"][0]["legacy_template_id"] = legacy_id
+
+        draft = await svc.create_configuration(_create(name="草稿配置", code="draft_only"))
+
+        resolved = await svc.resolve_extraction_configuration(TENANT_ID, legacy_id)
+        assert resolved["id"] == created["id"]
+
+        published_configs = await svc.list_published_extract_configurations(TENANT_ID)
+        ids = [c["id"] for c in published_configs]
+        assert created["id"] in ids
+        assert draft["id"] not in ids

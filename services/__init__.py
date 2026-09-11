@@ -1,5 +1,5 @@
 # services package
-# 惰性加载：避免 import services.schema_sync_service 等子模块时拉起重依赖（如 paddleocr）
+# 惰性加载：避免 import services.ocr_service 等子模块时拉起重依赖（如 paddleocr）
 
 def __getattr__(name: str):
     if name == "ocr_service":

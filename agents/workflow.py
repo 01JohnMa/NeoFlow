@@ -14,8 +14,9 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from config.settings import settings
+from services.base import build_extraction_prompt
+from services.configuration_service import configuration_service
 from services.ocr_service import ocr_service
-from services.template_service import template_service
 from .exceptions import WorkflowError, WorkflowErrorType
 from .json_cleaner import parse_llm_json
 from .result_builder import build_error, build_single_success
@@ -121,7 +122,7 @@ class OCRWorkflow:
             raise WorkflowError(WorkflowErrorType.OCR_FAILED, str(e))
 
     async def _extract_node(self, state: WorkflowState) -> Dict[str, Any]:
-        """字段提取节点 - 从数据库获取模板配置构建 prompt（ocr_llm 模式）"""
+        """字段提取节点 - 从 Configuration 获取字段构建 prompt（ocr_llm 模式）"""
         doc_type = state.get("document_type", "")
         ocr_text = state.get("ocr_text", "")
         tenant_id = state.get("tenant_id")
@@ -133,18 +134,20 @@ class OCRWorkflow:
             raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少租户ID，用户未选择所属部门")
 
         if not doc_type:
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少文档类型，无法获取模板配置")
+            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少文档类型，无法获取配置")
 
         try:
-            template = await template_service.get_template_by_code(tenant_id, doc_type)
-            if not template:
+            configuration = await configuration_service.resolve_extraction_configuration(
+                tenant_id, doc_type
+            )
+            if not configuration:
                 raise WorkflowError(
                     WorkflowErrorType.TEMPLATE_NOT_FOUND,
-                    f"未找到文档类型 [{doc_type}] 的模板配置",
+                    f"未找到文档类型 [{doc_type}] 的配置",
                 )
 
-            prompt = template_service.build_extraction_prompt(template, ocr_text)
-            logger.info(f"使用数据库模板 [{template.get('name')}] 构建 prompt")
+            prompt = build_extraction_prompt(configuration, ocr_text)
+            logger.info(f"使用配置 [{configuration.get('name')}] 构建 prompt")
 
             response_content = await self._llm_invoke_with_retry(prompt)
             extraction_data = parse_llm_json(response_content)
@@ -182,15 +185,17 @@ class OCRWorkflow:
             raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少文档类型，请上传时选择文档类型")
 
         try:
-            template = await template_service.get_template_by_code(tenant_id, doc_type)
-            if not template:
+            configuration = await configuration_service.resolve_extraction_configuration(
+                tenant_id, doc_type
+            )
+            if not configuration:
                 raise WorkflowError(
                     WorkflowErrorType.TEMPLATE_NOT_FOUND,
-                    f"未找到文档类型 [{doc_type}] 的模板配置",
+                    f"未找到文档类型 [{doc_type}] 的配置",
                 )
 
-            logger.info(f"VLM 模式提取: {file_path}，模板: {template.get('name')}")
-            extraction_data = await vlm_service.extract_from_image(file_path, template)
+            logger.info(f"VLM 模式提取: {file_path}，配置: {configuration.get('name')}")
+            extraction_data = await vlm_service.extract_from_image(file_path, configuration)
 
             logger.info(f"VLM 提取完成: {len(extraction_data)} 个字段")
             return {
@@ -309,48 +314,43 @@ class OCRWorkflow:
             err_msg = WorkflowError.extract_message(e)
             return build_error(document_id, err_msg, self._elapsed(processing_start))
 
-    # ============ 模板化提取方法 ============
+    # ============ 配置化提取方法 ============
 
-    async def process_with_template(
+    async def process_with_configuration(
         self,
         document_id: str,
         file_path: str,
-        template_id: str,
+        configuration: Dict[str, Any],
         tenant_id: str,
     ) -> Dict[str, Any]:
-        """使用模板配置执行工作流（单文档）
+        """使用 Configuration 执行工作流（单文档）
 
         根据 DOC_PROCESS_MODE 自动选择 OCR+LLM 或 VLM 路径。
 
         Args:
             document_id: 文档ID
             file_path: 文件路径
-            template_id: 模板ID
+            configuration: Configuration 抽取执行视图
             tenant_id: 租户ID
         """
         processing_start = datetime.now()
+        configuration_id = configuration.get("id")
 
         try:
-            template = await template_service.get_template_with_details(template_id)
-            if not template:
-                raise WorkflowError(
-                    WorkflowErrorType.TEMPLATE_NOT_FOUND,
-                    f"模板不存在: {template_id}",
-                )
-
             logger.info(
-                f"使用模板 [{template['name']}] 处理文档，模式: {template.get('extraction_mode', settings.DOC_PROCESS_MODE)}"
+                f"使用配置 [{configuration.get('name')}] 处理文档，"
+                f"模式: {configuration.get('extraction_mode', settings.DOC_PROCESS_MODE)}"
             )
 
-            mode = template.get("extraction_mode", settings.DOC_PROCESS_MODE)
-            per_page = template.get("per_page_extraction", False)
+            mode = configuration.get("extraction_mode", settings.DOC_PROCESS_MODE)
+            per_page = configuration.get("per_page_extraction", False)
 
             if per_page:
                 # ── 逐页提取路径：每页独立提取，每页产生一个样品 ──────────
                 if mode == "vlm":
                     from services.vlm_service import vlm_service
                     logger.info(f"VLM逐页处理: {file_path}")
-                    vlm_pages = await vlm_service.extract_per_page(file_path, template)
+                    vlm_pages = await vlm_service.extract_per_page(file_path, configuration)
                     page_results = [vp["data"] for vp in vlm_pages]
                     ocr_text = ""
                     ocr_confidence = 0.0
@@ -363,7 +363,7 @@ class OCRWorkflow:
                     for page in raw_pages:
                         extracted = parse_llm_json(
                             await self._llm_invoke_with_retry(
-                                template_service.build_extraction_prompt(template, page["text"])
+                                build_extraction_prompt(configuration, page["text"])
                             )
                         )
                         page_results.append(extracted)
@@ -380,13 +380,13 @@ class OCRWorkflow:
                 extraction_data = page_results[0] if page_results else {}
                 result = build_single_success(
                     document_id=document_id,
-                    document_type=template.get("code", ""),
+                    document_type=configuration.get("code", ""),
                     extraction_data=extraction_data,
                     ocr_text=ocr_text,
                     ocr_confidence=ocr_confidence,
                     processing_time=processing_time,
-                    template_id=template_id,
-                    template_name=template.get("name"),
+                    template_id=configuration_id,
+                    template_name=configuration.get("name"),
                 )
                 # 多样品时附带完整列表供调用方使用
                 if len(extraction_results) > 1:
@@ -396,7 +396,7 @@ class OCRWorkflow:
                 # ── VLM 整体路径：直接从图片提取 ──────────────────────────
                 from services.vlm_service import vlm_service
 
-                extraction_data = await vlm_service.extract_from_image(file_path, template)
+                extraction_data = await vlm_service.extract_from_image(file_path, configuration)
                 ocr_text = ""
                 ocr_confidence = 0.0
             else:
@@ -409,26 +409,26 @@ class OCRWorkflow:
                     f"OCR完成，提取{ocr_result['total_lines']}行，置信度{ocr_confidence:.2f}"
                 )
 
-                prompt = template_service.build_extraction_prompt(template, ocr_text)
+                prompt = build_extraction_prompt(configuration, ocr_text)
                 response_content = await self._llm_invoke_with_retry(prompt)
                 extraction_data = parse_llm_json(response_content)
 
             processing_time = self._elapsed(processing_start)
-            logger.info(f"模板化提取完成: {len(extraction_data)}个字段，耗时{processing_time:.2f}s")
+            logger.info(f"配置化提取完成: {len(extraction_data)}个字段，耗时{processing_time:.2f}s")
 
             return build_single_success(
                 document_id=document_id,
-                document_type=template.get("code", ""),
+                document_type=configuration.get("code", ""),
                 extraction_data=extraction_data,
                 ocr_text=ocr_text,
                 ocr_confidence=ocr_confidence,
                 processing_time=processing_time,
-                template_id=template_id,
-                template_name=template.get("name"),
+                template_id=configuration_id,
+                template_name=configuration.get("name"),
             )
 
         except Exception as e:
-            logger.error(f"模板化处理失败: {e}")
+            logger.error(f"配置化处理失败: {e}")
             err_msg = WorkflowError.extract_message(e)
             return build_error(document_id, err_msg, self._elapsed(processing_start))
 

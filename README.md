@@ -90,17 +90,18 @@ npm run dev
 neoflow/
 ├── api/                        # FastAPI 应用层
 │   ├── main.py                # 应用入口
-│   ├── jobs.py                # 合并任务状态管理
+│   ├── jobs.py                # 任务状态管理
 │   ├── dependencies/          # 依赖注入（auth 等）
 │   └── routes/
 │       ├── documents/         # 文档路由（子模块）
 │       │   ├── upload.py      # 上传
-│       │   ├── process.py     # 处理（含 process-with-template、process-merge）
+│       │   ├── process.py     # 处理（含 process-with-template）
 │       │   ├── query.py       # 查询
 │       │   ├── review.py     # 审核
 │       │   ├── helpers.py    # 辅助函数（飞书推送等）
 │       │   └── schemas.py    # 请求/响应模型
-│       ├── admin.py           # 管理员配置（模板、部门、示例）
+│       ├── configurations.py  # 配置管理（Configuration/Revision）
+│       ├── jobs.py            # 任务与结果
 │       ├── tenants.py         # 租户/部门管理
 │       └── health.py          # 健康检查
 │
@@ -110,12 +111,13 @@ neoflow/
 │   │   ├── pages/             # 页面
 │   │   │   ├── Login.tsx      # 登录
 │   │   │   ├── Dashboard.tsx  # 仪表盘
-│   │   │   ├── Upload.tsx     # 上传（单文件/合并/相机）
+│   │   │   ├── Upload.tsx     # 上传（单文件/相机）
 │   │   │   ├── Documents.tsx  # 文档列表
 │   │   │   ├── DocumentDetail.tsx # 文档详情/审核
+│   │   │   ├── ParseViewer.tsx    # 解析结果查看
 │   │   │   ├── AdminConfig.tsx    # 管理配置入口
 │   │   │   ├── AdminFeishuTab.tsx # 飞书配置
-│   │   │   ├── AdminFieldsTab.tsx # 模板字段
+│   │   │   ├── AdminFieldsTab.tsx # 配置字段
 │   │   │   └── AdminExamplesTab.tsx # 示例管理
 │   │   ├── hooks/             # 自定义 Hooks
 │   │   ├── services/          # API 服务
@@ -133,17 +135,18 @@ neoflow/
 │   └── prompts.py             # LLM Prompt 配置
 │
 ├── services/                   # 业务服务
-│   ├── base.py                # 基类（SupabaseClientMixin、build_field_table）
+│   ├── base.py                # 基类（SupabaseClientMixin、prompt 构建）
 │   ├── ocr_service.py         # OCR 服务
 │   ├── supabase_service.py    # 数据库服务
-│   ├── template_service.py    # 模板服务
+│   ├── configuration_service.py # Configuration/Revision 服务
+│   ├── result_service.py      # Result 存储
+│   ├── job_runner.py          # Job 执行入口（按类型分发）
+│   ├── parser_adapter.py      # ParserAdapter 接口
+│   ├── mineru_adapter.py      # MinerU 解析后端
+│   ├── parse_service.py       # Parse Job 处理
 │   ├── tenant_service.py       # 租户服务
 │   ├── feishu_service.py       # 飞书推送服务
-│   ├── schema_sync_service.py # 模板字段与数据库列同步
 │   └── vlm_service.py         # 多模态 VLM 服务（可选）
-│
-├── constants/                  # 常量
-│   └── document_types.py      # 文档类型定义
 │
 ├── model/                      # PaddleOCR 模型（需自行下载）
 │   ├── PP-OCRv5_server_det_infer/
@@ -180,15 +183,11 @@ POST /api/documents/upload
 # 处理文档（自动分类或按文档关联模板）
 POST /api/documents/{id}/process?sync=false
 
-# 按指定模板处理
+# 按指定配置处理
 POST /api/documents/{id}/process-with-template
-Body: { "template_id": "xxx", "sync": false }
+Body: { "template_id": "配置ID", "sync": false }
 
-# 合并模式（多文件 → 单模板多样品）
-POST /api/documents/process-merge
-Body: { "template_id": "xxx", "files": [{ "file_path": "...", "doc_type": "积分球" }, ...] }
-
-# 查询合并任务状态
+# 查询任务状态
 GET /api/documents/jobs/{job_id}
 
 # 获取结果
