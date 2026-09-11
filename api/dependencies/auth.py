@@ -55,29 +55,40 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 def _extract_token_and_user_id(authorization: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """
-    从 Authorization header 提取 token 并解析 user_id
+    从 Authorization header 提取 token，并用 GoTrue JWT 密钥验签后解析 user_id
+    
+    验签使用 self-hosted GoTrue 的对称密钥（JWT_SECRET）。密钥缺失或签名/
+    有效期/aud 校验失败时一律返回 (None, None)，由调用方按未认证处理。
     
     Args:
         authorization: Authorization header 值 (Bearer xxx)
         
     Returns:
-        (token, user_id) 元组，如果解析失败则返回 (None, None)
+        (token, user_id) 元组，如果验签或解析失败则返回 (None, None)
     """
     token = _extract_bearer_token(authorization)
     if not token:
         return None, None
-    
+
+    if not settings.JWT_SECRET:
+        logger.error("JWT_SECRET 未配置，拒绝 Bearer token（fail closed）")
+        return None, None
+
     try:
-        # 解码 JWT 仅提取 user_id（sub 字段）。
-        # 签名验证由 Supabase 服务端负责：后续所有数据库操作均通过
-        # service_role 客户端 + 手动权限检查完成，不依赖 JWT 签名本身。
-        # 若需在本地验证签名，需配置 SUPABASE_JWT_SECRET。
-        payload = jwt.decode(token, options={"verify_signature": False})
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience="authenticated",
+        )
         user_id = payload.get("sub")
+        if not isinstance(user_id, str) or not user_id:
+            logger.warning("JWT 校验通过但缺少 sub 声明")
+            return None, None
         return token, user_id
     except Exception as e:
-        logger.warning(f"JWT 解析失败: {e}")
-        return token, None
+        logger.warning(f"JWT 验签失败: {e}")
+        return None, None
 
 
 async def get_current_user(

@@ -4,15 +4,17 @@
 
 ```
 supabase/
-├── docker-compose.yml                      # Docker 服务编排
-├── kong.yml                                # API 网关配置
-├── migrations/                             # 数据库初始化脚本
-│   ├── 000_init.sql                       # 完整初始化（自动执行）
-│   ├── upgrade_001_add_display_name.sql   # 增量迁移（仅升级用）
-│   └── upgrade_002_remove_triggers.sql    # 增量迁移（仅升级用）
-├── volumes/                                # Docker 数据卷（gitignore）
-│   ├── db/data/                           # PostgreSQL 数据
-│   └── storage/                           # Storage 文件
+├── docker-compose.yml      # Docker 服务编排
+├── kong.yml                # API 网关配置
+├── initdb/                 # 仅 db 容器首次初始化执行
+│   └── 000_bootstrap.sh    # 执行 000_init.sql + 从环境变量设置角色密码
+├── migrations/             # 迁移脚本
+│   ├── 000_init.sql        # 基础结构（bootstrap 与迁移器都会执行，幂等）
+│   ├── 001~020_*.sql       # 增量迁移（migrations 服务应用并记录）
+│   └── run_migrations.sh   # 迁移执行器脚本
+├── volumes/                # Docker 数据卷（gitignore）
+│   ├── db/data/            # PostgreSQL 数据
+│   └── storage/            # Storage 文件
 └── README.md
 ```
 
@@ -26,8 +28,12 @@ docker-compose up -d
 ```
 
 说明：
-- 首次初始化由 `000_init.sql` 自动执行。
-- 增量迁移由 `migrations` 迁移执行器自动处理（见 `migrations/run_migrations.sh`）。
+- 首次初始化由 `initdb/000_bootstrap.sh` 执行：应用 `migrations/000_init.sql`，
+  并用 `POSTGRES_PASSWORD` 设置数据库角色密码。
+- 增量迁移由 `migrations` 服务在 db/auth 就绪后自动处理
+  （见 `migrations/run_migrations.sh`，只处理 `*.sql`）。
+- 只有 `initdb/` 挂载到 `docker-entrypoint-initdb.d`，避免依赖 auth 服务的
+  迁移在 auth 启动前执行导致初始化失败。
 
 `000_init.sql` 会在数据库容器首次启动时自动执行，包含：
 - 角色和 Schema 初始化
@@ -85,15 +91,19 @@ docker exec -i supabase-db psql -U postgres -d postgres -f /docker-entrypoint-in
 docker exec -i supabase-db psql -U postgres -d postgres -c "GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_admin; GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_admin; GRANT USAGE ON SCHEMA auth TO supabase_admin;"
 ```
 
-### Q5: 生产环境密码安全
-**警告**: `000_init.sql` 中的密码 `123456` 仅供开发测试  
-**解决**: 生产部署前必须修改为强密码，建议使用 `openssl rand -base64 32` 生成
+### Q5: 数据库角色密码从哪里来
+**说明**: `000_init.sql` 不包含任何硬编码密码。首次初始化时由
+`initdb/000_bootstrap.sh` 读取 `POSTGRES_PASSWORD` 环境变量，
+统一设置 `supabase_auth_admin`、`supabase_storage_admin`、`authenticator`、
+`supabase_admin` 的密码，与 compose 中 auth/rest/storage 的连接串保持一致。  
+**已部署数据库**: `initdb/` 仅在数据目录为空时执行，现有角色密码保持不变；
+如需轮换，手动执行 `ALTER ROLE ... PASSWORD`。
 
 ## Migration 文件说明
 
 | 文件 | 作用 | 执行方式 |
 |------|------|----------|
-| 000_init.sql | 完整初始化（角色、表、RLS） | ✅ 首次初始化时自动执行 |
+| 000_init.sql | 完整初始化（角色、表、RLS） | ✅ 首次由 initdb 执行，迁移器幂等重放并记录 |
 | 001_multi_tenant.sql | 多租户基础表与策略 | ✅ 迁移执行器自动执行 |
 | 002_init_data.sql | 多租户初始化数据 | ✅ 迁移执行器自动执行 |
 | 003_post_auth_setup.sql | auth.users 触发器 | ✅ 迁移执行器等待 auth 就绪后执行 |

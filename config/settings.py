@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = "http://localhost:8000"
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
+    # GoTrue 签发的 JWT 密钥（与 supabase/docker-compose.yml 的 JWT_SECRET 一致）。
+    # 留空时 API 拒绝所有 Bearer token（fail closed）。
+    JWT_SECRET: str = ""
     DATABASE_URL: Optional[str] = None
 
     # ============ LLM配置 ============
