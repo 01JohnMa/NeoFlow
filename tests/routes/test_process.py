@@ -228,6 +228,48 @@ class TestProcessingHandlers:
         mock_svc.save_extraction_result.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_handle_success_writes_result_and_legacy_mirror(self):
+        """抽取成功同时写旧业务表与统一 Result 存储。"""
+        from api.routes.documents.process import _handle_processing_success
+
+        revision_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        result = {
+            "document_type": "inspection_report",
+            "extraction_data": {"sample_name": "LED灯"},
+            "extraction_results": [{"sample_index": 1, "data": {"sample_name": "LED灯"}}],
+        }
+        with _patch_supabase_in_helpers() as mock_svc, \
+             patch("api.routes.documents.helpers.template_service") as mock_ts, \
+             patch("api.routes.documents.helpers.result_service") as mock_result, \
+             patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock):
+            mock_result.record_extraction_result = AsyncMock()
+            mock_svc.save_extraction_result = AsyncMock()
+            mock_svc.generate_display_name.return_value = "报告_LED灯"
+            mock_svc.update_document_status = AsyncMock()
+            mock_svc.update_document = AsyncMock()
+            mock_ts.get_template = AsyncMock(return_value=None)
+            mock_ts.get_template_with_details = AsyncMock(return_value=None)
+            mock_ts.get_template_by_code = AsyncMock(return_value=None)
+            await _handle_processing_success(
+                document_id="doc-001",
+                result=result,
+                tenant_id=TENANT_ID,
+                job_id="job-1",
+                configuration_revision_id=revision_id,
+                source="ocr_llm",
+            )
+
+        mock_svc.save_extraction_result.assert_awaited_once()
+        mock_result.record_extraction_result.assert_awaited_once_with(
+            tenant_id=TENANT_ID,
+            document_id="doc-001",
+            result=result,
+            job_id="job-1",
+            config_revision_id=revision_id,
+            source="ocr_llm",
+        )
+
+    @pytest.mark.asyncio
     async def test_process_task_respects_template_review_requirement(self):
         """模板 auto_approve=False 时应保持待审核，不由 CRM worker 覆盖。"""
         from api.routes.documents.process import process_document_task
@@ -290,6 +332,45 @@ class TestProcessingHandlers:
         mock_success.assert_awaited_once()
         assert mock_success.await_args.kwargs["auto_approve"] is False
         assert mock_success.await_args.kwargs["skip_feishu_push"] is True
+
+    @pytest.mark.asyncio
+    async def test_process_task_forwards_pinned_revision_to_result_writer(self):
+        """Job 固定 Revision 与来源应传到统一结果写入。"""
+        from api.routes.documents.process import process_document_task
+
+        revision_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        result = {
+            "success": True,
+            "document_type": "inspection_report",
+            "extraction_data": {"sample_name": "LED灯"},
+            "template_name": "检测报告",
+        }
+        with _patch_supabase() as mock_svc, \
+             _patch_workflow() as mock_wf, \
+             patch("api.routes.documents.process.template_service") as mock_ts, \
+             patch("api.routes.documents.process.update_job", new_callable=AsyncMock), \
+             patch("api.routes.documents.process.handle_processing_success", new_callable=AsyncMock) as mock_success:
+            mock_svc.update_document_status = AsyncMock()
+            mock_wf.process_with_template = AsyncMock(return_value=result)
+            mock_ts.get_template = AsyncMock(return_value={
+                "id": TEMPLATE_ID,
+                "auto_approve": False,
+                "extraction_mode": "ocr_llm",
+            })
+
+            await process_document_task(
+                document_id=DOCUMENT_ID,
+                file_path="/tmp/test.pdf",
+                template_id=TEMPLATE_ID,
+                tenant_id=TENANT_ID,
+                job_id="job-1",
+                configuration_revision_id=revision_id,
+            )
+
+        kwargs = mock_success.await_args.kwargs
+        assert kwargs["job_id"] == "job-1"
+        assert kwargs["configuration_revision_id"] == revision_id
+        assert kwargs["source"] == "ocr_llm"
 
     @pytest.mark.asyncio
     async def test_handle_failure_updates_status(self):

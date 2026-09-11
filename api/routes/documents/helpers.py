@@ -16,6 +16,7 @@ from loguru import logger
 from config.settings import settings
 from services.supabase_service import supabase_service
 from services.template_service import template_service
+from services.result_service import result_service
 from sdk.excel_template import fill_excel_template
 from api.jobs import build_feishu_push_dedupe_key, has_feishu_push_record, record_feishu_push
 
@@ -249,15 +250,31 @@ async def handle_processing_success(
     source_file_path: Optional[str] = None,
     custom_push_name: Optional[str] = None,
     skip_feishu_push: bool = False,
+    job_id: Optional[str] = None,
+    configuration_revision_id: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> None:
-    """处理成功时的统一逻辑"""
+    """处理成功时的统一逻辑
+
+    旧业务表镜像写入保持不变；同时把同一份抽取结果写入统一 Result 存储。
+    """
     await supabase_service.save_extraction_result(
         document_id=document_id,
         document_type=result.get("document_type") or result.get("template_name", "未知"),
         extraction_data=result["extraction_data"],
         template_id=template_id,
     )
-    logger.info(f"提取结果已保存: {document_id}")
+    logger.info(f"提取结果已保存(旧业务表镜像): {document_id}")
+
+    await result_service.record_extraction_result(
+        tenant_id=tenant_id,
+        document_id=document_id,
+        result=result,
+        job_id=job_id,
+        config_revision_id=configuration_revision_id,
+        source=source,
+    )
+    logger.info(f"提取结果已保存(Result): {document_id}")
 
     display_name = None
     if generate_display_name:
