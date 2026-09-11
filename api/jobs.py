@@ -24,8 +24,6 @@ STAGE_PROGRESS: Dict[str, int] = {
     "failed": -1,
 }
 
-_ACTIVE_JOB_STATUSES = {"queued", "pending", "processing"}
-
 
 def _utc_now_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -55,40 +53,18 @@ def _normalize_job_record(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, A
     normalized.setdefault("stage", "queued")
     normalized.setdefault("progress", STAGE_PROGRESS.get(normalized["stage"], 0))
     normalized.setdefault("document_ids", [])
-    normalized.setdefault("items", [])
-    normalized.setdefault("total", len(normalized.get("items") or []))
-    normalized.setdefault("completed_count", 0)
     normalized.setdefault("error", None)
     return normalized
 
 
-def build_batch_dedupe_key(items: list[dict]) -> str:
-    """为批量处理构建稳定的去重键，保留任务顺序。"""
-    normalized_items: list[dict[str, Any]] = []
-    for item in items:
-        normalized_items.append({
-            "document_id": item.get("document_id"),
-            "template_id": item.get("template_id"),
-            "paired_document_id": item.get("paired_document_id"),
-            "paired_template_id": item.get("paired_template_id"),
-            "custom_push_name": item.get("custom_push_name") or None,
-        })
-    payload = json.dumps(normalized_items, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return f"batch:{digest}"
-
-
 async def create_job(
-    batch_items: list | None = None,
     *,
     job_type: str = "batch",
     created_by: Optional[str] = None,
-    dedupe_key: Optional[str] = None,
     related_document_ids: Optional[list[str]] = None,
 ) -> str:
     """创建持久化 Job，返回 job_id。"""
     job_id = str(uuid.uuid4())
-    items = batch_items or []
     payload: Dict[str, Any] = {
         "job_id": job_id,
         "job_type": job_type,
@@ -96,12 +72,8 @@ async def create_job(
         "stage": "queued",
         "progress": STAGE_PROGRESS["queued"],
         "document_ids": related_document_ids or [],
-        "items": items,
-        "total": len(items),
-        "completed_count": 0,
         "error": None,
         "created_by": created_by,
-        "dedupe_key": dedupe_key,
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
     }
@@ -165,76 +137,6 @@ async def claim_next_job(worker_id: str, stale_after_seconds: int = 1800) -> Opt
     else:
         row = data[0] if data else None
     return _normalize_job_record(row)
-
-
-async def find_job_by_dedupe_key(dedupe_key: str) -> Optional[Dict[str, Any]]:
-    """按去重键查找仍处于活动中的任务。"""
-    result = await _run_db(
-        lambda: _job_table()
-        .select("*")
-        .eq("dedupe_key", dedupe_key)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    row = result.data[0] if result.data else None
-    job = _normalize_job_record(row)
-    if job and job.get("status") in _ACTIVE_JOB_STATUSES:
-        return job
-    return None
-
-
-async def update_batch_item(job_id: str, index: int, status: str, error: str = None, document_ids: list = None) -> None:
-    """更新批量 Job 中某一项的状态，并自动计算进度。"""
-    job = await get_job(job_id)
-    if not job or "items" not in job:
-        return
-
-    items = list(job.get("items") or [])
-    if index < 0 or index >= len(items):
-        return
-
-    item = dict(items[index])
-    item["status"] = status
-    if error is not None:
-        item["error"] = error
-    if document_ids:
-        item["document_ids"] = document_ids
-    items[index] = item
-
-    accumulated_document_ids = list(job.get("document_ids") or [])
-    if document_ids:
-        accumulated_document_ids.extend(document_ids)
-        accumulated_document_ids = list(dict.fromkeys(accumulated_document_ids))
-
-    completed = sum(1 for it in items if it.get("status") in ("completed", "failed"))
-    total = job.get("total", len(items)) or len(items)
-    progress = int(completed / total * 100) if total > 0 else 0
-
-    if completed == total and total > 0:
-        overall_status = "failed" if all(it.get("status") == "failed" for it in items) else "completed"
-        overall_stage = "failed" if overall_status == "failed" else "completed"
-        progress = STAGE_PROGRESS[overall_stage] if overall_status == "completed" else progress
-    else:
-        overall_status = "processing"
-        overall_stage = "ocr"
-
-    payload = {
-        "items": items,
-        "document_ids": accumulated_document_ids,
-        "completed_count": completed,
-        "total": total,
-        "progress": progress,
-        "status": overall_status,
-        "stage": overall_stage,
-        "updated_at": _utc_now_iso(),
-    }
-    if status == "failed" and error:
-        payload["error"] = error
-
-    await _run_db(
-        lambda: _job_table().update(payload).eq("job_id", job_id).execute()
-    )
 
 
 async def has_feishu_push_record(dedupe_key: str) -> bool:

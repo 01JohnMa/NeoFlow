@@ -1,5 +1,5 @@
 # tests/services/test_supabase_service.py
-"""SupabaseService 单元测试 — 纯逻辑方法（日期清洗、单位修正、显示名生成等）"""
+"""SupabaseService 单元测试 — 纯逻辑方法（日期清洗、显示名生成等）"""
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
@@ -164,38 +164,6 @@ class TestCleanDataForDb:
         data = {"sampling_date": "2025/03/16"}
         svc._clean_data_for_db(data, "sampling_forms")
         assert data["sampling_date"] == "2025/03/16"
-
-
-# ============ _normalize_lighting_units ============
-
-class TestNormalizeLightingUnits:
-    """OCR 单位修正"""
-
-    def test_1m_w_to_lm_w(self, svc):
-        """1m/W → lm/W"""
-        data = {"luminous_flux": "1200 1m/W"}
-        result = svc._normalize_lighting_units(data)
-        assert "lm/W" in result["luminous_flux"]
-
-    def test_number_followed_by_1m(self, svc):
-        """数字后的 1m → lm"""
-        data = {"luminous_flux": "1200 1m"}
-        result = svc._normalize_lighting_units(data)
-        assert "1200 lm" in result["luminous_flux"] or "1200lm" in result["luminous_flux"]
-
-    def test_none_data_returns_none(self, svc):
-        """None 输入返回 None"""
-        assert svc._normalize_lighting_units(None) is None
-
-    def test_empty_dict_returns_empty(self, svc):
-        """空字典返回空字典"""
-        assert svc._normalize_lighting_units({}) == {}
-
-    def test_non_target_field_untouched(self, svc):
-        """非目标字段不受影响"""
-        data = {"sample_name": "1m LED灯"}
-        result = svc._normalize_lighting_units(data)
-        assert result["sample_name"] == "1m LED灯"
 
 
 # ============ generate_display_name ============

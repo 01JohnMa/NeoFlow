@@ -104,7 +104,6 @@ export function useProfile() {
     tenantName: profile?.tenant_name,
     tenantCode: profile?.tenant_code,
     displayName: profile?.display_name,
-    pairedBatchMode: profile?.tenant_settings?.paired_batch_mode ?? false,
   }
 }
 

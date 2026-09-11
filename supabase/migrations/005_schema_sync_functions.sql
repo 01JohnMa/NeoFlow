@@ -23,8 +23,7 @@ AS $$
 DECLARE
     v_allowed CONSTANT TEXT[] := ARRAY[
         'inspection_reports', 'expresses', 'sampling_forms',
-        'lighting_reports', 'packagings',
-        'integrating_sphere_reports', 'light_distribution_reports'
+        'packagings'
     ];
 BEGIN
     -- 表名白名单校验
@@ -87,8 +86,7 @@ AS $$
 DECLARE
     v_allowed CONSTANT TEXT[] := ARRAY[
         'inspection_reports', 'expresses', 'sampling_forms',
-        'lighting_reports', 'packagings',
-        'integrating_sphere_reports', 'light_distribution_reports'
+        'packagings'
     ];
     v_system_cols CONSTANT TEXT[] := ARRAY[
         'id', 'document_id', 'extraction_confidence', 'extraction_version',
@@ -163,8 +161,7 @@ AS $$
 DECLARE
     v_allowed CONSTANT TEXT[] := ARRAY[
         'inspection_reports', 'expresses', 'sampling_forms',
-        'lighting_reports', 'packagings',
-        'integrating_sphere_reports', 'light_distribution_reports'
+        'packagings'
     ];
     v_system_cols CONSTANT TEXT[] := ARRAY[
         'id', 'document_id', 'extraction_confidence', 'extraction_version',
@@ -232,8 +229,7 @@ AS $$
 DECLARE
     v_allowed CONSTANT TEXT[] := ARRAY[
         'inspection_reports', 'expresses', 'sampling_forms',
-        'lighting_reports', 'packagings',
-        'integrating_sphere_reports', 'light_distribution_reports'
+        'packagings'
     ];
     v_columns TEXT[];
 BEGIN

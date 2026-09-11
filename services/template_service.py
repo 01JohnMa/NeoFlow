@@ -651,33 +651,6 @@ class TemplateService(SupabaseClientMixin):
         except Exception as e:
             logger.error("更新模板配置失败: {}", e)
             raise
-    
-    # ============ Merge 模式支持 ============
-    
-    def merge_extraction_results(
-        self, 
-        result_a: Optional[Dict[str, Any]], 
-        result_b: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        合并两份文档的提取结果
-        
-        Args:
-            result_a: 文档A的提取结果
-            result_b: 文档B的提取结果
-            
-        Returns:
-            合并后的结果
-        """
-        merged = {}
-        
-        if result_a:
-            merged.update(result_a)
-        
-        if result_b:
-            merged.update(result_b)
-        
-        return merged
 
 
 # 单例实例

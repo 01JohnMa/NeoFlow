@@ -430,11 +430,11 @@ async def process_document_with_template_task(
 
 
 @router.get("/jobs/{job_id}")
-async def get_merge_job_status(
+async def get_job_status(
     job_id: str,
     user: CurrentUser = Depends(get_crm_current_user)
 ):
-    """查询合并任务状态（前端轮询用）
+    """查询异步任务状态（前端轮询用）
 
     Returns:
         {
@@ -463,8 +463,6 @@ async def _can_access_job(job: dict, user: CurrentUser) -> bool:
         document_ids.extend(item.get("document_ids") or [])
         if item.get("document_id"):
             document_ids.append(item.get("document_id"))
-        if item.get("paired_document_id"):
-            document_ids.append(item.get("paired_document_id"))
 
     for doc_id in dict.fromkeys(document_ids):
         if not doc_id:

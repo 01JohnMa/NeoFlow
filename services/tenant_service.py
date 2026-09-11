@@ -120,26 +120,6 @@ class TenantService(SupabaseClientMixin):
         except Exception as e:
             logger.error(f"更新租户失败: {e}")
             raise
-    
-    async def update_tenant_settings(self, tenant_id: str, settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        更新租户的 settings 配置
-
-        Args:
-            tenant_id: 租户ID
-            settings: 配置数据（JSONB）
-
-        Returns:
-            更新后的租户信息
-        """
-        try:
-            result = await self._run_sync(
-                lambda: self._get_client().table("tenants").update({"settings": settings}).eq("id", tenant_id).execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"更新租户配置失败: {e}")
-            raise
 
     # ============ 用户 Profile 操作 ============
     

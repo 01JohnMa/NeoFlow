@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { documentsService } from '@/services/documents'
 import { useUploadStore } from '@/store/useStore'
-import type { DocumentStatus, BatchProcessItem } from '@/types'
+import type { DocumentStatus } from '@/types'
 
 // Query keys
 export const documentKeys = {
@@ -205,61 +205,6 @@ export function useRenameDocument() {
     },
     onSuccess: (_, { documentId }) => {
       queryClient.invalidateQueries({ queryKey: documentKeys.status(documentId) })
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
-
-// Upload multiple files for merge mode
-export function useUploadMultiple() {
-  const queryClient = useQueryClient()
-  const { setUploadProgress, removeUploadProgress } = useUploadStore()
-
-  return useMutation({
-    mutationFn: async ({
-      files,
-      templateId,
-      onProgress,
-    }: {
-      files: Array<{ file: File; docType: string }>
-      templateId?: string
-      onProgress?: (progress: number) => void
-    }) => {
-      const tempId = `upload-merge-${Date.now()}`
-      setUploadProgress(tempId, 0)
-
-      try {
-        const result = await documentsService.uploadMultiple(files, {
-          templateId,
-          onProgress: (fileIndex, progress) => {
-            // 计算总进度
-            const totalProgress = Math.round(((fileIndex + progress / 100) / files.length) * 100)
-            setUploadProgress(tempId, totalProgress)
-            onProgress?.(totalProgress)
-          },
-        })
-        removeUploadProgress(tempId)
-        return result
-      } catch (error) {
-        removeUploadProgress(tempId)
-        throw error
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
-
-// Batch process mutation
-export function useBatchProcess() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (items: BatchProcessItem[]) => {
-      return documentsService.submitBatchProcess(items)
-    },
-    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
     },
   })

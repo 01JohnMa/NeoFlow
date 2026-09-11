@@ -107,84 +107,6 @@ ON CONFLICT (template_id, field_key) DO NOTHING;
 
 
 -- ############################################################
--- PART 4: 照明事业部模板
--- ############################################################
-
--- 4.1 积分球测试模板
-INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000010', 'a0000000-0000-0000-0000-000000000002', '积分球测试', 'integrating_sphere', '积分球测试PDF', 2, TRUE, 1)
-ON CONFLICT (id) DO UPDATE SET
-    required_doc_count = EXCLUDED.required_doc_count,
-    is_active          = EXCLUDED.is_active,
-    sort_order         = EXCLUDED.sort_order;
-
--- 4.2 光分布测试模板（子模板：负责光分布字段提取）
-INSERT INTO document_templates (id, tenant_id, name, code, description, required_doc_count, is_active, sort_order) VALUES
-    ('b0000000-0000-0000-0000-000000000011', 'a0000000-0000-0000-0000-000000000002', '光分布测试', 'light_distribution', '光分布PDF', 1, TRUE, 2)
-ON CONFLICT (id) DO UPDATE SET
-    is_active  = EXCLUDED.is_active,
-    sort_order = EXCLUDED.sort_order;
-
-
--- ############################################################
--- PART 5: 照明事业部模板字段
--- ############################################################
-
--- 5.1 积分球测试字段（14个：纯积分球字段）
-INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order, source_doc_type) VALUES
-    ('b0000000-0000-0000-0000-000000000010', 'sample_model', '样品型号', '样品型号', 'text', FALSE, 1, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'chromaticity_x', '色品坐标X', '色品坐标X', 'text', FALSE, 2, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'chromaticity_y', '色品坐标Y', '色品坐标Y', 'text', FALSE, 3, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'duv', 'duv', 'duv', 'text', FALSE, 4, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'cct', '色温(CCT)', '色温', 'text', FALSE, 5, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'ra', 'Ra', 'Ra', 'text', FALSE, 6, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'r9', 'R9', 'R9', 'text', FALSE, 7, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'cqs', 'CQS', 'CQS', 'text', FALSE, 8, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'sdcm', '色容差SDCM', '色容差SDCM', 'text', FALSE, 9, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'power_sphere', '功率(积分球)', '功率(积分球)', 'text', FALSE, 10, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'luminous_flux_sphere', '光通量(积分球)', '光通量(积分球)', 'text', FALSE, 11, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'luminous_efficacy_sphere', '光效(积分球)', '光效(积分球)', 'text', FALSE, 12, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'rf', 'Rf', 'Rf', 'text', FALSE, 13, '积分球'),
-    ('b0000000-0000-0000-0000-000000000010', 'rg', 'Rg', 'Rg', 'text', FALSE, 14, '积分球')
-ON CONFLICT (template_id, field_key) DO NOTHING;
-
--- 积分球测试：提取提示
-UPDATE template_fields
-SET extraction_hint = '仅数值，不带单位'
-WHERE template_id = 'b0000000-0000-0000-0000-000000000010'
-  AND field_key IN ('cct', 'luminous_efficacy_sphere', 'luminous_flux_sphere', 'power_sphere', 'sdcm');
-
-UPDATE template_fields
-SET extraction_hint = '将duv字段提取结果科学记数法转换为小数'
-WHERE template_id = 'b0000000-0000-0000-0000-000000000010'
-  AND field_key = 'duv';
-
--- 5.2 光分布测试字段（8个：3个光分布扩展 + 5个光分布，作为子模板驱动光分布提取）
-INSERT INTO template_fields (template_id, field_key, field_label, feishu_column, field_type, is_required, sort_order, source_doc_type) VALUES
-    -- 光分布扩展（3个，sort_order=0）
-    ('b0000000-0000-0000-0000-000000000011', 'c0_180', 'C0/180', 'C0/180', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000011', 'c90_270', 'C90/270', 'C90/270', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000011', 'avg_beam_angle', '平均光束角', '平均光束角', 'text', FALSE, 0, NULL),
-    ('b0000000-0000-0000-0000-000000000011', 'lamp_specification', '灯具规格', '灯具规格', 'text', FALSE, 1, '光分布'),
-    ('b0000000-0000-0000-0000-000000000011', 'power', '功率', '功率', 'text', FALSE, 2, '光分布'),
-    ('b0000000-0000-0000-0000-000000000011', 'luminous_flux', '光通量(光分布)', '光通量(光分布)', 'text', FALSE, 3, '光分布'),
-    ('b0000000-0000-0000-0000-000000000011', 'luminous_efficacy', '光效(光分布)', '光效(光分布)', 'text', FALSE, 4, '光分布'),
-    ('b0000000-0000-0000-0000-000000000011', 'peak_intensity', '峰值光强', '峰值光强', 'text', FALSE, 5, '光分布')
-ON CONFLICT (template_id, field_key) DO NOTHING;
-
--- 光分布测试：提取提示
-UPDATE template_fields
-SET extraction_hint = '仅数值，不带单位'
-WHERE template_id = 'b0000000-0000-0000-0000-000000000011'
-  AND field_key IN ('avg_beam_angle', 'c0_180', 'c90_270', 'luminous_efficacy', 'luminous_flux', 'power');
-
-
--- ############################################################
--- PART 6: 照明事业部合并规则（已废弃，template_merge_rules 表已在 009 migration 中删除）
--- ############################################################
-
-
--- ############################################################
 -- PART 7: 质量管理中心模板示例（few-shot）
 -- ############################################################
 
@@ -220,31 +142,6 @@ ON CONFLICT (id) DO NOTHING;
 
 
 -- ############################################################
--- PART 8: 照明事业部模板示例（few-shot）
--- ############################################################
-
--- 8.1 积分球测试示例
-INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
-    ('c0000000-0000-0000-0000-000000000010',
-     'b0000000-0000-0000-0000-000000000010', 
-     '积分球光电参数测试报告...型号：LED-T8-1200...色品坐标：x=0.4523 y=0.4089...Duv：0.0012...色温CCT：3000K...Ra：92.3...R9：85.6...CQS：91.2...SDCM：3.2...功率：18.5W...光通量：1850lm...光效：100lm/W...Rf：89.5...Rg：101.2',
-     '{"sample_model": "LED-T8-1200", "chromaticity_x": "0.4523", "chromaticity_y": "0.4089", "duv": "0.0012", "cct": "3000K", "ra": "92.3", "r9": "85.6", "cqs": "91.2", "sdcm": "3.2", "power_sphere": "18.5W", "luminous_flux_sphere": "1850lm", "luminous_efficacy_sphere": "100lm/W", "rf": "89.5", "rg": "101.2"}',
-     '积分球测试标准示例',
-     1, TRUE)
-ON CONFLICT (id) DO NOTHING;
-
--- 8.2 光分布测试示例
-INSERT INTO template_examples (id, template_id, example_input, example_output, description, sort_order, is_active) VALUES
-    ('c0000000-0000-0000-0000-000000000011',
-     'b0000000-0000-0000-0000-000000000011', 
-     '分布光度计测试报告...灯具型号：LED筒灯 Model-A100...功率：15W...光通量：1200lm...光效：80lm/W...峰值光强：850cd...C0/180：120...C90/270：115...平均光束角：118',
-     '{"lamp_specification": "LED筒灯 Model-A100", "power": "15", "luminous_flux": "1200", "luminous_efficacy": "80", "peak_intensity": "850", "c0_180": "120", "c90_270": "115", "avg_beam_angle": "118"}',
-     '光分布测试标准示例',
-     1, TRUE)
-ON CONFLICT (id) DO UPDATE SET example_input = EXCLUDED.example_input, example_output = EXCLUDED.example_output;
-
-
--- ############################################################
 -- PART 9: 飞书推送配置（统一使用模板配置）
 -- ############################################################
 
@@ -254,13 +151,7 @@ SET feishu_bitable_token = 'WNYMbxfiIaY7rasaO44caKxznxd',
     feishu_table_id = 'tblV1HgMnDRQH0eg'
 WHERE id = 'b0000000-0000-0000-0000-000000000003';
 
--- 9.2 积分球测试（合并主模板）→ 照明事业部多维表格
-UPDATE document_templates
-SET feishu_bitable_token = 'IIJMb0tQNaV5sHsfmX3ccEJLnDb',
-    feishu_table_id = 'tblDpL7MIZjKX89H'
-WHERE id = 'b0000000-0000-0000-0000-000000000010';
-
--- 9.3 检测报告 → 质量管理中心多维表格
+-- 9.2 检测报告 → 质量管理中心多维表格
 UPDATE document_templates
 SET feishu_bitable_token = 'WNYMbxfiIaY7rasaO44caKxznxd',
     feishu_table_id = 'tblqjX6PRcLMFhUU'
@@ -277,4 +168,3 @@ WHERE id = 'b0000000-0000-0000-0000-000000000001';
 SELECT '002_init_data.sql: 租户和模板初始化数据创建完成！' as message;
 SELECT '已创建租户: 质量管理中心(quality), 照明事业部(lighting)' as tenants;
 SELECT '质量管理中心模板: 检测报告, 快递单, 抽样单' as quality_templates;
-SELECT '照明事业部模板: 积分球测试(合并主模板,22字段), 光分布测试(子模板,8字段)' as lighting_templates;

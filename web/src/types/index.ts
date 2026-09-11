@@ -256,33 +256,3 @@ export interface ExtractionResultResponse {
   review_hint_fields?: ReviewHintField[]
   template_fields: TemplateFieldForDetail[]
 }
-
-// ============ Batch types ============
-
-export interface BatchProcessItem {
-  document_id: string
-  template_id: string
-  paired_document_id?: string
-  paired_template_id?: string
-  custom_push_name?: string
-}
-
-export interface BatchJobItemStatus {
-  index: number
-  type: 'single' | 'merge'
-  document_ids: string[]
-  status: 'queued' | 'pending' | 'processing' | 'completed' | 'failed'
-  error?: string
-}
-
-export interface BatchJobStatus {
-  job_id: string
-  status: 'queued' | 'pending' | 'processing' | 'completed' | 'failed'
-  stage: string
-  progress: number
-  document_ids: string[]
-  error: string | null
-  items?: BatchJobItemStatus[]
-  total?: number
-  completed_count?: number
-}
