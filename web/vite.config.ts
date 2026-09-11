@@ -28,11 +28,16 @@ export default defineConfig({
         target: 'http://127.0.0.1:8080',  // 使用 IPv4 地址，避免 IPv6 解析问题
         changeOrigin: true,
       },
-      // 代理 Supabase 请求，支持内网穿透访问
-      '/supabase': {
-        target: 'http://127.0.0.1:8000',
+      // 代理 Supabase 请求到直连的 auth/rest 容器，支持内网穿透访问
+      '/supabase/auth/v1': {
+        target: 'http://127.0.0.1:9999',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/supabase/, ''),
+        rewrite: (path) => path.replace(/^\/supabase\/auth\/v1/, ''),
+      },
+      '/supabase/rest/v1': {
+        target: 'http://127.0.0.1:3002',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/supabase\/rest\/v1/, ''),
       },
     },
   },

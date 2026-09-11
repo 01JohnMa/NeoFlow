@@ -81,14 +81,14 @@ docker rmi neoflow-api neoflow-web 2>/dev/null || true
 # docker rmi <api镜像ID> <web镜像ID>
 ```
 
-**注意**：不要删 `supabase/*` 的官方镜像（如 supabase/postgres、kong 等），只删你项目 build 出来的 `neoflow-api`、`neoflow-web`。
+**注意**：不要删 `supabase/*` 的官方镜像（如 supabase/postgres、gotrue、postgrest 等），只删你项目 build 出来的 `neoflow-api`、`neoflow-web`。
 
 ### 4. 用最新代码重新构建并启动
 
 ```bash
 # 使用与 .env 同目录的 .env（若 .env 在项目根）
 docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml build --no-cache
-docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
 若希望构建时拉取最新基础镜像，可加 `--pull`：
@@ -132,7 +132,7 @@ echo "删除旧镜像..."
 docker rmi neoflow-api neoflow-web 2>/dev/null || true
 echo "重新构建并启动..."
 docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml build --no-cache
-docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 echo "完成。检查: docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml ps"
 ```
 

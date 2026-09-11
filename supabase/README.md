@@ -4,8 +4,7 @@
 
 ```
 supabase/
-├── docker-compose.yml      # Docker 服务编排
-├── kong.yml                # API 网关配置
+├── docker-compose.yml      # Docker 服务编排（db/auth/rest/migrations）
 ├── initdb/                 # 仅 db 容器首次初始化执行
 │   └── 000_bootstrap.sh    # 执行 000_init.sql + 从环境变量设置角色密码
 ├── migrations/             # 迁移脚本
@@ -13,8 +12,7 @@ supabase/
 │   ├── 001~020_*.sql       # 增量迁移（migrations 服务应用并记录）
 │   └── run_migrations.sh   # 迁移执行器脚本
 ├── volumes/                # Docker 数据卷（gitignore）
-│   ├── db/data/            # PostgreSQL 数据
-│   └── storage/            # Storage 文件
+│   └── db/data/            # PostgreSQL 数据
 └── README.md
 ```
 
@@ -40,8 +38,6 @@ docker-compose up -d
 - OCR 应用表和索引
 - 用户数据隔离 RLS 策略
 - 管理员权限策略
-
-**注意**：Storage 表（buckets、objects）由 `supabase-storage` 服务自动创建和管理，不在 `000_init.sql` 中定义。
 
 ### 2. 重建数据库（测试环境）
 
@@ -74,28 +70,15 @@ docker exec -i supabase-db psql -U postgres -d postgres -f /docker-entrypoint-in
 **原因**: Schema 创建顺序错误  
 **解决**: 已在 `000_init.sql` 中修复，确保先 `CREATE SCHEMA` 再 `GRANT`
 
-### Q2: storage 容器不断重启 "relation storage.objects does not exist" 或 "column already exists"
-**原因**: 旧版本 `000_init.sql` 手动定义了 storage 表，与 storage 服务内置迁移冲突  
-**解决**: 已在代码中修复。`000_init.sql` 不再定义 storage 表，由 storage 服务自动管理。  
-**全新部署无需任何手动操作。**
-
-### Q3: 创建扩展报错 "permission denied for function pg_read_file"
+### Q2: 创建扩展报错 "permission denied for function pg_read_file"
 **原因**: Supabase postgres 镜像对 `CREATE EXTENSION` 有特殊触发器  
 **解决**: 使用 PostgreSQL 原生的 `gen_random_uuid()`，不需要 `uuid-ossp` 扩展
 
-### Q4: Studio 看不到 auth.users 表
-**原因**: `supabase_admin` 用户对 auth 服务创建的表没有权限  
-**解决**: 已在 `000_init.sql` 中通过 `ALTER DEFAULT PRIVILEGES` 预设权限  
-**备用修复**: 如果仍有问题，执行：
-```bash
-docker exec -i supabase-db psql -U postgres -d postgres -c "GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_admin; GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_admin; GRANT USAGE ON SCHEMA auth TO supabase_admin;"
-```
-
-### Q5: 数据库角色密码从哪里来
+### Q3: 数据库角色密码从哪里来
 **说明**: `000_init.sql` 不包含任何硬编码密码。首次初始化时由
 `initdb/000_bootstrap.sh` 读取 `POSTGRES_PASSWORD` 环境变量，
 统一设置 `supabase_auth_admin`、`supabase_storage_admin`、`authenticator`、
-`supabase_admin` 的密码，与 compose 中 auth/rest/storage 的连接串保持一致。  
+`supabase_admin` 的密码，与 compose 中 auth/rest 的连接串保持一致。  
 **已部署数据库**: `initdb/` 仅在数据目录为空时执行，现有角色密码保持不变；
 如需轮换，手动执行 `ALTER ROLE ... PASSWORD`。
 
@@ -165,12 +148,9 @@ PostgreSQL 函数（SECURITY DEFINER）
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| Kong (API Gateway) | 8000 | 主入口 |
-| Studio | 3001 | 管理界面 |
-| PostgreSQL | 5432 | 数据库 |
-| Auth | 9999 | 认证服务 |
-| REST | 3002 | REST API |
-| Storage | 5000 | 文件存储 |
+| PostgreSQL | 5432 | 数据库（宿主机映射） |
+| Auth | 9999 | 认证服务（宿主机映射） |
+| REST | 3002 | PostgREST（宿主机映射，容器内为 3000） |
 
 ## 文档状态说明
 
