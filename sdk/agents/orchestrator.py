@@ -1,18 +1,64 @@
 """Orchestration for AI template generation sessions."""
 
-from typing import List
+from typing import Any, Dict
 
-from services.template_service import template_service
+from services.configuration_service import configuration_service
 from services.tenant_service import tenant_service
 from sdk.agents.code_agent import generate_cleaner_code
 from sdk.agents.doc_analyzer_agent import analyze_document as run_doc_analyzer
 from sdk.agents.prompt_agent import build_fallback_prompt, generate_prompt as run_prompt_agent
 from sdk.models import (
     CommitResult,
+    ConfirmTemplateRequest,
     DocumentAnalysis,
     SDKSession,
     SDKSessionState,
 )
+
+
+def build_configuration_definition(
+    session: SDKSession,
+    confirmed: ConfirmTemplateRequest,
+    prompt: str,
+) -> Dict[str, Any]:
+    """把向导确认的模板草稿映射为 Configuration definition。"""
+    fields = [
+        {
+            "field_key": field.field_key,
+            "field_label": field.field_label,
+            "field_type": field.field_type,
+            "extraction_hint": field.extraction_hint,
+            "review_enforced": field.review_enforced,
+            "review_allowed_values": field.review_allowed_values,
+            "sort_order": index,
+        }
+        for index, field in enumerate(confirmed.fields)
+    ]
+    examples = [
+        {
+            "example_input": example.example_input,
+            "example_output": example.example_output,
+            "sort_order": index,
+            "is_active": True,
+        }
+        for index, example in enumerate(confirmed.examples)
+    ]
+    return {
+        "fields": fields,
+        "examples": examples,
+        "extraction_prompt": prompt,
+        "extraction_mode": confirmed.extraction_mode,
+        "per_page_extraction": confirmed.per_page_extraction,
+        "cleaner_module": None,
+        "output_mode": "both" if session.excel_template_path else "bitable",
+        "excel": {
+            "file_name": session.excel_template_file_name,
+            "path": session.excel_template_path,
+            "placeholders": [
+                placeholder.model_dump() for placeholder in session.excel_placeholders
+            ],
+        },
+    }
 
 
 class SDKOrchestrator:
@@ -54,58 +100,33 @@ class SDKOrchestrator:
             tenant_id = tenant["id"]
 
         prompt = session.prompt or build_fallback_prompt(confirmed)
-        excel_placeholders = [
-            placeholder.model_dump()
-            for placeholder in session.excel_placeholders
-        ]
-        template = await template_service.create_template({
-            "tenant_id": tenant_id,
-            "name": confirmed.template_name,
-            "code": confirmed.template_code,
-            "description": confirmed.description,
-            "required_doc_count": 1,
-            "extraction_mode": confirmed.extraction_mode,
-            "per_page_extraction": confirmed.per_page_extraction,
-            "extraction_prompt_template": prompt,
-            "cleaner_module": None,
-            "output_mode": "both" if session.excel_template_path else "bitable",
-            "excel_template_file_name": session.excel_template_file_name,
-            "excel_template_path": session.excel_template_path,
-            "excel_template_placeholders": excel_placeholders,
-        })
+        definition = build_configuration_definition(session, confirmed, prompt)
 
-        field_ids: List[str] = []
-        for index, field in enumerate(confirmed.fields):
-            created = await template_service.create_field(
-                template["id"],
-                {
-                    **field.model_dump(),
-                    "sort_order": index,
-                },
-            )
-            if created.get("id"):
-                field_ids.append(created["id"])
-
-        example_ids: List[str] = []
-        for index, example in enumerate(confirmed.examples):
-            created = await template_service.create_example(
-                template["id"],
-                {
-                    **example.model_dump(),
-                    "sort_order": index,
-                    "is_active": True,
-                },
-            )
-            if created.get("id"):
-                example_ids.append(created["id"])
+        configuration = await configuration_service.create_configuration(
+            {
+                "tenant_id": tenant_id,
+                "name": confirmed.template_name,
+                "code": confirmed.template_code,
+                "description": confirmed.description,
+                "type": "extract",
+                "definition": definition,
+            },
+            created_by=session.user_id,
+        )
+        published = await configuration_service.publish_configuration(
+            configuration["id"],
+            created_by=session.user_id,
+        )
+        revision = published.get("revision") or {}
 
         session.state = SDKSessionState.COMMITTED
         return CommitResult(
             tenant_id=tenant_id,
-            template_id=template["id"],
-            field_ids=field_ids,
-            example_ids=example_ids,
-            cleaner_module=None,
+            configuration_id=configuration["id"],
+            revision_id=revision.get("id", ""),
+            revision_number=revision.get("revision_number", 1),
+            field_count=len(confirmed.fields),
+            example_count=len(confirmed.examples),
         )
 
 

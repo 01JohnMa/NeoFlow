@@ -1,21 +1,37 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProfileStore } from '@/store/useStore'
 import { api } from '@/services/api'
-import * as adminApi from '@/services/admin'
-import type { AdminTemplate } from '@/types'
+import * as configurationsApi from '@/services/configurations'
+import type { Configuration, ConfigurationType } from '@/types'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Modal } from '@/components/ui/modal'
 import { Spinner } from '@/components/ui/spinner'
-import { Settings, Sparkles } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { FeishuConfigTab } from './AdminFeishuTab'
-import { FieldsTab } from './AdminFieldsTab'
-import { ExamplesTab } from './AdminExamplesTab'
+import { Settings, Sparkles, Plus, ChevronRight } from 'lucide-react'
+import { formatDate } from '@/lib/utils'
+import {
+  CONFIGURATION_STATUS_LABELS,
+  CONFIGURATION_TYPE_LABELS,
+  configurationStatusVariant,
+} from '@/lib/configuration'
 import { AiTemplateWizard } from '@/components/admin/AiTemplateWizard'
+import { ConfigurationDetail } from './AdminConfigurationDetail'
 
-type Tab = 'ai' | 'feishu' | 'fields' | 'examples'
+type View = 'list' | 'detail' | 'ai'
+
+const CONFIGURATION_TYPES: ConfigurationType[] = [
+  'parse',
+  'extract',
+  'classify',
+  'split',
+  'composite',
+]
 
 interface Tenant {
   id: string
@@ -31,11 +47,19 @@ export function AdminConfig() {
 
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
-  const [templates, setTemplates] = useState<AdminTemplate[]>([])
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
-  const [selectedTemplate, setSelectedTemplate] = useState<AdminTemplate | null>(null)
-  const [loadingTemplates, setLoadingTemplates] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('feishu')
+  const [view, setView] = useState<View>('list')
+  const [configurations, setConfigurations] = useState<Configuration[]>([])
+  const [loadingList, setLoadingList] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [createForm, setCreateForm] = useState({
+    name: '',
+    code: '',
+    description: '',
+    type: 'extract' as ConfigurationType,
+  })
 
   useEffect(() => {
     if (profile && !isTenantAdmin) {
@@ -54,38 +78,62 @@ export function AdminConfig() {
     }
   }, [isSuperAdmin, profile])
 
-  useEffect(() => {
+  const refreshList = useCallback(async () => {
     if (!selectedTenantId) return
-    setLoadingTemplates(true)
-    setSelectedTemplateId('')
-    setSelectedTemplate(null)
-    adminApi
-      .fetchAdminTemplates(selectedTenantId)
-      .then(setTemplates)
-      .finally(() => setLoadingTemplates(false))
+    setLoadingList(true)
+    try {
+      const data = await configurationsApi.listConfigurations({ tenant_id: selectedTenantId })
+      setConfigurations(data)
+    } finally {
+      setLoadingList(false)
+    }
   }, [selectedTenantId])
 
-  const handleTemplateChange = (id: string) => {
-    setSelectedTemplateId(id)
-    setSelectedTemplate(templates.find((t) => t.id === id) ?? null)
-    setActiveTab(id ? 'feishu' : 'ai')
+  useEffect(() => {
+    setView('list')
+    setSelectedId(null)
+    void refreshList()
+  }, [refreshList])
+
+  const openDetail = (id: string) => {
+    setSelectedId(id)
+    setView('detail')
   }
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'ai', label: 'AI 生成模板' },
-    { key: 'feishu', label: '飞书表格配置' },
-    { key: 'fields', label: '识别字段管理' },
-    { key: 'examples', label: 'Few-shot 示例' },
-  ]
+  const openCreate = () => {
+    setCreateForm({ name: '', code: '', description: '', type: 'extract' })
+    setCreateError(null)
+    setCreateOpen(true)
+  }
 
-  const refreshTemplates = async () => {
-    if (!selectedTenantId) return
-    setLoadingTemplates(true)
+  const handleCreate = async () => {
+    if (!createForm.name.trim()) return
+    setCreating(true)
+    setCreateError(null)
     try {
-      const fresh = await adminApi.fetchAdminTemplates(selectedTenantId)
-      setTemplates(fresh)
+      const created = await configurationsApi.createConfiguration({
+        tenant_id: selectedTenantId,
+        name: createForm.name.trim(),
+        code: createForm.code.trim() || null,
+        description: createForm.description.trim() || null,
+        type: createForm.type,
+      })
+      setCreateOpen(false)
+      await refreshList()
+      openDetail(created.id)
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : '创建配置失败')
     } finally {
-      setLoadingTemplates(false)
+      setCreating(false)
+    }
+  }
+
+  const handleWizardCommitted = async (configurationId?: string) => {
+    await refreshList()
+    if (configurationId) {
+      openDetail(configurationId)
+    } else {
+      setView('list')
     }
   }
 
@@ -103,7 +151,9 @@ export function AdminConfig() {
         <Settings className="h-6 w-6 text-primary-400" />
         <div>
           <h1 className="text-xl font-semibold text-text-primary">系统配置</h1>
-          <p className="text-sm text-text-muted">配置文档模板的识别字段、审核规则和 Few-shot 示例</p>
+          <p className="text-sm text-text-muted">
+            管理文档处理配置、识别字段、输出策略与不可变修订
+          </p>
         </div>
       </div>
 
@@ -136,97 +186,164 @@ export function AdminConfig() {
             </div>
           )}
 
-          <div className="min-w-[240px]">
-            <Label>选择模板</Label>
-            {loadingTemplates ? (
-              <div className="mt-1 h-10 flex items-center px-3">
-                <Spinner size="sm" />
-              </div>
-            ) : (
-              <Select
-                className="mt-1"
-                value={selectedTemplateId}
-                onChange={(e) => handleTemplateChange(e.target.value)}
-                disabled={!selectedTenantId}
-              >
-                <option value="">— 请选择模板 —</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-            )}
+          <div className="flex flex-1 justify-end gap-2">
+            <Button
+              variant="secondary"
+              disabled={!selectedTenantId}
+              onClick={() => setView('ai')}
+            >
+              <Sparkles className="h-4 w-4 mr-1" />
+              AI 生成配置
+            </Button>
+            <Button disabled={!selectedTenantId} onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-1" />
+              新建配置
+            </Button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedTemplateId('')
-              setSelectedTemplate(null)
-              setActiveTab('ai')
-            }}
-            disabled={!selectedTenantId}
-            className="mb-0 h-10 inline-flex items-center gap-2 rounded-lg border border-primary-500/40 px-4 text-sm font-medium text-primary-300 hover:bg-primary-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Sparkles className="h-4 w-4" />
-            AI 生成模板
-          </button>
         </div>
       </Card>
 
-      {selectedTenantId ? (
+      {!selectedTenantId ? (
+        <div className="flex flex-col items-center justify-center py-24 text-text-muted">
+          <Settings className="h-12 w-12 mb-4 opacity-20" />
+          <p className="text-sm">请先选择部门</p>
+        </div>
+      ) : view === 'detail' && selectedId ? (
+        <ConfigurationDetail
+          configurationId={selectedId}
+          onBack={() => {
+            setView('list')
+            setSelectedId(null)
+          }}
+          onChanged={refreshList}
+        />
+      ) : view === 'ai' ? (
         <div className="space-y-4">
-          <div className="flex gap-1 rounded-xl border border-border-default bg-bg-secondary p-1 w-fit">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                disabled={tab.key !== 'ai' && !selectedTemplate}
-                className={cn(
-                  'rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200',
-                  activeTab === tab.key
-                    ? 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
-                    : 'text-text-secondary hover:text-text-primary',
-                  tab.key !== 'ai' && !selectedTemplate && 'cursor-not-allowed opacity-50 hover:text-text-secondary',
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
+          <Button variant="ghost" size="sm" onClick={() => setView('list')}>
+            ← 返回配置列表
+          </Button>
           <Card className="p-6">
-            {activeTab === 'ai' && (
-              <AiTemplateWizard tenantId={selectedTenantId} onCommitted={refreshTemplates} />
-            )}
-            {activeTab === 'feishu' && selectedTemplate && (
-              <FeishuConfigTab
-                template={selectedTemplate}
-                onSaved={(updated) => {
-                  setSelectedTemplate(updated)
-                  setTemplates((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
-                }}
-              />
-            )}
-            {activeTab === 'fields' && selectedTemplate && <FieldsTab templateId={selectedTemplate.id} />}
-            {activeTab === 'examples' && selectedTemplate && <ExamplesTab templateId={selectedTemplate.id} />}
-            {activeTab !== 'ai' && !selectedTemplate && (
-              <div className="flex flex-col items-center justify-center py-16 text-text-muted">
-                <Settings className="h-10 w-10 mb-4 opacity-20" />
-                <p className="text-sm">请选择要配置的模板</p>
-              </div>
-            )}
+            <AiTemplateWizard tenantId={selectedTenantId} onCommitted={handleWizardCommitted} />
           </Card>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-24 text-text-muted">
-          <Settings className="h-12 w-12 mb-4 opacity-20" />
-          <p className="text-sm">
-            {!selectedTenantId ? '请先选择部门' : '请选择要配置的模板'}
-          </p>
-        </div>
+        <Card className="p-6">
+          {loadingList ? (
+            <div className="flex items-center justify-center py-16">
+              <Spinner />
+            </div>
+          ) : configurations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-text-muted">
+              <Settings className="h-10 w-10 mb-4 opacity-20" />
+              <p className="text-sm">暂无配置，点击"新建配置"或使用"AI 生成配置"</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border-default">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border-default bg-bg-secondary text-text-muted">
+                    <th className="px-4 py-2.5 text-left font-medium">名称</th>
+                    <th className="px-4 py-2.5 text-left font-medium">类型</th>
+                    <th className="px-4 py-2.5 text-left font-medium">状态</th>
+                    <th className="px-4 py-2.5 text-left font-medium">字段</th>
+                    <th className="px-4 py-2.5 text-left font-medium">更新于</th>
+                    <th className="px-4 py-2.5 text-right font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {configurations.map((configuration) => (
+                    <tr
+                      key={configuration.id}
+                      className="border-b border-border-default last:border-0 hover:bg-bg-hover transition-colors cursor-pointer"
+                      onClick={() => openDetail(configuration.id)}
+                    >
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-text-primary">{configuration.name}</p>
+                        {configuration.code && (
+                          <p className="mt-0.5 font-mono text-xs text-text-muted">
+                            {configuration.code}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-text-secondary">
+                        {CONFIGURATION_TYPE_LABELS[configuration.type] ?? configuration.type}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={configurationStatusVariant(configuration.status)}>
+                          {CONFIGURATION_STATUS_LABELS[configuration.status]}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-text-secondary">
+                        {configuration.draft_definition?.fields?.length ?? 0}
+                      </td>
+                      <td className="px-4 py-3 text-text-muted text-xs">
+                        {formatDate(configuration.updated_at)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <ChevronRight className="inline h-4 w-4 text-text-muted" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       )}
+
+      <Modal
+        open={createOpen}
+        title="新建配置"
+        onClose={() => setCreateOpen(false)}
+        onConfirm={handleCreate}
+        confirmText={creating ? '创建中...' : '创建'}
+      >
+        <div className="mt-4 space-y-3">
+          <div>
+            <Label>配置名称 *</Label>
+            <Input
+              className="mt-1"
+              value={createForm.name}
+              onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. 检测报告提取"
+            />
+          </div>
+          <div>
+            <Label>配置 code</Label>
+            <Input
+              className="mt-1 font-mono"
+              value={createForm.code}
+              onChange={(e) => setCreateForm((f) => ({ ...f, code: e.target.value }))}
+              placeholder="e.g. inspection_report"
+            />
+          </div>
+          <div>
+            <Label>类型</Label>
+            <Select
+              className="mt-1"
+              value={createForm.type}
+              onChange={(e) =>
+                setCreateForm((f) => ({ ...f, type: e.target.value as ConfigurationType }))
+              }
+            >
+              {CONFIGURATION_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {CONFIGURATION_TYPE_LABELS[type]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>描述</Label>
+            <Textarea
+              className="mt-1"
+              value={createForm.description}
+              onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+            />
+          </div>
+          {createError && <p className="text-sm text-error-500">{createError}</p>}
+        </div>
+      </Modal>
     </div>
   )
 }

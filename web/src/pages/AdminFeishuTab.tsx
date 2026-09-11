@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import * as adminApi from '@/services/admin'
-import type { AdminTemplate } from '@/types'
+import * as configurationsApi from '@/services/configurations'
+import type { Configuration } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,43 +8,47 @@ import { Spinner } from '@/components/ui/spinner'
 import { ToggleLeft, ToggleRight, Save } from 'lucide-react'
 
 export function FeishuConfigTab({
-  template,
-  onSaved,
+  configuration,
+  onUpdated,
 }: {
-  template: AdminTemplate
-  onSaved: (updated: AdminTemplate) => void
+  configuration: Configuration
+  onUpdated: (configuration: Configuration) => void
 }) {
-  const [token, setToken] = useState(template.feishu_bitable_token ?? '')
-  const [tableId, setTableId] = useState(template.feishu_table_id ?? '')
-  const [autoApprove, setAutoApprove] = useState(template.auto_approve)
-  const [pushAttachment, setPushAttachment] = useState(template.push_attachment ?? true)
-  const [perPageExtraction, setPerPageExtraction] = useState(template.per_page_extraction ?? false)
-  const [extractionMode, setExtractionMode] = useState<'ocr_llm' | 'vlm'>(template.extraction_mode ?? 'ocr_llm')
+  const definition = configuration.draft_definition
+  const [token, setToken] = useState(definition?.feishu?.bitable_token ?? '')
+  const [tableId, setTableId] = useState(definition?.feishu?.table_id ?? '')
+  const [autoApprove, setAutoApprove] = useState(definition?.auto_approve ?? false)
+  const [pushAttachment, setPushAttachment] = useState(definition?.push_attachment ?? true)
+  const [perPageExtraction, setPerPageExtraction] = useState(definition?.per_page_extraction ?? false)
+  const [extractionMode, setExtractionMode] = useState<'ocr_llm' | 'vlm'>(
+    definition?.extraction_mode ?? 'ocr_llm',
+  )
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    setToken(template.feishu_bitable_token ?? '')
-    setTableId(template.feishu_table_id ?? '')
-    setAutoApprove(template.auto_approve)
-    setPushAttachment(template.push_attachment ?? true)
-    setPerPageExtraction(template.per_page_extraction ?? false)
-    setExtractionMode(template.extraction_mode ?? 'ocr_llm')
-  }, [template])
+    setToken(definition?.feishu?.bitable_token ?? '')
+    setTableId(definition?.feishu?.table_id ?? '')
+    setAutoApprove(definition?.auto_approve ?? false)
+    setPushAttachment(definition?.push_attachment ?? true)
+    setPerPageExtraction(definition?.per_page_extraction ?? false)
+    setExtractionMode(definition?.extraction_mode ?? 'ocr_llm')
+  }, [definition])
 
   const handleSave = async () => {
     setSaving(true)
     setSuccess(false)
     try {
-      const updated = await adminApi.updateTemplateConfig(template.id, {
-        feishu_bitable_token: token,
-        feishu_table_id: tableId,
-        auto_approve: autoApprove,
-        push_attachment: pushAttachment,
-        per_page_extraction: perPageExtraction,
-        extraction_mode: extractionMode,
+      const updated = await configurationsApi.updateConfiguration(configuration.id, {
+        definition: {
+          feishu: { bitable_token: token, table_id: tableId },
+          auto_approve: autoApprove,
+          push_attachment: pushAttachment,
+          per_page_extraction: perPageExtraction,
+          extraction_mode: extractionMode,
+        },
       })
-      onSaved({ ...template, ...updated })
+      onUpdated(updated)
       setSuccess(true)
       setTimeout(() => setSuccess(false), 2000)
     } catch (e) {
@@ -160,8 +164,16 @@ export function FeishuConfigTab({
             )}
           </button>
         </div>
+        {definition?.excel?.file_name && (
+          <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+            <p className="text-sm font-medium text-text-primary">Excel 输出模板</p>
+            <p className="mt-1 text-xs text-text-muted">
+              {definition.excel.file_name}（{definition.excel.placeholders.length} 个槽位）
+            </p>
+          </div>
+        )}
       </div>
-      <Button onClick={handleSave} disabled={saving}>
+      <Button onClick={handleSave} disabled={saving || configuration.status === 'archived'}>
         {saving ? <Spinner size="sm" className="mr-2" /> : <Save className="h-4 w-4 mr-2" />}
         {success ? '已保存' : '保存配置'}
       </Button>

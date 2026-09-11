@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
-import * as adminApi from '@/services/admin'
-import type { TemplateField, CreateFieldPayload } from '@/types'
+import { useState } from 'react'
+import * as configurationsApi from '@/services/configurations'
+import type {
+  Configuration,
+  ConfigurationField,
+  ConfigurationFieldPayload,
+} from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Modal } from '@/components/ui/modal'
-import { Spinner } from '@/components/ui/spinner'
 import { Settings, Plus, Pencil, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
 
-const EMPTY_FIELD: CreateFieldPayload = {
+const EMPTY_FIELD: ConfigurationFieldPayload = {
   field_key: '',
   field_label: '',
   field_type: 'text',
@@ -20,11 +23,6 @@ const EMPTY_FIELD: CreateFieldPayload = {
   review_allowed_values: null,
 }
 
-interface ForceDeleteInfo {
-  message: string
-  non_null_count: number | null
-}
-
 function FieldFormModal({
   open,
   initial,
@@ -32,18 +30,13 @@ function FieldFormModal({
   onSubmit,
 }: {
   open: boolean
-  initial?: Partial<CreateFieldPayload> & { id?: string }
+  initial?: Partial<ConfigurationFieldPayload> & { id?: string }
   onClose: () => void
-  onSubmit: (data: CreateFieldPayload) => Promise<void>
+  onSubmit: (data: ConfigurationFieldPayload) => Promise<void>
 }) {
-  const [form, setForm] = useState<CreateFieldPayload>({ ...EMPTY_FIELD, ...initial })
+  const [form, setForm] = useState<ConfigurationFieldPayload>({ ...EMPTY_FIELD, ...initial })
   const [allowedInput, setAllowedInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
-
-  useEffect(() => {
-    setForm({ ...EMPTY_FIELD, ...initial })
-    setAllowedInput('')
-  }, [initial, open])
 
   const allowedValues = form.review_allowed_values ?? []
 
@@ -112,13 +105,14 @@ function FieldFormModal({
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
-                  field_type: e.target.value as 'text' | 'date' | 'number',
+                  field_type: e.target.value as ConfigurationField['field_type'],
                 }))
               }
             >
               <option value="text">文本</option>
               <option value="date">日期</option>
               <option value="number">数值</option>
+              <option value="boolean">布尔</option>
             </Select>
           </div>
           <div>
@@ -192,84 +186,90 @@ function FieldFormModal({
   )
 }
 
-export function FieldsTab({ templateId }: { templateId: string }) {
-  const [fields, setFields] = useState<TemplateField[]>([])
-  const [loading, setLoading] = useState(true)
+function toConfigurationField(
+  payload: ConfigurationFieldPayload,
+  index: number,
+  base?: ConfigurationField,
+): ConfigurationField {
+  return {
+    field_key: payload.field_key,
+    field_label: payload.field_label,
+    field_type: payload.field_type,
+    extraction_hint: payload.extraction_hint ?? '',
+    feishu_column: payload.feishu_column ?? '',
+    sort_order: index,
+    review_enforced: payload.review_enforced ?? false,
+    review_allowed_values: payload.review_allowed_values ?? null,
+    is_required: base?.is_required ?? false,
+    default_value: base?.default_value ?? null,
+    source_doc_type: base?.source_doc_type ?? null,
+  }
+}
+
+export function FieldsTab({
+  configuration,
+  onUpdated,
+}: {
+  configuration: Configuration
+  onUpdated: (configuration: Configuration) => void
+}) {
+  const fields = configuration.draft_definition?.fields ?? []
   const [modalOpen, setModalOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<TemplateField | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<TemplateField | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const [forceDeleteInfo, setForceDeleteInfo] = useState<ForceDeleteInfo | null>(null)
+  const [editIndex, setEditIndex] = useState<number | null>(null)
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const saveFields = async (nextFields: ConfigurationField[]) => {
+    setSaving(true)
     try {
-      const data = await adminApi.fetchFields(templateId)
-      setFields(data)
+      const updated = await configurationsApi.updateConfiguration(configuration.id, {
+        definition: { fields: nextFields },
+      })
+      onUpdated(updated)
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
-  }, [templateId])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  const handleCreate = async (payload: CreateFieldPayload) => {
-    await adminApi.createField(templateId, payload)
-    await load()
   }
 
-  const handleUpdate = async (payload: CreateFieldPayload) => {
-    if (!editTarget) return
-    await adminApi.updateField(editTarget.id, payload)
-    await load()
+  const handleCreate = async (payload: ConfigurationFieldPayload) => {
+    await saveFields([...fields, toConfigurationField(payload, fields.length)])
   }
 
-  const handleDelete = async (force = false) => {
-    if (!deleteTarget) return
-    setDeleting(true)
+  const handleUpdate = async (payload: ConfigurationFieldPayload) => {
+    if (editIndex === null) return
+    const next = fields.map((field, index) =>
+      index === editIndex ? toConfigurationField(payload, index, field) : field,
+    )
+    await saveFields(next)
+  }
+
+  const handleDelete = async () => {
+    if (deleteIndex === null) return
+    setSaving(true)
     try {
-      await adminApi.deleteField(deleteTarget.id, force)
-      setDeleteTarget(null)
-      setForceDeleteInfo(null)
-      await load()
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { status?: number; data?: { detail?: { message?: string; non_null_count?: number } } } }
-      if (axiosErr?.response?.status === 409) {
-        const detail = axiosErr.response.data?.detail
-        setForceDeleteInfo({
-          message: detail?.message ?? '该列存在历史数据，删除将永久丢失',
-          non_null_count: detail?.non_null_count ?? null,
-        })
-      } else {
-        throw err
-      }
+      const next = fields
+        .filter((_, index) => index !== deleteIndex)
+        .map((field, index) => ({ ...field, sort_order: index }))
+      const updated = await configurationsApi.updateConfiguration(configuration.id, {
+        definition: { fields: next },
+      })
+      setDeleteIndex(null)
+      onUpdated(updated)
     } finally {
-      setDeleting(false)
+      setSaving(false)
     }
   }
 
   const moveField = async (index: number, direction: 'up' | 'down') => {
-    const newFields = [...fields]
     const swapIndex = direction === 'up' ? index - 1 : index + 1
-    if (swapIndex < 0 || swapIndex >= newFields.length) return
-    ;[newFields[index], newFields[swapIndex]] = [newFields[swapIndex], newFields[index]]
-    const reordered = newFields.map((f, i) => ({ ...f, sort_order: i }))
-    setFields(reordered)
-    await adminApi.reorderFields(
-      templateId,
-      reordered.map((f) => ({ id: f.id, sort_order: f.sort_order })),
-    )
+    if (swapIndex < 0 || swapIndex >= fields.length) return
+    const next = [...fields]
+    ;[next[index], next[swapIndex]] = [next[swapIndex], next[index]]
+    await saveFields(next.map((field, i) => ({ ...field, sort_order: i })))
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    )
-  }
+  const editTarget = editIndex === null ? null : fields[editIndex]
+  const deleteTarget = deleteIndex === null ? null : fields[deleteIndex]
 
   return (
     <div className="space-y-4">
@@ -277,8 +277,9 @@ export function FieldsTab({ templateId }: { templateId: string }) {
         <p className="text-sm text-text-muted">共 {fields.length} 个字段</p>
         <Button
           size="sm"
+          disabled={saving}
           onClick={() => {
-            setEditTarget(null)
+            setEditIndex(null)
             setModalOpen(true)
           }}
         >
@@ -310,21 +311,21 @@ export function FieldsTab({ templateId }: { templateId: string }) {
             <tbody>
               {fields.map((field, idx) => (
                 <tr
-                  key={field.id}
+                  key={`${field.field_key}-${idx}`}
                   className="border-b border-border-default last:border-0 hover:bg-bg-hover transition-colors"
                 >
                   <td className="px-3 py-2">
                     <div className="flex flex-col gap-0.5">
                       <button
                         onClick={() => moveField(idx, 'up')}
-                        disabled={idx === 0}
+                        disabled={idx === 0 || saving}
                         className="text-text-muted hover:text-text-primary disabled:opacity-20"
                       >
                         <ChevronUp className="h-3 w-3" />
                       </button>
                       <button
                         onClick={() => moveField(idx, 'down')}
-                        disabled={idx === fields.length - 1}
+                        disabled={idx === fields.length - 1 || saving}
                         className="text-text-muted hover:text-text-primary disabled:opacity-20"
                       >
                         <ChevronDown className="h-3 w-3" />
@@ -334,7 +335,8 @@ export function FieldsTab({ templateId }: { templateId: string }) {
                   <td className="px-3 py-2 font-mono text-xs text-primary-400">{field.field_key}</td>
                   <td className="px-3 py-2 text-text-primary">{field.field_label}</td>
                   <td className="px-3 py-2 text-text-secondary">
-                    {{ text: '文本', date: '日期', number: '数值' }[field.field_type] ?? field.field_type}
+                    {{ text: '文本', date: '日期', number: '数值', boolean: '布尔' }[field.field_type] ??
+                      field.field_type}
                   </td>
                   <td className="px-3 py-2 text-text-secondary text-xs">{field.feishu_column || '-'}</td>
                   <td className="px-3 py-2 text-text-muted text-xs max-w-[160px] truncate">
@@ -354,8 +356,9 @@ export function FieldsTab({ templateId }: { templateId: string }) {
                       <Button
                         variant="ghost"
                         size="icon-sm"
+                        disabled={saving}
                         onClick={() => {
-                          setEditTarget(field)
+                          setEditIndex(idx)
                           setModalOpen(true)
                         }}
                       >
@@ -365,7 +368,8 @@ export function FieldsTab({ templateId }: { templateId: string }) {
                         variant="ghost"
                         size="icon-sm"
                         className="hover:text-error-500"
-                        onClick={() => setDeleteTarget(field)}
+                        disabled={saving}
+                        onClick={() => setDeleteIndex(idx)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -378,47 +382,33 @@ export function FieldsTab({ templateId }: { templateId: string }) {
         </div>
       )}
 
-      <FieldFormModal
-        open={modalOpen}
-        initial={
-          editTarget
-            ? {
-                ...editTarget,
-                extraction_hint: editTarget.extraction_hint ?? undefined,
-                feishu_column: editTarget.feishu_column ?? undefined,
-                review_allowed_values: editTarget.review_allowed_values ?? undefined,
-              }
-            : undefined
-        }
-        onClose={() => setModalOpen(false)}
-        onSubmit={editTarget ? handleUpdate : handleCreate}
-      />
+      {modalOpen && (
+        <FieldFormModal
+          open
+          initial={
+            editTarget
+              ? {
+                  id: editTarget.field_key,
+                  ...editTarget,
+                  extraction_hint: editTarget.extraction_hint ?? undefined,
+                  feishu_column: editTarget.feishu_column ?? undefined,
+                  review_allowed_values: editTarget.review_allowed_values ?? undefined,
+                }
+              : undefined
+          }
+          onClose={() => setModalOpen(false)}
+          onSubmit={editIndex === null ? handleCreate : handleUpdate}
+        />
+      )}
 
       <Modal
-        open={!!deleteTarget && !forceDeleteInfo}
+        open={deleteTarget !== null}
         title="删除字段"
-        message={`确定删除字段「${deleteTarget?.field_label}」？对应数据库列也将同步删除，此操作不可恢复。`}
-        confirmText={deleting ? '删除中...' : '删除'}
+        message={`确定删除字段「${deleteTarget?.field_label ?? ''}」？此操作不可恢复。`}
+        confirmText={saving ? '删除中...' : '删除'}
         cancelText="取消"
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={() => handleDelete(false)}
-      />
-
-      <Modal
-        open={!!forceDeleteInfo}
-        title="⚠️ 存在历史数据，确认强制删除？"
-        message={
-          forceDeleteInfo
-            ? `${forceDeleteInfo.message}${forceDeleteInfo.non_null_count != null ? `（共 ${forceDeleteInfo.non_null_count} 条）` : ''}。\n强制删除后数据将永久丢失，无法恢复，请确认！`
-            : ''
-        }
-        confirmText={deleting ? '强制删除中...' : '强制删除'}
-        cancelText="取消"
-        onClose={() => {
-          setForceDeleteInfo(null)
-          setDeleteTarget(null)
-        }}
-        onConfirm={() => handleDelete(true)}
+        onClose={() => setDeleteIndex(null)}
+        onConfirm={handleDelete}
       />
     </div>
   )

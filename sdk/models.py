@@ -73,10 +73,11 @@ class CommitSessionRequest(BaseModel):
 
 class CommitResult(BaseModel):
     tenant_id: str
-    template_id: str
-    field_ids: List[str] = []
-    example_ids: List[str] = []
-    cleaner_module: Optional[str] = None
+    configuration_id: str
+    revision_id: str
+    revision_number: int = 1
+    field_count: int = 0
+    example_count: int = 0
 
 
 class SDKSession(BaseModel):
