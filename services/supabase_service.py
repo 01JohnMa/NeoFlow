@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 from loguru import logger
-from supabase import create_client, Client
+from postgrest import SyncPostgrestClient
 
 from config.settings import settings
 from constants.document_types import DocumentTypeTable, DOC_TYPE_TABLE_MAP
@@ -17,7 +17,7 @@ class SupabaseService(SupabaseClientMixin):
     """Supabase 服务封装"""
     
     _instance: Optional['SupabaseService'] = None
-    _client: Optional[Client] = None
+    _client: Optional[SyncPostgrestClient] = None
     
     # ============ 表格映射（使用常量模块） ============
     # 支持模板 code、中文名和历史别名，降低耦合性
@@ -158,45 +158,49 @@ class SupabaseService(SupabaseClientMixin):
         logger.warning(f"无效的日期格式 '{date_str}'，将设为 None")
         return None
     
+    def _build_rest_client(
+        self,
+        api_key: str,
+        authorization: Optional[str] = None,
+    ) -> SyncPostgrestClient:
+        """构建 PostgREST 客户端（数据访问直连，不经过网关）"""
+        return SyncPostgrestClient(
+            settings.SUPABASE_URL,
+            headers={
+                "apikey": api_key,
+                "Authorization": authorization or f"Bearer {api_key}",
+            },
+        )
+
     async def initialize(self):
-        """初始化Supabase客户端"""
+        """初始化 PostgREST 客户端"""
         try:
-            self._client = create_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_SERVICE_ROLE_KEY
-            )
-            logger.info(f"✓ Supabase连接成功: {settings.SUPABASE_URL}")
+            self._client = self._build_rest_client(settings.SUPABASE_SERVICE_ROLE_KEY)
+            logger.info(f"✓ PostgREST 客户端已创建: {settings.SUPABASE_URL}")
             return True
         except Exception as e:
-            logger.error(f"✗ Supabase连接失败: {e}")
+            logger.error(f"✗ PostgREST 客户端创建失败: {e}")
             raise
     
     @property
-    def client(self) -> Client:
+    def client(self) -> SyncPostgrestClient:
         if not self._client:
             raise RuntimeError("Supabase未初始化，请先调用initialize()")
         return self._client
     
-    def get_user_client(self, user_token: str) -> Client:
+    def get_user_client(self, user_token: str) -> SyncPostgrestClient:
         """
-        根据用户 JWT token 创建 Supabase client（应用 RLS 策略）
+        根据用户 JWT token 创建 PostgREST client（应用 RLS 策略）
         
         Args:
             user_token: 用户的 JWT access token
             
         Returns:
-            配置了用户身份的 Supabase Client，自动应用 RLS 策略
+            配置了用户身份的客户端，自动应用 RLS 策略
         """
-        from supabase import ClientOptions
-        
-        return create_client(
-            settings.SUPABASE_URL,
+        return self._build_rest_client(
             settings.SUPABASE_ANON_KEY,
-            options=ClientOptions(
-                headers={
-                    "Authorization": f"Bearer {user_token}"
-                }
-            )
+            authorization=f"Bearer {user_token}",
         )
     
     def get_table_name(self, document_type: str) -> Optional[str]:
