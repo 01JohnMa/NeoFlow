@@ -26,7 +26,10 @@ services:
       POSTGRES_DB: postgres
     volumes:
       - ./volumes/db/data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+      # 首次初始化只执行引导脚本（基础结构 + 角色密码）；
+      # 增量迁移由 migrations 服务在 auth 就绪后应用。
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ./migrations:/migrations:ro
     restart: unless-stopped
     networks:
       - supabase-network

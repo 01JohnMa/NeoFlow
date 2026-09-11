@@ -51,14 +51,10 @@ END
 $$;
 
 -- ============================================================
--- 【生产环境警告】以下密码仅供开发测试使用！
--- 部署到生产环境前，必须修改为强密码或使用环境变量
--- 建议：使用 openssl rand -base64 32 生成随机密码
+-- 【角色密码】不在 SQL 中硬编码。
+-- 首次初始化时由 supabase/initdb/000_bootstrap.sh 从 POSTGRES_PASSWORD
+-- 环境变量统一设置；已运行过的数据库保持现有密码，不会被覆盖。
 -- ============================================================
-ALTER ROLE supabase_auth_admin WITH PASSWORD '123456';
-ALTER ROLE supabase_storage_admin WITH PASSWORD '123456';
-ALTER ROLE authenticator WITH PASSWORD '123456';
-ALTER ROLE supabase_admin WITH PASSWORD '123456';
 
 -- 1.2 【关键】设置 search_path，GoTrue 查询时不带 schema 前缀
 ALTER ROLE supabase_auth_admin SET search_path TO auth, public, extensions;
