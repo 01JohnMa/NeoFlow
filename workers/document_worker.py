@@ -11,8 +11,8 @@ from typing import Any, Dict
 from loguru import logger
 
 from api.jobs import claim_next_job, update_job
-from api.routes.documents.process import process_document_task
 from config.settings import settings
+from services.job_runner import job_runner
 from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
 
@@ -25,32 +25,8 @@ def build_worker_id() -> str:
 
 
 async def execute_job(job: Dict[str, Any]) -> None:
-    """执行一个已认领 job。"""
-    job_id = str(job.get("job_id"))
-    job_type = job.get("job_type")
-
-    document_ids = job.get("document_ids") or []
-    if not document_ids:
-        await update_job(job_id, "failed", error="任务缺少 document_ids")
-        return
-
-    document_id = document_ids[0]
-    document = await supabase_service.get_document(document_id)
-    if not document:
-        await update_job(job_id, "failed", error=f"文档不存在: {document_id}")
-        return
-
-    task_kwargs = {
-        "document_id": document_id,
-        "file_path": document.get("file_path", ""),
-        "template_id": document.get("template_id"),
-        "tenant_id": document.get("tenant_id"),
-        "custom_push_name": document.get("custom_push_name"),
-        "job_id": job_id,
-    }
-    if job_type == "crm":
-        task_kwargs["force_pending_review"] = True
-    await process_document_task(**task_kwargs)
+    """执行一个已认领 job（统一走 JobRunner seam，按 Configuration Type 分发）。"""
+    await job_runner.run(job)
 
 
 async def poll_once(worker_id: str) -> bool:

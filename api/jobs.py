@@ -62,8 +62,14 @@ async def create_job(
     job_type: str = "batch",
     created_by: Optional[str] = None,
     related_document_ids: Optional[list[str]] = None,
+    tenant_id: Optional[str] = None,
+    configuration_revision_id: Optional[str] = None,
 ) -> str:
-    """创建持久化 Job，返回 job_id。"""
+    """创建持久化 Job，返回 job_id。
+
+    configuration_revision_id 用于固定创建时选定的 Configuration Revision；
+    历史调用不传时为 NULL，worker 仍按旧文档处理流程执行。
+    """
     job_id = str(uuid.uuid4())
     payload: Dict[str, Any] = {
         "job_id": job_id,
@@ -74,6 +80,8 @@ async def create_job(
         "document_ids": related_document_ids or [],
         "error": None,
         "created_by": created_by,
+        "tenant_id": tenant_id,
+        "configuration_revision_id": configuration_revision_id,
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
     }

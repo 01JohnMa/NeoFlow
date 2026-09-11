@@ -146,6 +146,7 @@ async def process_document(
                         auto_approve=auto_approve,
                         source_file_path=file_path,
                         custom_push_name=document.get("custom_push_name") if document else None,
+                        source=(template or {}).get("extraction_mode"),
                     )
                 except Exception as e:
                     logger.warning(f"保存结果到数据库失败: {e}")
@@ -187,6 +188,7 @@ async def process_document_task(
     custom_push_name: Optional[str] = None,
     job_id: Optional[str] = None,
     force_pending_review: bool = False,
+    configuration_revision_id: Optional[str] = None,
 ):
     """后台处理任务"""
     try:
@@ -229,6 +231,9 @@ async def process_document_task(
                     source_file_path=file_path,
                     custom_push_name=custom_push_name,
                     skip_feishu_push=force_pending_review,
+                    job_id=job_id,
+                    configuration_revision_id=configuration_revision_id,
+                    source=(template or {}).get("extraction_mode"),
                 )
                 if job_id:
                     await update_job(job_id, "completed", document_ids=[document_id], error=None)
@@ -498,6 +503,7 @@ async def _save_template_extraction_result(
             auto_approve=auto_approve,
             source_file_path=file_path,
             custom_push_name=custom_push_name,
+            source=template.get("extraction_mode"),
         )
     except Exception as e:
         logger.error(f"保存模板提取结果失败: {e}")
