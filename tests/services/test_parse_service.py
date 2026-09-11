@@ -208,3 +208,67 @@ class TestHandleParseJob:
         ]
         assert stored_documents == [DOCUMENT_ID, second_document_id]
         assert mock_update.await_args_list[-1].args[1] == "completed"
+
+
+class TestEnsureParseResult:
+    @pytest.mark.asyncio
+    async def test_returns_existing_parse_data(self):
+        from services.parse_service import ensure_parse_result
+
+        with patch("services.parse_service.result_service") as mock_result, \
+             patch("services.parse_service.get_parser_adapter") as mock_adapter:
+            mock_result.get_document_parse_result = AsyncMock(
+                return_value={"data": {"markdown": "已有解析"}}
+            )
+
+            result = await ensure_parse_result(
+                document_id=DOCUMENT_ID,
+                file_path="/tmp/demo.pdf",
+                tenant_id=TENANT_ID,
+            )
+
+        assert result == {"markdown": "已有解析"}
+        mock_adapter.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_parses_when_missing_and_key_configured(self):
+        from services.parse_service import ensure_parse_result
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+
+        with patch("services.parse_service.result_service") as mock_result, \
+             patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.parse_service.settings") as mock_settings:
+            mock_settings.MINERU_API_KEY = "test-key"
+            mock_result.get_document_parse_result = AsyncMock(return_value=None)
+            mock_result.record_parse_result = AsyncMock(return_value={"id": "r-parse"})
+
+            result = await ensure_parse_result(
+                document_id=DOCUMENT_ID,
+                file_path="/tmp/demo.pdf",
+                tenant_id=TENANT_ID,
+            )
+
+        assert result["markdown"] == "hello"
+        adapter.parse.assert_awaited_once()
+        assert mock_result.record_parse_result.await_args.kwargs["document_id"] == DOCUMENT_ID
+
+    @pytest.mark.asyncio
+    async def test_returns_none_without_mineru_key(self):
+        from services.parse_service import ensure_parse_result
+
+        with patch("services.parse_service.result_service") as mock_result, \
+             patch("services.parse_service.get_parser_adapter") as mock_adapter, \
+             patch("services.parse_service.settings") as mock_settings:
+            mock_settings.MINERU_API_KEY = ""
+            mock_result.get_document_parse_result = AsyncMock(return_value=None)
+
+            result = await ensure_parse_result(
+                document_id=DOCUMENT_ID,
+                file_path="/tmp/demo.pdf",
+                tenant_id=TENANT_ID,
+            )
+
+        assert result is None
+        mock_adapter.assert_not_called()

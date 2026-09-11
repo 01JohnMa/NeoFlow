@@ -6,7 +6,6 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 from typing import List, Dict, Any, Optional
-from paddleocr import PaddleOCR
 from loguru import logger
 
 from config.settings import settings
@@ -51,7 +50,7 @@ class OCRService:
 
     # ── 向后兼容属性 ──────────────────────────────────────────────────────
     @property
-    def ocr_engine(self) -> Optional[PaddleOCR]:
+    def ocr_engine(self) -> Optional[Any]:
         """向后兼容：窥探池中第一个引擎（只读，不应直接调用其 ocr() 方法）"""
         try:
             engine = self._engine_pool.get_nowait()
@@ -97,8 +96,10 @@ class OCRService:
             logger.error(f"✗ OCR引擎池初始化失败: {e}")
             raise
 
-    def _init_ocr_sync(self) -> PaddleOCR:
-        """同步创建一个 PaddleOCR 引擎实例"""
+    def _init_ocr_sync(self) -> Any:
+        """同步创建一个 PaddleOCR 引擎实例（懒加载，未安装时仅在调用处失败）"""
+        from paddleocr import PaddleOCR
+
         return PaddleOCR(
             lang='ch',
             det_model_dir=settings.OCR_DET_MODEL_PATH,
