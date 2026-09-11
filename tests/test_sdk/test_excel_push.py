@@ -84,6 +84,64 @@ async def test_push_to_feishu_attaches_filled_excel_template(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_push_to_feishu_fills_excel_from_result_adapter(tmp_path, monkeypatch):
+    """Result 适配出的数据应原样进入固定 Excel 附件（飞书与 Excel 同源）。"""
+    from services.result_service import result_to_extraction_data
+
+    template_path = tmp_path / "template.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "订单号"
+    sheet["B1"] = "{{order_no}}"
+    workbook.save(template_path)
+
+    uploaded_paths = []
+
+    async def fake_upload(file_path, _bitable_token):
+        uploaded_paths.append(Path(file_path))
+        if file_path.endswith(".xlsx"):
+            uploaded_workbook = load_workbook(file_path)
+            assert uploaded_workbook.active["B1"].value == "NOZS0311046"
+            return "excel-token"
+        return "source-token"
+
+    fake_feishu = MagicMock()
+    fake_feishu._upload_file_to_feishu = AsyncMock(side_effect=fake_upload)
+    fake_feishu.push_by_template = AsyncMock(return_value=True)
+
+    monkeypatch.setattr(helpers.settings, "UPLOAD_FOLDER", str(tmp_path / "uploads"))
+    monkeypatch.setattr(helpers, "has_feishu_push_record", AsyncMock(return_value=False))
+    monkeypatch.setattr(helpers, "record_feishu_push", AsyncMock())
+    mock_template_service = MagicMock()
+    mock_template_service.build_field_mapping.return_value = {"order_no": "订单号"}
+    monkeypatch.setattr(helpers, "template_service", mock_template_service)
+
+    result_row = {
+        "data": {"order_no": "NOZS0311046"},
+        "review_state": "approved",
+    }
+
+    with patch("services.feishu_service.feishu_service", fake_feishu):
+        pushed = await helpers.push_to_feishu(
+            template={
+                "id": TEMPLATE_ID,
+                "name": "固定模板",
+                "feishu_bitable_token": "bitable-token",
+                "feishu_table_id": "table-id",
+                "output_mode": "both",
+                "excel_template_path": str(template_path),
+                "excel_template_file_name": "template.xlsx",
+            },
+            extraction_data=result_to_extraction_data(result_row, DOCUMENT_ID),
+            display_name="推送文件",
+            document_id=DOCUMENT_ID,
+        )
+
+    assert pushed is True
+    assert any(path.suffix == ".xlsx" for path in uploaded_paths)
+
+
+@pytest.mark.asyncio
 async def test_push_to_feishu_merges_extra_crm_fields(monkeypatch):
     """CRM 手填字段应只作为额外飞书字段进入推送 payload。"""
     fake_feishu = MagicMock()

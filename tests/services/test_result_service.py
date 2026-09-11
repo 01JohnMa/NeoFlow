@@ -8,6 +8,7 @@ from services.result_service import (
     PARSE_SAMPLE_KEY,
     ResultService,
     build_field_meta,
+    result_to_extraction_data,
 )
 from tests.services.test_configuration_service import FakePostgrestClient
 
@@ -206,3 +207,149 @@ class TestRecordParseResult:
 
         assert created is None
         assert fake.tables.get("results", []) == []
+
+
+def _result_row(result_id, *, job_id=None, sample_key=DEFAULT_SAMPLE_KEY, data=None,
+                review_state="pending", created_at="2026-01-01T00:00:00+00:00",
+                field_meta=None):
+    return {
+        "id": result_id,
+        "tenant_id": TENANT_ID,
+        "document_id": DOCUMENT_ID,
+        "job_id": job_id,
+        "sample_key": sample_key,
+        "data": data or {},
+        "field_meta": field_meta or {},
+        "review_state": review_state,
+        "created_at": created_at,
+    }
+
+
+class TestGetDocumentResult:
+    @pytest.mark.asyncio
+    async def test_returns_first_sample_of_latest_job_batch_by_created_at(self, service):
+        svc, fake = service
+        fake.tables["results"] = [
+            _result_row("old", job_id="job-old", data={"a": 1},
+                        created_at="2026-01-01T00:00:00+00:00"),
+            _result_row("new-2", job_id="job-new", sample_key="2", data={"a": 22},
+                        created_at="2026-01-02T00:00:02+00:00"),
+            _result_row("new-1", job_id="job-new", sample_key="1", data={"a": 21},
+                        created_at="2026-01-02T00:00:01+00:00"),
+        ]
+
+        row = await svc.get_document_result(DOCUMENT_ID, tenant_id=TENANT_ID)
+
+        assert row["id"] == "new-1"
+        assert row["data"] == {"a": 21}
+
+    @pytest.mark.asyncio
+    async def test_excludes_parse_rows(self, service):
+        svc, fake = service
+        fake.tables["results"] = [
+            _result_row("parse-row", sample_key=PARSE_SAMPLE_KEY,
+                        data={"pages": []}, created_at="2026-01-02T00:00:00+00:00"),
+            _result_row("extract-row", data={"sample_name": "LED灯"},
+                        created_at="2026-01-01T00:00:00+00:00"),
+        ]
+
+        row = await svc.get_document_result(DOCUMENT_ID)
+
+        assert row["id"] == "extract-row"
+
+    @pytest.mark.asyncio
+    async def test_no_job_id_uses_time_window_and_first_sample(self, service):
+        svc, fake = service
+        fake.tables["results"] = [
+            _result_row("previous", data={"a": 0},
+                        created_at="2026-01-01T00:00:00+00:00"),
+            _result_row("page-2", sample_key="2", data={"a": 22},
+                        created_at="2026-01-02T00:00:02+00:00"),
+            _result_row("page-1", sample_key="1", data={"a": 21},
+                        created_at="2026-01-02T00:00:01+00:00"),
+        ]
+
+        row = await svc.get_document_result(DOCUMENT_ID)
+
+        assert row["id"] == "page-1"
+
+    @pytest.mark.asyncio
+    async def test_missing_document_result_returns_none(self, service):
+        svc, _ = service
+
+        assert await svc.get_document_result(DOCUMENT_ID) is None
+
+
+class TestUpdateResultReview:
+    @pytest.mark.asyncio
+    async def test_merges_corrections_and_updates_field_meta(self, service):
+        svc, fake = service
+        fake.tables["results"] = [
+            _result_row(
+                "r-1",
+                data={"sample_name": "原值", "qty": 3},
+                field_meta={"sample_name": {"source": "ocr_llm", "confidence": None,
+                                            "review_state": "pending"}},
+            ),
+        ]
+
+        updated = await svc.update_result_review(
+            document_id=DOCUMENT_ID,
+            review_state="approved",
+            data={"sample_name": "修正值"},
+            tenant_id=TENANT_ID,
+        )
+
+        assert updated["data"] == {"sample_name": "修正值", "qty": 3}
+        assert updated["review_state"] == "approved"
+        assert updated["field_meta"]["sample_name"] == {
+            "source": "ocr_llm",
+            "confidence": None,
+            "review_state": "approved",
+        }
+        assert updated["field_meta"]["qty"]["review_state"] == "approved"
+        assert fake.tables["results"][0]["review_state"] == "approved"
+
+    @pytest.mark.asyncio
+    async def test_reject_keeps_data_and_marks_review_state(self, service):
+        svc, fake = service
+        fake.tables["results"] = [_result_row("r-1", data={"sample_name": "原值"})]
+
+        updated = await svc.update_result_review(
+            document_id=DOCUMENT_ID,
+            review_state="rejected",
+        )
+
+        assert updated["data"] == {"sample_name": "原值"}
+        assert updated["review_state"] == "rejected"
+        assert updated["field_meta"]["sample_name"]["review_state"] == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_missing_result_returns_none_without_update(self, service):
+        svc, fake = service
+
+        updated = await svc.update_result_review(
+            document_id=DOCUMENT_ID,
+            review_state="approved",
+        )
+
+        assert updated is None
+        assert fake.tables.get("results", []) == []
+
+
+class TestResultExtractionDataAdapter:
+    def test_adapter_keeps_legacy_row_shape(self):
+        row = _result_row("r-1", data={"sample_name": "LED灯"}, review_state="approved")
+
+        adapted = result_to_extraction_data(row, DOCUMENT_ID)
+
+        assert adapted["sample_name"] == "LED灯"
+        assert adapted["document_id"] == DOCUMENT_ID
+        assert adapted["is_validated"] is True
+
+    def test_adapter_marks_pending_result_as_not_validated(self):
+        row = _result_row("r-1", data={"sample_name": "LED灯"}, review_state="pending")
+
+        adapted = result_to_extraction_data(row, DOCUMENT_ID)
+
+        assert adapted["is_validated"] is False
