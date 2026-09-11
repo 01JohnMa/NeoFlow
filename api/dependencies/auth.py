@@ -1,6 +1,7 @@
 # api/dependencies/auth.py
 """认证依赖注入 - FastAPI Depends 实现（支持多租户）"""
 
+import asyncio
 import secrets
 import time
 from typing import Optional, Tuple, Dict, Any
@@ -8,6 +9,7 @@ from fastapi import Header, Depends
 from pydantic import BaseModel
 from loguru import logger
 import jwt
+from jwt import PyJWKClient
 
 from services.supabase_service import supabase_service
 from api.exceptions import AuthenticationError
@@ -17,6 +19,10 @@ _PROFILE_CACHE_TTL = 60  # seconds
 _profile_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 QUALITY_CRM_TENANT_ID = "a0000000-0000-0000-0000-000000000001"
 CRM_SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
+
+_JWKS_CLIENT_TTL = 300  # seconds
+_ASYMMETRIC_ALGORITHMS = ("ES256", "RS256")
+_jwks_client: Optional[Tuple[str, PyJWKClient, float]] = None
 
 
 class CurrentUser(BaseModel):
@@ -53,16 +59,39 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     return authorization[7:].strip()
 
 
-def _extract_token_and_user_id(authorization: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def _get_jwks_client() -> Optional[PyJWKClient]:
+    """按 JWKS_URL 懒加载公钥客户端（带缓存，避免每请求拉取）。"""
+    global _jwks_client
+    url = settings.JWKS_URL
+    if not url:
+        return None
+    now = time.monotonic()
+    if (
+        _jwks_client
+        and _jwks_client[0] == url
+        and (now - _jwks_client[2]) < _JWKS_CLIENT_TTL
+    ):
+        return _jwks_client[1]
+    client = PyJWKClient(url, cache_keys=True, lifespan=_JWKS_CLIENT_TTL)
+    _jwks_client = (url, client, now)
+    return client
+
+
+async def _extract_token_and_user_id(
+    authorization: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
     """
-    从 Authorization header 提取 token，并用 GoTrue JWT 密钥验签后解析 user_id
-    
-    验签使用 self-hosted GoTrue 的对称密钥（JWT_SECRET）。密钥缺失或签名/
-    有效期/aud 校验失败时一律返回 (None, None)，由调用方按未认证处理。
-    
+    从 Authorization header 提取 token，按 token alg 选择验签方式：
+
+    - HS256：GoTrue 对称密钥（JWT_SECRET，适用于自建/本地部署）
+    - ES256/RS256：Supabase 云项目 JWKS 公钥（JWKS_URL）
+
+    对应密钥缺失或签名/有效期/aud 校验失败时一律返回 (None, None)，
+    由调用方按未认证处理（fail closed）。
+
     Args:
         authorization: Authorization header 值 (Bearer xxx)
-        
+
     Returns:
         (token, user_id) 元组，如果验签或解析失败则返回 (None, None)
     """
@@ -70,25 +99,49 @@ def _extract_token_and_user_id(authorization: Optional[str]) -> Tuple[Optional[s
     if not token:
         return None, None
 
-    if not settings.JWT_SECRET:
-        logger.error("JWT_SECRET 未配置，拒绝 Bearer token（fail closed）")
+    try:
+        algorithm = jwt.get_unverified_header(token).get("alg") or ""
+    except Exception as e:
+        logger.warning(f"JWT 头部解析失败: {e}")
         return None, None
 
     try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-            audience="authenticated",
-        )
-        user_id = payload.get("sub")
-        if not isinstance(user_id, str) or not user_id:
-            logger.warning("JWT 校验通过但缺少 sub 声明")
+        if algorithm == settings.JWT_ALGORITHM:
+            if not settings.JWT_SECRET:
+                logger.error("JWT_SECRET 未配置，拒绝 Bearer token（fail closed）")
+                return None, None
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET,
+                algorithms=[settings.JWT_ALGORITHM],
+                audience="authenticated",
+            )
+        elif algorithm in _ASYMMETRIC_ALGORITHMS:
+            jwks_client = _get_jwks_client()
+            if jwks_client is None:
+                logger.error("JWKS_URL 未配置，拒绝非对称 Bearer token（fail closed）")
+                return None, None
+            signing_key = await asyncio.to_thread(
+                jwks_client.get_signing_key_from_jwt, token
+            )
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=list(_ASYMMETRIC_ALGORITHMS),
+                audience="authenticated",
+            )
+        else:
+            logger.warning(f"不支持的 JWT 算法: {algorithm}")
             return None, None
-        return token, user_id
     except Exception as e:
         logger.warning(f"JWT 验签失败: {e}")
         return None, None
+
+    user_id = payload.get("sub")
+    if not isinstance(user_id, str) or not user_id:
+        logger.warning("JWT 校验通过但缺少 sub 声明")
+        return None, None
+    return token, user_id
 
 
 async def get_current_user(
@@ -105,7 +158,7 @@ async def get_current_user(
     Raises:
         AuthenticationError: 未登录或 token 无效
     """
-    token, user_id = _extract_token_and_user_id(authorization)
+    token, user_id = await _extract_token_and_user_id(authorization)
     
     if not token or not user_id:
         raise AuthenticationError()
@@ -188,7 +241,7 @@ async def get_optional_user(
             else:
                 print("匿名访问")
     """
-    token, user_id = _extract_token_and_user_id(authorization)
+    token, user_id = await _extract_token_and_user_id(authorization)
     
     if not token or not user_id:
         return None
