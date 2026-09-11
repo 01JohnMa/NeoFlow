@@ -10,8 +10,8 @@ uvicorn[standard]==0.27.0
 python-multipart==0.0.32
 
 # ============ 数据验证 ============
-pydantic==2.10.6
-pydantic-settings==2.5.2
+pydantic==2.13.5
+pydantic-settings==2.15.0
 email-validator==2.2.0
 
 # ============ Supabase ============
@@ -22,12 +22,11 @@ realtime==2.5.3
 cryptography==50.0.1
 
 # ============ LangChain & LangGraph ============
-langchain==0.2.17
-langchain-openai==0.1.25
-langchain-core==0.2.43
-langgraph==0.2.62
-# openai-agents 0.7+ requires openai>=2.9, which conflicts with langchain-openai 0.1.x.
-openai-agents==0.2.9
+langchain==1.4.0
+langchain-openai==1.6.2
+langchain-core==1.6.2
+langgraph==1.2.11
+openai-agents==0.22.2
 mcp==1.11.0
 sse-starlette==3.0.3
 
