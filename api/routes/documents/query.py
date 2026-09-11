@@ -251,7 +251,7 @@ async def get_extraction_result(
         try:
             fields_list: list = []
             if template_id:
-                # 直接查询字段表，避免 get_template_with_details 中复杂的 merge_rules 关联查询
+                # 直接查询字段表，避免不必要的关联查询
                 fields_list = await template_service.get_template_fields(template_id)
             elif tenant_id and document_type:
                 template = await template_service.get_template_by_code(tenant_id, document_type)

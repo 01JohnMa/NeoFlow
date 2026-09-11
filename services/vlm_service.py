@@ -239,7 +239,7 @@ class VLMService:
         self, file_path: str, template: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        逐页提取，每页独立返回一个结果（用于 merge 模式的多样品场景）。
+        逐页提取，每页独立返回一个结果（用于逐页提取的多样品场景）。
 
         与 extract_from_image 的区别：不做跨页合并，每页作为独立样品。
 

@@ -15,7 +15,6 @@ import {
   ArrowRight,
   TrendingUp,
   Building2,
-  Lightbulb,
   ClipboardList,
   Package,
   TestTube,
@@ -31,10 +30,6 @@ function getTemplateIcon(code: string) {
       return <Package className={`${iconClass} text-accent-400`} />
     case 'sampling':
       return <ClipboardList className={`${iconClass} text-success-400`} />
-    case 'integrating_sphere':
-    case 'light_distribution':
-    case 'lighting_combined':
-      return <Lightbulb className={`${iconClass} text-yellow-400`} />
     default:
       return <FileText className={`${iconClass} text-primary-400`} />
   }
@@ -60,12 +55,6 @@ function getTemplateDescription(code: string) {
       return '快速提取运单号、收发件人信息'
     case 'sampling':
       return '自动识别抽样单位、产品信息'
-    case 'integrating_sphere':
-      return '提取积分球测试参数：色温、Ra、光通量等'
-    case 'light_distribution':
-      return '提取光分布测试参数：峰值光强、光束角等'
-    case 'lighting_combined':
-      return '上传积分球+光分布报告，合并提取所有参数'
     default:
       return '智能识别文档关键信息'
   }

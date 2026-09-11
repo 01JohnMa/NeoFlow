@@ -132,74 +132,19 @@ async def validate_document(
             or (document.get("file_name") or "").strip()
         )
 
-        # 检查是否为 merge 配对文档
-        paired_id = document.get("paired_document_id")
-        merge_template_id = document.get("merge_template_id")
-
-        if paired_id and merge_template_id:
-            # merge 模式：检查配对文档是否也已审核完成
-            paired_doc = await _run_supabase(
-                lambda: supabase_service.client.table("documents").select("status, template_id").eq("id", paired_id).execute()
-            )
-            paired_status = paired_doc.data[0].get("status") if paired_doc.data else None
-
-            if paired_status == "completed":
-                # 双方均已审核，从配对文档读对方数据，合并后推飞书
-                try:
-                    merge_template = await template_service.get_template_with_details(merge_template_id)
-                    if merge_template:
-                        # 查配对文档的业务表数据
-                        paired_template_id = paired_doc.data[0].get("template_id") if paired_doc.data else None
-                        paired_doc_type = None
-                        if not paired_template_id:
-                            paired_doc_full = await _run_supabase(
-                                lambda: supabase_service.client.table("documents").select("document_type").eq("id", paired_id).execute()
-                            )
-                            paired_doc_type = paired_doc_full.data[0].get("document_type", "") if paired_doc_full.data else ""
-                        paired_table_name = await _maybe_await(supabase_service.resolve_table_name(
-                            template_id=paired_template_id,
-                            document_type=paired_doc_type,
-                        ))
-
-                        paired_data = {}
-                        if paired_table_name:
-                            paired_result = await _run_supabase(
-                                lambda: supabase_service.client.table(paired_table_name).select("*").eq("document_id", paired_id).execute()
-                            )
-                            paired_data = paired_result.data[0] if paired_result.data else {}
-
-                        # 合并当前文档数据 + 配对文档数据，当前文档字段优先
-                        merged_data = {**paired_data, **result.data[0]}
-
-                        await push_to_feishu(
-                            template=merge_template,
-                            extraction_data=merged_data,
-                            display_name=file_name_for_push,
-                            document_id=document_id,
-                            source_file_path=document.get("file_path", ""),
-                        )
-                        logger.info(f"配对文档均已审核，合并推送完成: {document_id} + {paired_id}")
-                    else:
-                        logger.bind(merge_template_id=merge_template_id).warning("合并模板不存在，跳过推送")
-                except Exception as feishu_error:
-                    logger.bind(document_id=document_id, paired_id=paired_id).opt(exception=feishu_error).warning("合并推送失败，不影响审核结果")
-            else:
-                logger.bind(paired_id=paired_id, paired_status=paired_status).info("配对文档尚未审核，等待对方完成后推送")
+        if template:
+            try:
+                await push_to_feishu(
+                    template=template,
+                    extraction_data=result.data[0],
+                    display_name=file_name_for_push,
+                    document_id=document_id,
+                    source_file_path=document.get("file_path", ""),
+                )
+            except Exception as feishu_error:
+                logger.bind(document_id=document_id).opt(exception=feishu_error).warning("飞书推送失败，不影响审核结果")
         else:
-            # 普通单文档，走原有推送逻辑
-            if template:
-                try:
-                    await push_to_feishu(
-                        template=template,
-                        extraction_data=result.data[0],
-                        display_name=file_name_for_push,
-                        document_id=document_id,
-                        source_file_path=document.get("file_path", ""),
-                    )
-                except Exception as feishu_error:
-                    logger.bind(document_id=document_id).opt(exception=feishu_error).warning("飞书推送失败，不影响审核结果")
-            else:
-                logger.bind(document_id=document_id).info("模板未配置飞书，跳过推送")
+            logger.bind(document_id=document_id).info("模板未配置飞书，跳过推送")
         
         return {
             "success": True,

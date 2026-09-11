@@ -147,9 +147,8 @@ async def push_to_feishu(
     extraction_data: dict,
     display_name: Optional[str],
     document_id: str,
-    source_file_path: Optional[str | list] = None,
+    source_file_path: Optional[str] = None,
     log_prefix: str = "",
-    extra_template: Optional[dict] = None,
     custom_push_name: Optional[str] = None,
     dedupe_key: Optional[str] = None,
     extra_data: Optional[dict] = None,
@@ -160,10 +159,10 @@ async def push_to_feishu(
 
     文件名优先级：
     1. custom_push_name（用户上传时指定）
-    2. 默认：{模板名}_YYYYMMDD_HHmmss，merge 时为 {模板A名}+{模板B名}_YYYYMMDD_HHmmss
+    2. 默认：{模板名}_YYYYMMDD_HHmmss
 
     Args:
-        source_file_path: 单个文件路径（str）或多个文件路径列表（list），merge 时传 [fp_a, fp_b]
+        source_file_path: 源文件路径
         custom_push_name: 用户自定义的飞书推送文件名，优先于默认生成规则
         extra_data: 只参与本次推送的额外字段，不写入提取结果
         extra_field_mapping: extra_data 对应的飞书列映射
@@ -184,10 +183,6 @@ async def push_to_feishu(
 
     field_mapping = template_service.build_field_mapping(template)
 
-    # merge 模式：合并附加模板的字段映射（B 的字段也推到同一行）
-    if extra_template:
-        extra_mapping = template_service.build_field_mapping(extra_template)
-        field_mapping = {**extra_mapping, **field_mapping}  # A 优先（覆盖同名 key）
     if extra_field_mapping:
         field_mapping = {**field_mapping, **extra_field_mapping}
 
@@ -200,8 +195,6 @@ async def push_to_feishu(
         file_name_for_push = custom_push_name.strip()
     else:
         template_name = str(template.get("name") or "文档")
-        if extra_template:
-            template_name = f"{template_name}+{extra_template.get('name', '')}"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name_for_push = f"{template_name}_{timestamp}"
 
@@ -219,10 +212,7 @@ async def push_to_feishu(
     try:
         # 附件上传：传入的文件全部上传，调用方负责按 push_attachment 过滤。
         # 固定 Excel 是模板输出，不受原始文件 push_attachment 开关影响。
-        file_paths = (
-            source_file_path.copy() if isinstance(source_file_path, list)
-            else ([source_file_path] if source_file_path else [])
-        )
+        file_paths = [source_file_path] if source_file_path else []
         if generated_excel_path:
             file_paths.append(generated_excel_path)
 

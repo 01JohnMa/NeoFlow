@@ -62,36 +62,6 @@ class SupabaseService(SupabaseClientMixin):
         
         return cleaned
 
-    def _normalize_lighting_units(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """修正常见 OCR 单位错误（如 lm 被识别为 1m）"""
-        if not data:
-            return data
-
-        def fix_lm_unit(value: Any) -> Any:
-            if not isinstance(value, str):
-                return value
-            normalized = value
-            # 处理常见错误：1m/W -> lm/W
-            normalized = re.sub(r'(?i)\b1m\s*/\s*w\b', 'lm/W', normalized)
-            # 处理单位错误：数字后 1m -> lm（例如 1200 1m）
-            normalized = re.sub(r'(?i)(?<=\d)\s*1m\b', 'lm', normalized)
-            # 兜底：独立 1m -> lm
-            normalized = re.sub(r'(?i)\b1m\b', 'lm', normalized)
-            return normalized
-
-        normalized = data.copy()
-        target_fields = [
-            "luminous_flux",
-            "luminous_efficacy",
-            "luminous_flux_sphere",
-            "luminous_efficacy_sphere",
-        ]
-        for field in target_fields:
-            if field in normalized:
-                normalized[field] = fix_lm_unit(normalized[field])
-
-        return normalized
-    
     async def _filter_allowed_fields(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
         """
         过滤数据，只保留结果表中实际存在的物理列。
@@ -448,7 +418,6 @@ class SupabaseService(SupabaseClientMixin):
         table_name: str, 
         document_id: str, 
         data: Dict[str, Any],
-        normalize_func: Optional[callable] = None
     ) -> Optional[Dict[str, Any]]:
         """通用保存方法 - 保存数据到指定表
         
@@ -456,7 +425,6 @@ class SupabaseService(SupabaseClientMixin):
             table_name: 数据库表名
             document_id: 文档ID
             data: 要保存的数据
-            normalize_func: 可选的数据规范化函数（如照明报告的单位修正）
             
         Returns:
             保存后的记录，失败时抛出异常
@@ -464,8 +432,6 @@ class SupabaseService(SupabaseClientMixin):
         try:
             filtered_data = await self._filter_allowed_fields(data, table_name)
             filtered_data["raw_extraction_data"] = data.copy()
-            if normalize_func:
-                filtered_data = normalize_func(filtered_data)
             filtered_data["document_id"] = document_id
             cleaned_data = self._clean_data_for_db(filtered_data, table_name)
             result = await self._run_sync(
@@ -543,21 +509,6 @@ class SupabaseService(SupabaseClientMixin):
         """获取包装信息"""
         return await self._get_from_table("packagings", document_id)
 
-    # ============ 照明报告操作 ============
-    
-    async def save_lighting_report(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保存照明综合报告（含单位规范化）"""
-        return await self._save_to_table(
-            "lighting_reports", 
-            document_id, 
-            data, 
-            normalize_func=self._normalize_lighting_units
-        )
-    
-    async def get_lighting_report(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """获取照明综合报告"""
-        return await self._get_from_table("lighting_reports", document_id)
-    
     # ============ 文档查询辅助方法 ============
     
     async def get_document_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
@@ -741,15 +692,6 @@ class SupabaseService(SupabaseClientMixin):
                         return f"抽样_{product}_{location}"
                     return f"抽样_{product}"
             
-            elif document_type in ["照明综合报告", "lighting_combined", "integrating_sphere", "积分球测试"]:
-                # 照明报告: 照明_{样品型号}_{色温}
-                sample_model = clean_name(extraction_data.get("sample_model"))
-                cct = clean_name(extraction_data.get("cct"), max_len=10)
-                if sample_model:
-                    if cct:
-                        return f"照明_{sample_model}_{cct}"
-                    return f"照明_{sample_model}"
-            
             # 如果无法生成有意义的名称，使用时间戳
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             type_prefix = {
@@ -760,10 +702,6 @@ class SupabaseService(SupabaseClientMixin):
                 "抽样单": "抽样",
                 "sampling_form": "抽样",
                 "sampling": "抽样",
-                "照明综合报告": "照明",
-                "lighting_combined": "照明",
-                "integrating_sphere": "照明",
-                "积分球测试": "照明",
             }.get(document_type, "文档")
             
             return f"{type_prefix}_{timestamp}"

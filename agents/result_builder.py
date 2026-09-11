@@ -1,7 +1,7 @@
 # agents/result_builder.py
 """工作流统一结果构造"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 _OCR_TEXT_PREVIEW_LEN = 500
@@ -83,49 +83,3 @@ def build_single_success(
         result["template_name"] = template_name
 
     return result
-
-
-def build_merge_success(
-    document_id: str,
-    template_id: str,
-    template_name: str,
-    document_type: str,
-    extraction_results: List[Dict[str, Any]],
-    results_a: List[dict],
-    results_b: List[dict],
-    processing_time: float,
-) -> Dict[str, Any]:
-    """构造合并模式成功结果
-
-    适用于 process_merge()，支持多样品。
-
-    Args:
-        document_id: 文档ID
-        template_id: 模板ID
-        template_name: 模板名称
-        document_type: 文档类型（模板 code）
-        extraction_results: 各样品合并后的结果列表 [{"sample_index": n, "data": {...}}, ...]
-        results_a: doc_type_a（如积分球）的提取结果列表
-        results_b: doc_type_b（如光分布）的提取结果列表
-        processing_time: 处理耗时（秒）
-
-    Returns:
-        统一格式的合并成功结果字典
-    """
-    return {
-        "success": True,
-        "document_id": document_id,
-        "template_id": template_id,
-        "template_name": template_name,
-        "document_type": document_type,
-        "extraction_data": extraction_results[0]["data"] if extraction_results else {},
-        "extraction_results": extraction_results,
-        "sample_count": len(extraction_results),
-        "sub_results": {
-            "results_a": results_a,
-            "results_b": results_b,
-        },
-        "processing_time": processing_time,
-        "step": "completed",
-        "error": None,
-    }

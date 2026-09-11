@@ -85,12 +85,6 @@ export function getDocumentTypeText(documentType?: string | null): string {
       return '快递面单'
     case 'sampling':
       return '抽样单'
-    case 'integrating_sphere':
-      return '积分球报告'
-    case 'light_distribution':
-      return '光分布报告'
-    case 'lighting_combined':
-      return '照明综合报告'
     default:
       return documentType || '-'
   }

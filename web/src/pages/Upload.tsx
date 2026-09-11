@@ -1,64 +1,147 @@
-import { useMemo, useState } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
-import { resolveUploadCapabilities } from '@/features/composite-upload/config/resolveCompositeScenario'
-import { CompositeUploadPanel } from '@/features/composite-upload/CompositeUploadPanel'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useProfile } from '@/hooks/useProfile'
-import { cn } from '@/lib/utils'
+import { useUploadDocument, useProcessDocument } from '@/hooks/useDocuments'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { cn, formatFileSize } from '@/lib/utils'
 import {
+  AlertCircle,
   AlertTriangle,
   FileText,
-  FolderUp,
   Image as ImageIcon,
+  Loader2,
+  Upload as UploadIcon,
+  X,
 } from 'lucide-react'
 
-export function Upload() {
-  const { tenantCode, templates, isLoading: profileLoading, pairedBatchMode } = useProfile()
-  const capabilities = useMemo(
-    () => resolveUploadCapabilities({ tenantCode, templates, pairedBatchMode }),
-    [tenantCode, templates, pairedBatchMode],
-  )
-  const [requestedTab, setRequestedTab] = useState<string>(capabilities.compositeScenarios[0]?.scenarioKey || '')
+const ACCEPTED_TYPES = [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/tiff',
+  'image/bmp',
+]
+const MAX_FILE_SIZE = 20 * 1024 * 1024
 
-  const availableTabs = useMemo(
-    () => capabilities.compositeScenarios.map(scenario => scenario.scenarioKey),
-    [capabilities.compositeScenarios],
+export function Upload() {
+  const navigate = useNavigate()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadMutation = useUploadDocument()
+  const processMutation = useProcessDocument()
+  const { tenantName, tenantCode, templates, isLoading: profileLoading } = useProfile()
+
+  const availableTemplates = useMemo(
+    () => templates.filter(template => template.is_active !== false),
+    [templates],
   )
-  const activeTab = availableTabs.includes(requestedTab)
-    ? requestedTab
-    : availableTabs[0] || ''
-  const activeScenario = capabilities.compositeScenarios.find(
-    scenario => scenario.scenarioKey === activeTab,
-  )
-  const showTabs = Boolean(tenantCode) && availableTabs.length > 1
+
+  const [requestedTemplateId, setRequestedTemplateId] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const selectedTemplateId = useMemo(() => {
+    if (requestedTemplateId && availableTemplates.some(template => template.id === requestedTemplateId)) {
+      return requestedTemplateId
+    }
+    if (availableTemplates.length === 1) {
+      return availableTemplates[0].id
+    }
+    return null
+  }, [requestedTemplateId, availableTemplates])
+
+  const validateFile = (file: File): string | null => {
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      return '不支持的文件格式，请上传 PDF、PNG、JPG、TIFF 或 BMP 文件'
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return `文件大小超过限制（最大 ${Math.round(MAX_FILE_SIZE / 1024 / 1024)} MB）`
+    }
+    return null
+  }
+
+  const handleFileSelect = useCallback((file: File) => {
+    const error = validateFile(file)
+    if (error) {
+      setUploadError(error)
+      return
+    }
+
+    setUploadError(null)
+    setSelectedFile(file)
+
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onload = (event) => setPreview(event.target?.result as string)
+      reader.onerror = () => setPreview(null)
+      reader.readAsDataURL(file)
+    } else {
+      setPreview(null)
+    }
+  }, [])
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault()
+    setDragOver(true)
+  }
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault()
+    setDragOver(false)
+  }
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault()
+    setDragOver(false)
+    const file = event.dataTransfer.files[0]
+    if (file) handleFileSelect(file)
+  }
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) handleFileSelect(file)
+  }
+
+  const handleUpload = async () => {
+    if (!selectedFile || !selectedTemplateId) return
+
+    try {
+      setUploadError(null)
+      const result = await uploadMutation.mutateAsync({
+        file: selectedFile,
+        templateId: selectedTemplateId,
+      })
+      await processMutation.mutateAsync({ documentId: result.document_id })
+      navigate(`/documents/${result.document_id}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '上传失败'
+      setUploadError(message)
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedFile(null)
+    setPreview(null)
+    setUploadError(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const isUploading = uploadMutation.isPending || processMutation.isPending
+  const canUpload = Boolean(selectedFile && selectedTemplateId) && !isUploading
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 px-4 sm:px-6 animate-fadeIn">
+    <div className="mx-auto w-full max-w-2xl space-y-6 px-4 sm:px-6 animate-fadeIn">
       <div>
         <h2 className="text-2xl font-bold text-text-primary">上传文档</h2>
         <p className="text-text-secondary mt-1">
           支持 PDF、PNG、JPG、TIFF、BMP 格式，最大 20MB
         </p>
       </div>
-
-      {showTabs && (
-        <div className="flex gap-2 border-b border-border-default pb-2 flex-wrap">
-          {capabilities.compositeScenarios.map(scenario => (
-            <button
-              key={scenario.scenarioKey}
-              onClick={() => setRequestedTab(scenario.scenarioKey)}
-              className={cn(
-                'px-4 py-2 text-sm rounded-t-lg transition-colors flex items-center gap-1',
-                activeTab === scenario.scenarioKey
-                  ? 'bg-primary-500/10 text-primary-400 border-b-2 border-primary-500'
-                  : 'text-text-secondary hover:text-text-primary',
-              )}
-            >
-              <FolderUp className="h-4 w-4" />
-              {scenario.displayName}
-            </button>
-          ))}
-        </div>
-      )}
 
       {!tenantCode && !profileLoading && (
         <Card className="border-warning-500/50">
@@ -76,15 +159,15 @@ export function Upload() {
         </Card>
       )}
 
-      {tenantCode && capabilities.compositeScenarios.length === 0 && !profileLoading && (
+      {tenantCode && !profileLoading && availableTemplates.length === 0 && (
         <Card className="border-warning-500/50">
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 text-warning-500">
               <AlertTriangle className="h-6 w-6 flex-shrink-0" />
               <div>
-                <p className="font-medium">当前部门暂无可用上传能力</p>
+                <p className="font-medium">当前部门暂无可用模板</p>
                 <p className="text-sm text-text-muted mt-1">
-                  请先在后台配置可用模板或组合上传场景后再试。
+                  请先在后台配置文档模板后再试。
                 </p>
               </div>
             </div>
@@ -92,8 +175,141 @@ export function Upload() {
         </Card>
       )}
 
-      {tenantCode && activeScenario && (
-        <CompositeUploadPanel scenario={activeScenario} />
+      {tenantCode && availableTemplates.length > 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">选择文档类型</CardTitle>
+            <CardDescription>
+              {tenantName && `${tenantName} - `}请选择本次上传的文档类型
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {availableTemplates.map(template => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => setRequestedTemplateId(template.id)}
+                  disabled={isUploading}
+                  className={cn(
+                    'px-4 py-2 rounded-lg border text-sm transition-colors',
+                    selectedTemplateId === template.id
+                      ? 'border-primary-500 bg-primary-500/10 text-primary-400'
+                      : 'border-border-default hover:border-primary-500/50 text-text-secondary',
+                  )}
+                >
+                  {template.name}
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {tenantCode && selectedTemplateId && !selectedFile && (
+        <Card>
+          <CardContent className="pt-6">
+            <div
+              className={cn(
+                'border-2 border-dashed rounded-xl p-12 text-center transition-all cursor-pointer',
+                dragOver
+                  ? 'border-primary-500 bg-primary-500/5'
+                  : 'border-border-default hover:border-primary-500/50 hover:bg-bg-hover',
+              )}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp"
+                onChange={handleInputChange}
+                className="hidden"
+              />
+              <UploadIcon className="h-12 w-12 text-text-muted mx-auto mb-4" />
+              <p className="text-lg font-medium text-text-primary mb-2">
+                拖拽文件到此处或点击选择
+              </p>
+              <p className="text-sm text-text-muted">
+                支持 PDF、PNG、JPG、TIFF、BMP 格式
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {selectedFile && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">已选择文件</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-start gap-4">
+              <div className="w-24 h-24 rounded-lg bg-bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0">
+                {preview ? (
+                  <img src={preview} alt="预览" className="w-full h-full object-cover" />
+                ) : (
+                  <FileText className="h-10 w-10 text-text-muted" />
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-text-primary truncate">{selectedFile.name}</p>
+                <p className="text-sm text-text-muted mt-1">
+                  {formatFileSize(selectedFile.size)}
+                </p>
+              </div>
+
+              {!isUploading && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={clearSelection}
+                  className="text-text-muted hover:text-error-500"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              )}
+            </div>
+
+            {uploadError && (
+              <div className="mt-4 flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                <span>{uploadError}</span>
+              </div>
+            )}
+
+            <div className="mt-6 flex gap-3">
+              <Button className="flex-1" onClick={handleUpload} disabled={!canUpload}>
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    上传中...
+                  </>
+                ) : (
+                  <>
+                    <UploadIcon className="h-4 w-4 mr-2" />
+                    上传并识别
+                  </>
+                )}
+              </Button>
+              {!isUploading && (
+                <Button variant="outline" onClick={clearSelection}>
+                  重新选择
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!selectedFile && uploadError && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          <span>{uploadError}</span>
+        </div>
       )}
 
       <Card className="bg-bg-secondary/50">
@@ -111,7 +327,7 @@ export function Upload() {
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />
               <span>
                 {tenantCode
-                  ? '根据当前部门已配置的批处理场景进行上传与识别'
+                  ? '选择文档类型后上传，系统将自动提取关键信息'
                   : '请先选择所属部门'}
               </span>
             </li>
