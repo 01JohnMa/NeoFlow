@@ -1,0 +1,16 @@
+[
+  {
+    "type": "text",
+    "text": "Content-only paragraph.",
+    "bbox": [100, 200, 900, 260],
+    "page_idx": 0
+  },
+  {
+    "type": "image",
+    "img_path": "images/only.jpg",
+    "image_caption": [],
+    "image_footnote": [],
+    "bbox": [100, 300, 900, 600],
+    "page_idx": 0
+  }
+]

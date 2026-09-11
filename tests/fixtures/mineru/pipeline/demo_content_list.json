@@ -1,0 +1,63 @@
+[
+  {
+    "type": "header",
+    "text": "NeoFlow Annual Report",
+    "bbox": [100, 50, 900, 90],
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "1 Introduction",
+    "text_level": 1,
+    "bbox": [100, 120, 900, 160],
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "This is a native text paragraph about flow duration curves.",
+    "bbox": [100, 200, 900, 260],
+    "page_idx": 0
+  },
+  {
+    "type": "list",
+    "list_items": ["first item", "second item"],
+    "bbox": [100, 300, 900, 420],
+    "page_idx": 0
+  },
+  {
+    "type": "table",
+    "img_path": "images/table1.jpg",
+    "table_caption": ["Table 1 Metrics"],
+    "table_footnote": [],
+    "table_body": "<table><tr><td>A</td><td>1</td></tr></table>",
+    "bbox": [100, 450, 900, 700],
+    "page_idx": 0
+  },
+  {
+    "type": "equation",
+    "text": "$$\nE = mc^2\n$$",
+    "text_format": "latex",
+    "bbox": [300, 750, 700, 820],
+    "page_idx": 0
+  },
+  {
+    "type": "image",
+    "img_path": "images/fig1.jpg",
+    "image_caption": ["Figure 1 Architecture"],
+    "image_footnote": [],
+    "bbox": [100, 850, 900, 950],
+    "page_idx": 0
+  },
+  {
+    "type": "footer",
+    "text": "Confidential - page 1",
+    "bbox": [100, 960, 900, 990],
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "Scanned paragraph recognized by OCR.",
+    "bbox": [100, 100, 900, 200],
+    "page_idx": 1
+  }
+]

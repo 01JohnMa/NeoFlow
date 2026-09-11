@@ -1,0 +1,56 @@
+{
+  "pdf_info": [
+    {
+      "page_idx": 0,
+      "para_blocks": [
+        {
+          "type": "title",
+          "lines": [
+            {
+              "spans": [
+                {
+                  "type": "text",
+                  "content": "Office Title"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "lines": [
+            {
+              "spans": [
+                {
+                  "type": "text",
+                  "content": "Office native paragraph from DOCX XML."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "blocks": [
+            {
+              "type": "table_body",
+              "lines": [
+                {
+                  "spans": [
+                    {
+                      "type": "table",
+                      "html": "<table>\n  <tr>\n    <th><p>K</p></th>\n    <th><p>V</p></th>\n  </tr>\n  <tr>\n    <td><p>alpha</p></td>\n    <td><p>7</p></td>\n  </tr>\n</table>"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "discarded_blocks": []
+    }
+  ],
+  "_backend": "office",
+  "_version_name": "3.4.4"
+}

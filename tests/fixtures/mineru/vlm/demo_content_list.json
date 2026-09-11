@@ -1,0 +1,36 @@
+[
+  {
+    "type": "header",
+    "text": "VLM Report",
+    "bbox": [100, 50, 900, 90],
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "1 VLM Section",
+    "text_level": 1,
+    "bbox": [100, 120, 900, 160],
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "VLM paragraph with a score present in layout output.",
+    "bbox": [100, 200, 900, 260],
+    "page_idx": 0
+  },
+  {
+    "type": "table",
+    "img_path": "images/table_vlm.jpg",
+    "table_caption": ["Table V1 From VLM"],
+    "table_footnote": [],
+    "table_body": "<table><tr><td>X</td><td>9</td></tr></table>",
+    "bbox": [100, 300, 900, 600],
+    "page_idx": 0
+  },
+  {
+    "type": "footer",
+    "text": "VLM footer",
+    "bbox": [100, 960, 900, 990],
+    "page_idx": 0
+  }
+]
