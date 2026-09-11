@@ -1,0 +1,171 @@
+# tests/services/test_parse_service.py
+"""Parse Job handler 测试 — 参数合并、适配器调用、Result 落库、Job 状态推进。"""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from services.parse_result import Block, Page, ParseResult
+from tests.conftest import DOCUMENT_ID, TENANT_ID
+
+JOB_ID = "99999999-9999-4999-8999-999999999999"
+REVISION_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+
+
+def _job(**overrides):
+    job = {
+        "job_id": JOB_ID,
+        "job_type": "parse",
+        "document_ids": [DOCUMENT_ID],
+        "configuration_revision_id": REVISION_ID,
+        "tenant_id": TENANT_ID,
+    }
+    job.update(overrides)
+    return job
+
+
+def _document(**overrides):
+    document = {
+        "id": DOCUMENT_ID,
+        "tenant_id": TENANT_ID,
+        "file_path": "/tmp/demo.pdf",
+    }
+    document.update(overrides)
+    return document
+
+
+def _parse_result():
+    return ParseResult(
+        pages=[Page(page_no=1, width=100, height=200, blocks=[
+            Block(id="p1-b1", type="text", bbox=[0, 0, 10, 10], reading_order=1,
+                  text="hello", source="native-text"),
+        ])],
+        markdown="hello",
+        engine={"name": "mineru", "backend": "pipeline"},
+    )
+
+
+class TestBuildParseParams:
+    def test_defaults_when_definition_missing(self):
+        from services.parse_service import build_parse_params
+
+        params = build_parse_params()
+
+        assert params["backend"] == "mineru-api"
+        assert params["model_version"] == "pipeline"
+        assert params["method"] == "auto"
+        assert params["effort"] == "medium"
+
+    def test_revision_section_overrides_defaults(self):
+        from services.parse_service import build_parse_params
+
+        params = build_parse_params(revision={
+            "definition": {"parse": {"model_version": "vlm", "method": "ocr"}},
+        })
+
+        assert params["model_version"] == "vlm"
+        assert params["method"] == "ocr"
+        assert params["backend"] == "mineru-api"
+
+    def test_configuration_draft_used_without_revision(self):
+        from services.parse_service import build_parse_params
+
+        params = build_parse_params(configuration={
+            "draft_definition": {"parse": {"effort": "high"}},
+        })
+
+        assert params["effort"] == "high"
+
+
+class TestHandleParseJob:
+    @pytest.mark.asyncio
+    async def test_success_stores_parse_result_and_completes_job(self):
+        from services.parse_service import handle_parse_job
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.parse_service.result_service") as mock_result, \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_result.record_parse_result = AsyncMock(return_value={"id": "r-1"})
+
+            result = await handle_parse_job(
+                job=_job(),
+                revision={"definition": {"parse": {"model_version": "vlm"}}},
+                configuration={"type": "parse"},
+            )
+
+        assert result is not None
+        adapter.parse.assert_awaited_once()
+        parsed_kwargs = adapter.parse.await_args.args
+        assert parsed_kwargs[0] == "/tmp/demo.pdf"
+        assert parsed_kwargs[1]["model_version"] == "vlm"
+        assert parsed_kwargs[1]["backend"] == "mineru-api"
+        stored_kwargs = mock_result.record_parse_result.await_args.kwargs
+        assert stored_kwargs["tenant_id"] == TENANT_ID
+        assert stored_kwargs["document_id"] == DOCUMENT_ID
+        assert stored_kwargs["job_id"] == JOB_ID
+        assert stored_kwargs["config_revision_id"] == REVISION_ID
+        assert stored_kwargs["parse_data"]["markdown"] == "hello"
+        assert [call.args[1] for call in mock_update.await_args_list] == [
+            "ocr", "saving", "completed",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_missing_document_marks_job_failed(self):
+        from services.parse_service import handle_parse_job
+
+        with patch("services.parse_service.get_parser_adapter") as mock_adapter_factory, \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+            mock_supabase.get_document = AsyncMock(return_value=None)
+
+            result = await handle_parse_job(job=_job())
+
+        assert result is None
+        mock_update.assert_awaited_once()
+        assert mock_update.await_args.args[1] == "failed"
+        mock_adapter_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_adapter_failure_marks_job_failed(self):
+        from services.parse_service import handle_parse_job
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(side_effect=RuntimeError("MinerU 挂了"))
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.parse_service.result_service") as mock_result, \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_result.record_parse_result = AsyncMock()
+
+            result = await handle_parse_job(job=_job())
+
+        assert result is None
+        assert mock_update.await_args_list[-1].args[1] == "failed"
+        assert "MinerU 挂了" in mock_update.await_args_list[-1].kwargs["error"]
+        mock_result.record_parse_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_result_write_failure_marks_job_failed(self):
+        from services.parse_service import handle_parse_job
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.parse_service.result_service") as mock_result, \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_result.record_parse_result = AsyncMock(return_value=None)
+
+            result = await handle_parse_job(job=_job())
+
+        assert result is None
+        assert mock_update.await_args_list[-1].args[1] == "failed"

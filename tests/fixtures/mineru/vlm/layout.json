@@ -1,0 +1,110 @@
+{
+  "pdf_info": [
+    {
+      "page_idx": 0,
+      "page_size": [1190, 1684],
+      "preproc_blocks": [
+        {
+          "type": "title",
+          "bbox": [119, 202.08, 1071, 269.44],
+          "angle": 0,
+          "index": 1,
+          "lines": [
+            {
+              "bbox": [119, 202.08, 1071, 269.44],
+              "spans": [
+                {
+                  "bbox": [119, 202.08, 1071, 269.44],
+                  "type": "text",
+                  "content": "1 VLM Section"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "bbox": [119, 336.8, 1071, 437.84],
+          "angle": 0,
+          "index": 2,
+          "lines": [
+            {
+              "bbox": [119, 336.8, 1071, 437.84],
+              "spans": [
+                {
+                  "bbox": [119, 336.8, 1071, 437.84],
+                  "type": "text",
+                  "content": "VLM paragraph with a score present in layout output.",
+                  "score": 0.88
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "bbox": [119, 505.2, 1071, 1010.4],
+          "angle": 0,
+          "index": 3,
+          "blocks": [
+            {
+              "type": "table_body",
+              "bbox": [119, 505.2, 1071, 1010.4],
+              "lines": [
+                {
+                  "bbox": [119, 505.2, 1071, 1010.4],
+                  "spans": [
+                    {
+                      "bbox": [119, 505.2, 1071, 1010.4],
+                      "type": "table",
+                      "html": "<table><tr><td>X</td><td>9</td></tr></table>",
+                      "image_path": "images/table_vlm.jpg"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "discarded_blocks": [
+        {
+          "type": "header",
+          "bbox": [119, 84.2, 1071, 151.56],
+          "angle": 0,
+          "lines": [
+            {
+              "bbox": [119, 84.2, 1071, 151.56],
+              "spans": [
+                {
+                  "bbox": [119, 84.2, 1071, 151.56],
+                  "type": "text",
+                  "content": "VLM Report"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "footer",
+          "bbox": [119, 1616.64, 1071, 1667.16],
+          "angle": 0,
+          "lines": [
+            {
+              "bbox": [119, 1616.64, 1071, 1667.16],
+              "spans": [
+                {
+                  "bbox": [119, 1616.64, 1071, 1667.16],
+                  "type": "text",
+                  "content": "VLM footer"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "_backend": "hybrid",
+  "_version_name": "3.4.4"
+}

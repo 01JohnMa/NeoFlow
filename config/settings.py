@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     DOC_WORKER_STALE_LOCK_SECONDS: int = 1800
     DOC_WORKER_ID: str = ""
 
+    # ============ MinerU 解析（#8；key 由本地 .env 提供，不入库） ============
+    MINERU_API_KEY: str = ""
+    MINERU_BASE_URL: str = "https://mineru.net"
+    MINERU_POLL_INTERVAL_SECONDS: float = 5.0
+    MINERU_PARSE_TIMEOUT_SECONDS: int = 900
+
     @property
     def allowed_extensions_list(self) -> List[str]:
         return [ext.strip() for ext in self.ALLOWED_EXTENSIONS.split(",")]

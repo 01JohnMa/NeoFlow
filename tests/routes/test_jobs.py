@@ -232,3 +232,43 @@ class TestGetResult:
             resp = user_client.get(f"/api/results/{RESULT_ID}")
 
         assert resp.status_code == 404
+
+
+class TestGetParseResult:
+    PARSE_DATA = {
+        "pages": [{"page_no": 1, "width": 100, "height": 200, "blocks": []}],
+        "markdown": "# Demo",
+        "engine": {"name": "mineru", "backend": "pipeline"},
+        "warnings": [],
+    }
+
+    def test_returns_parse_result_for_job(self, user_client):
+        row = {**RESULT, "sample_key": "parse", "data": self.PARSE_DATA}
+        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.result_service") as mock_results:
+            mock_results.list_results = AsyncMock(return_value=[row])
+            resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["result_id"] == RESULT_ID
+        assert body["data"] == self.PARSE_DATA
+        assert mock_results.list_results.await_args.kwargs["job_id"] == JOB_ID
+
+    def test_returns_404_without_parse_result(self, user_client):
+        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.result_service") as mock_results:
+            mock_results.list_results = AsyncMock(return_value=[])
+            resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
+
+        assert resp.status_code == 404
+
+    def test_cross_tenant_job_hidden(self, user_client):
+        job = {**JOB, "tenant_id": OTHER_TENANT_ID}
+        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=job), \
+             patch("api.routes.jobs.result_service") as mock_results:
+            resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
+
+        assert resp.status_code == 404
+        mock_results.list_results.assert_not_called()

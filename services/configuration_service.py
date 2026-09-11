@@ -33,6 +33,25 @@ EXAMPLE_DEFAULTS: Dict[str, Any] = {
     "is_active": True,
 }
 
+# Type=parse 的参数默认值（#8）：
+# - backend: mineru-api（托管 API）；本地 hybrid-engine/hybrid-http-client 后续接入
+# - model_version: pipeline | vlm | MinerU-HTML（托管 API 模型版本）
+# - method: auto | txt | ocr（本地 --method；托管 API 映射为 is_ocr）
+# - effort: 本地 hybrid-engine 推理档位，托管 API 当前忽略但保留在 engine 元信息
+PARSE_DEFAULTS: Dict[str, Any] = {
+    "backend": "mineru-api",
+    "model_version": "pipeline",
+    "method": "auto",
+    "effort": "medium",
+    "language": "ch",
+    "enable_formula": True,
+    "enable_table": True,
+    "page_ranges": None,
+    "extra_formats": [],
+    "timeout_seconds": 900,
+    "poll_interval_seconds": 5,
+}
+
 DEFAULT_DEFINITION: Dict[str, Any] = {
     "fields": [],
     "examples": [],
@@ -45,7 +64,10 @@ DEFAULT_DEFINITION: Dict[str, Any] = {
     "auto_approve": False,
     "feishu": {"bitable_token": None, "table_id": None},
     "excel": {"file_name": None, "path": None, "placeholders": []},
+    "parse": deepcopy(PARSE_DEFAULTS),
 }
+
+SECTION_KEYS = ("feishu", "excel", "parse")
 
 
 class ConfigurationError(Exception):
@@ -90,7 +112,7 @@ def normalize_definition(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]
             base["fields"] = [normalize_field(item) for item in (value or [])]
         elif key == "examples":
             base["examples"] = [normalize_example(item) for item in (value or [])]
-        elif key in ("feishu", "excel") and isinstance(value, dict):
+        elif key in SECTION_KEYS and isinstance(value, dict):
             section = dict(base.get(key) or {})
             section.update(value)
             base[key] = section
@@ -111,7 +133,7 @@ def merge_definition(
     """
     merged = normalize_definition(base)
     for key, value in (patch or {}).items():
-        if key in ("feishu", "excel") and isinstance(value, dict):
+        if key in SECTION_KEYS and isinstance(value, dict):
             section = dict(merged.get(key) or {})
             section.update(value)
             merged[key] = section

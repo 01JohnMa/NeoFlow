@@ -14,7 +14,7 @@ from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import AuthorizationError
 from api.jobs import create_job, get_job
 from services.configuration_service import configuration_service
-from services.result_service import result_service
+from services.result_service import PARSE_SAMPLE_KEY, result_service
 from services.supabase_service import supabase_service
 
 router = APIRouter(tags=["任务与结果"])
@@ -118,6 +118,35 @@ async def list_job_results(
         job_id=job_id,
         tenant_id=job.get("tenant_id"),
     )
+
+
+@router.get("/jobs/{job_id}/parse-result")
+async def get_job_parse_result(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """读取 parse Job 的 ParseResult（data JSONB）。"""
+    job = await get_job(job_id)
+    if not job or not _can_access_job(job, user):
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    results = await result_service.list_results(
+        job_id=job_id,
+        tenant_id=job.get("tenant_id"),
+        limit=50,
+    )
+    parse_row = next(
+        (row for row in results if row.get("sample_key") == PARSE_SAMPLE_KEY),
+        None,
+    )
+    if not parse_row:
+        raise HTTPException(status_code=404, detail="解析结果不存在")
+
+    return {
+        "success": True,
+        "result_id": parse_row.get("id"),
+        "data": parse_row.get("data") or {},
+    }
 
 
 # ============ Result ============

@@ -18,6 +18,7 @@ from services.base import SupabaseClientMixin
 
 RESULTS_TABLE = "results"
 DEFAULT_SAMPLE_KEY = "default"
+PARSE_SAMPLE_KEY = "parse"
 DEFAULT_REVIEW_STATE = "pending"
 
 
@@ -63,8 +64,12 @@ class ResultService(SupabaseClientMixin):
         config_revision_id: Optional[str] = None,
         source: Optional[str] = None,
         confidence: Optional[float] = None,
+        field_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """构建一条 Result 记录（不含 id/时间戳，由数据库生成）。"""
+        """构建一条 Result 记录（不含 id/时间戳，由数据库生成）。
+
+        field_meta 缺省按 data 逐字段生成；parse 结果不是字段表，显式传 {}。
+        """
         return {
             "tenant_id": tenant_id,
             "job_id": job_id,
@@ -72,7 +77,11 @@ class ResultService(SupabaseClientMixin):
             "config_revision_id": config_revision_id,
             "sample_key": sample_key,
             "data": data or {},
-            "field_meta": build_field_meta(data, source=source, confidence=confidence),
+            "field_meta": (
+                field_meta
+                if field_meta is not None
+                else build_field_meta(data, source=source, confidence=confidence)
+            ),
             "review_state": DEFAULT_REVIEW_STATE,
         }
 
@@ -179,6 +188,37 @@ class ResultService(SupabaseClientMixin):
             if stored:
                 created.append(stored)
         return created
+
+    async def record_parse_result(
+        self,
+        *,
+        tenant_id: Optional[str],
+        document_id: Optional[str],
+        parse_data: Dict[str, Any],
+        job_id: Optional[str] = None,
+        config_revision_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """把一份 ParseResult（整体 JSONB）落成单条 Result。
+
+        parse 结果不是字段表，field_meta 保持空对象；
+        sample_key 固定为 parse，供读接口识别。
+        """
+        if not tenant_id:
+            logger.warning(
+                f"缺少 tenant_id，跳过 ParseResult 写入: document_id={document_id}"
+            )
+            return None
+
+        row = self.build_result_row(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            data=parse_data,
+            sample_key=PARSE_SAMPLE_KEY,
+            job_id=job_id,
+            config_revision_id=config_revision_id,
+            field_meta={},
+        )
+        return await self.create_result(row)
 
 
 # 单例实例

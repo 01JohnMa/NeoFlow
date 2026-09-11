@@ -1,0 +1,194 @@
+{
+  "pdf_info": [
+    {
+      "page_idx": 0,
+      "page_size": [1190, 1684],
+      "para_blocks": [
+        {
+          "type": "title",
+          "bbox": [119, 202.08, 1071, 269.44],
+          "index": 1,
+          "lines": [
+            {
+              "bbox": [119, 202.08, 1071, 269.44],
+              "spans": [
+                {
+                  "bbox": [119, 202.08, 1071, 269.44],
+                  "type": "text",
+                  "content": "1 Introduction"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "bbox": [119, 336.8, 1071, 437.84],
+          "index": 2,
+          "lines": [
+            {
+              "bbox": [119, 336.8, 1071, 437.84],
+              "spans": [
+                {
+                  "bbox": [119, 336.8, 1071, 437.84],
+                  "type": "text",
+                  "content": "This is a native text paragraph about flow duration curves."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "bbox": [119, 505.2, 1071, 707.28],
+          "index": 3,
+          "lines": [
+            {
+              "bbox": [119, 505.2, 1071, 707.28],
+              "spans": [
+                {
+                  "bbox": [119, 505.2, 1071, 707.28],
+                  "type": "text",
+                  "content": "first item\nsecond item"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "discarded_blocks": [
+        {
+          "type": "header",
+          "bbox": [119, 84.2, 1071, 151.56],
+          "index": 0,
+          "lines": [
+            {
+              "bbox": [119, 84.2, 1071, 151.56],
+              "spans": [
+                {
+                  "bbox": [119, 84.2, 1071, 151.56],
+                  "type": "text",
+                  "content": "NeoFlow Annual Report"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "footer",
+          "bbox": [119, 1616.64, 1071, 1667.16],
+          "index": 99,
+          "lines": [
+            {
+              "bbox": [119, 1616.64, 1071, 1667.16],
+              "spans": [
+                {
+                  "bbox": [119, 1616.64, 1071, 1667.16],
+                  "type": "text",
+                  "content": "Confidential - page 1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "tables": [
+        {
+          "type": "table",
+          "bbox": [119, 757.8, 1071, 1178.8],
+          "index": 4,
+          "blocks": [
+            {
+              "type": "table_body",
+              "bbox": [119, 757.8, 1071, 1178.8],
+              "lines": [
+                {
+                  "bbox": [119, 757.8, 1071, 1178.8],
+                  "spans": [
+                    {
+                      "bbox": [119, 757.8, 1071, 1178.8],
+                      "type": "table",
+                      "html": "<table><tr><td>A</td><td>1</td></tr></table>",
+                      "image_path": "images/table1.jpg"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "interline_equations": [
+        {
+          "type": "interline_equation",
+          "bbox": [357, 1263, 833, 1380.88],
+          "index": 5,
+          "lines": [
+            {
+              "bbox": [357, 1263, 833, 1380.88],
+              "spans": [
+                {
+                  "bbox": [357, 1263, 833, 1380.88],
+                  "type": "interline_equation",
+                  "content": "E = mc^2"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "images": [
+        {
+          "type": "image",
+          "bbox": [119, 1431.4, 1071, 1599.8],
+          "index": 6,
+          "blocks": [
+            {
+              "type": "image_body",
+              "bbox": [119, 1431.4, 1071, 1599.8],
+              "lines": [
+                {
+                  "bbox": [119, 1431.4, 1071, 1599.8],
+                  "spans": [
+                    {
+                      "bbox": [119, 1431.4, 1071, 1599.8],
+                      "type": "image",
+                      "image_path": "images/fig1.jpg"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page_idx": 1,
+      "page_size": [595, 842],
+      "para_blocks": [
+        {
+          "type": "text",
+          "bbox": [59.5, 84.2, 535.5, 168.4],
+          "index": 1,
+          "lines": [
+            {
+              "bbox": [59.5, 84.2, 535.5, 168.4],
+              "spans": [
+                {
+                  "bbox": [59.5, 84.2, 535.5, 168.4],
+                  "type": "text",
+                  "content": "Scanned paragraph recognized by OCR.",
+                  "score": 0.93
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "discarded_blocks": []
+    }
+  ],
+  "_backend": "pipeline",
+  "_version_name": "3.4.4"
+}

@@ -5,6 +5,7 @@ import pytest
 
 from services.result_service import (
     DEFAULT_SAMPLE_KEY,
+    PARSE_SAMPLE_KEY,
     ResultService,
     build_field_meta,
 )
@@ -162,4 +163,46 @@ class TestRecordExtractionResult:
         )
 
         assert created == []
+        assert fake.tables.get("results", []) == []
+
+
+class TestRecordParseResult:
+    @pytest.mark.asyncio
+    async def test_parse_result_stored_as_single_row_with_parse_sample_key(self, service):
+        svc, fake = service
+        parse_data = {
+            "pages": [{"page_no": 1, "blocks": [], "width": 100, "height": 200}],
+            "markdown": "# 标题",
+            "engine": {"name": "mineru", "backend": "pipeline"},
+            "warnings": [],
+        }
+
+        created = await svc.record_parse_result(
+            tenant_id=TENANT_ID,
+            document_id=DOCUMENT_ID,
+            parse_data=parse_data,
+            job_id=JOB_ID,
+            config_revision_id=REVISION_ID,
+        )
+
+        assert created is not None
+        row = fake.tables["results"][0]
+        assert row["sample_key"] == PARSE_SAMPLE_KEY
+        assert row["data"] == parse_data
+        assert row["field_meta"] == {}
+        assert row["review_state"] == "pending"
+        assert row["job_id"] == JOB_ID
+        assert row["config_revision_id"] == REVISION_ID
+
+    @pytest.mark.asyncio
+    async def test_parse_result_without_tenant_is_skipped(self, service):
+        svc, fake = service
+
+        created = await svc.record_parse_result(
+            tenant_id=None,
+            document_id=DOCUMENT_ID,
+            parse_data={"pages": []},
+        )
+
+        assert created is None
         assert fake.tables.get("results", []) == []

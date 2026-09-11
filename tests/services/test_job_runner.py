@@ -93,6 +93,37 @@ class TestDispatch:
         assert handler.await_args.kwargs["configuration"] is None
 
 
+class TestDefaultHandlers:
+    def test_default_runner_registers_extract_and_parse(self):
+        from services.job_runner import (
+            EXTRACT_CONFIGURATION_TYPE,
+            PARSE_CONFIGURATION_TYPE,
+            JobRunner,
+        )
+
+        handlers = JobRunner().handlers
+        assert EXTRACT_CONFIGURATION_TYPE in handlers
+        assert PARSE_CONFIGURATION_TYPE in handlers
+
+    @pytest.mark.asyncio
+    async def test_default_runner_dispatches_parse_jobs(self):
+        from services.job_runner import JobRunner
+
+        revision = {"id": REVISION_ID, "configuration_id": CONFIG_ID}
+        configuration = {"id": CONFIG_ID, "type": "parse", "status": "published"}
+
+        with patch("services.parse_service.handle_parse_job", new_callable=AsyncMock) as mock_handler, \
+             patch("services.job_runner.configuration_service") as mock_svc:
+            mock_handler.return_value = "parse-ok"
+            mock_svc.get_revision = AsyncMock(return_value=revision)
+            mock_svc.get_configuration = AsyncMock(return_value=configuration)
+
+            result = await JobRunner().run(_job())
+
+        assert result == "parse-ok"
+        assert mock_handler.await_args.kwargs["configuration"]["type"] == "parse"
+
+
 class TestExtractHandler:
     @pytest.mark.asyncio
     async def test_builds_legacy_task_kwargs_with_pinned_revision(self):

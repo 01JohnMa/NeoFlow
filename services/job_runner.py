@@ -18,6 +18,17 @@ from services.configuration_service import configuration_service
 JobHandler = Callable[..., Awaitable[Any]]
 
 EXTRACT_CONFIGURATION_TYPE = "extract"
+PARSE_CONFIGURATION_TYPE = "parse"
+
+
+def _default_handlers() -> Dict[str, JobHandler]:
+    """内置 handler 注册表（parse handler 延迟导入，避免加载解析依赖）。"""
+    from services.parse_service import handle_parse_job
+
+    return {
+        EXTRACT_CONFIGURATION_TYPE: handle_extract_job,
+        PARSE_CONFIGURATION_TYPE: handle_parse_job,
+    }
 
 
 class JobRunnerError(Exception):
@@ -66,7 +77,7 @@ class JobRunner:
 
     def __init__(self, handlers: Optional[Dict[str, JobHandler]] = None):
         if handlers is None:
-            handlers = {EXTRACT_CONFIGURATION_TYPE: handle_extract_job}
+            handlers = _default_handlers()
         self._handlers: Dict[str, JobHandler] = dict(handlers)
 
     def register(self, configuration_type: str, handler: JobHandler) -> None:

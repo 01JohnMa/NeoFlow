@@ -208,6 +208,23 @@ class TestCreateConfiguration:
         assert definition["fields"][0]["field_type"] == "text"
         assert definition["fields"][0]["sort_order"] == 0
 
+    @pytest.mark.asyncio
+    async def test_parse_configuration_merges_parse_defaults_and_publishes(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(_create(
+            type="parse",
+            definition={"parse": {"model_version": "vlm", "method": "ocr"}},
+        ))
+
+        parse_section = created["draft_definition"]["parse"]
+        assert parse_section["model_version"] == "vlm"
+        assert parse_section["method"] == "ocr"
+        assert parse_section["backend"] == "mineru-api"
+        assert parse_section["effort"] == "medium"
+
+        published = await svc.publish_configuration(created["id"], created_by=USER_ID)
+        assert published["revision"]["definition"]["parse"]["model_version"] == "vlm"
+
 
 class TestPublishLifecycle:
     @pytest.mark.asyncio
