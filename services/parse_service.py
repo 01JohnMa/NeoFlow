@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+from config.settings import settings
 from services.configuration_service import PARSE_DEFAULTS
 from services.parser_adapter import get_parser_adapter
 from services.result_service import result_service
@@ -32,6 +33,54 @@ def build_parse_params(
     if isinstance(section, dict):
         params.update(section)
     return params
+
+
+async def ensure_parse_result(
+    *,
+    document_id: str,
+    file_path: str,
+    tenant_id: Optional[str],
+    job_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """返回文档最新 ParseResult 的 data；缺失时按需自动解析一次。
+
+    - 已有 ParseResult：直接返回其 data
+    - 无 ParseResult 且配置了 MINERU_API_KEY：调用 ParserAdapter 解析并落 Result
+    - 无 key 或解析失败：返回 None（调用方回退 raw 抽取路径）
+    """
+    existing = await result_service.get_document_parse_result(
+        document_id,
+        tenant_id=tenant_id,
+    )
+    if existing and existing.get("data"):
+        return existing["data"]
+
+    if not settings.MINERU_API_KEY:
+        logger.info(
+            f"无 ParseResult 且未配置 MINERU_API_KEY，保留 raw 抽取路径: {document_id}"
+        )
+        return None
+
+    params = build_parse_params()
+    try:
+        adapter = get_parser_adapter(params)
+        result = await adapter.parse(file_path, params)
+    except Exception as exc:
+        logger.warning(
+            f"自动解析失败，回退 raw 抽取路径: document_id={document_id}, error={exc}"
+        )
+        return None
+
+    parse_data = result.to_dict()
+    stored = await result_service.record_parse_result(
+        tenant_id=tenant_id,
+        document_id=document_id,
+        parse_data=parse_data,
+        job_id=job_id,
+    )
+    if not stored:
+        return None
+    return parse_data
 
 
 async def handle_parse_job(

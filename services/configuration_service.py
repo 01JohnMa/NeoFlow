@@ -66,9 +66,10 @@ DEFAULT_DEFINITION: Dict[str, Any] = {
     "feishu": {"bitable_token": None, "table_id": None},
     "excel": {"file_name": None, "path": None, "placeholders": []},
     "parse": deepcopy(PARSE_DEFAULTS),
+    "extract": {"input": "parse"},
 }
 
-SECTION_KEYS = ("feishu", "excel", "parse")
+SECTION_KEYS = ("feishu", "excel", "parse", "extract")
 
 
 class ConfigurationError(Exception):
@@ -175,6 +176,7 @@ def build_extraction_config(
         "extraction_prompt": definition["extraction_prompt"],
         "extraction_mode": definition["extraction_mode"],
         "per_page_extraction": definition["per_page_extraction"],
+        "extract_input": (definition.get("extract") or {}).get("input", "parse"),
         "cleaner_module": definition["cleaner_module"],
         "output_mode": definition["output_mode"],
         "push_attachment": definition["push_attachment"],

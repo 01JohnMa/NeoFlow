@@ -345,6 +345,26 @@ class OCRWorkflow:
             mode = configuration.get("extraction_mode", settings.DOC_PROCESS_MODE)
             per_page = configuration.get("per_page_extraction", False)
 
+            input_mode = configuration.get("extract_input") or "parse"
+            if input_mode == "parse":
+                from services.parse_service import ensure_parse_result
+
+                parse_data = await ensure_parse_result(
+                    document_id=document_id,
+                    file_path=file_path,
+                    tenant_id=tenant_id,
+                )
+                if parse_data and parse_data.get("markdown"):
+                    logger.info(
+                        f"使用 ParseResult 作为抽取输入: {document_id}"
+                    )
+                    return await self._extract_from_parse(
+                        document_id=document_id,
+                        configuration=configuration,
+                        parse_data=parse_data,
+                    )
+                logger.info(f"无可用 ParseResult，回退 raw 抽取路径: {document_id}")
+
             if per_page:
                 # ── 逐页提取路径：每页独立提取，每页产生一个样品 ──────────
                 if mode == "vlm":
@@ -431,6 +451,41 @@ class OCRWorkflow:
             logger.error(f"配置化处理失败: {e}")
             err_msg = WorkflowError.extract_message(e)
             return build_error(document_id, err_msg, self._elapsed(processing_start))
+
+    async def _extract_from_parse(
+        self,
+        document_id: str,
+        configuration: Dict[str, Any],
+        parse_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """以 ParseResult 的 markdown 作为 LLM 输入执行抽取（含逐页模式）。"""
+        from services.parse_extraction import run_parse_extraction
+
+        processing_start = datetime.now()
+        payload = await run_parse_extraction(
+            configuration=configuration,
+            parse_data=parse_data,
+            llm_invoke=self._llm_invoke_with_retry,
+        )
+        processing_time = self._elapsed(processing_start)
+        logger.info(
+            f"ParseResult 抽取完成: {len(payload['extraction_data'])}个字段，"
+            f"耗时{processing_time:.2f}s"
+        )
+
+        result = build_single_success(
+            document_id=document_id,
+            document_type=configuration.get("code", ""),
+            extraction_data=payload["extraction_data"],
+            ocr_text=payload["markdown"],
+            ocr_confidence=1.0,
+            processing_time=processing_time,
+            template_id=configuration.get("id"),
+            template_name=configuration.get("name"),
+        )
+        if payload.get("extraction_results"):
+            result["extraction_results"] = payload["extraction_results"]
+        return result
 
     async def extract_with_prompt(
         self,

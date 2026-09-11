@@ -219,6 +219,23 @@ class ResultService(SupabaseClientMixin):
         batch = _latest_batch(samples)
         return min(batch, key=_sample_sort_key)
 
+    async def get_document_parse_result(
+        self,
+        document_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """获取文档最新的 ParseResult 行（sample_key=parse），无则 None。"""
+        rows = await self.list_results(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            limit=50,
+        )
+        for row in rows:
+            if row.get("sample_key") == PARSE_SAMPLE_KEY:
+                return row
+        return None
+
     async def update_result_review(
         self,
         *,
