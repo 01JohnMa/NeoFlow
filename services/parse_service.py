@@ -49,39 +49,45 @@ async def handle_parse_job(
         await update_job(job_id, "failed", error="任务缺少 document_ids")
         return None
 
-    document_id = document_ids[0]
-    document = await supabase_service.get_document(document_id)
-    if not document:
-        await update_job(job_id, "failed", error=f"文档不存在: {document_id}")
-        return None
-
-    file_path = document.get("file_path") or ""
-    if not file_path:
-        await update_job(job_id, "failed", error="文档缺少 file_path")
-        return None
+    documents = []
+    for document_id in document_ids:
+        document = await supabase_service.get_document(document_id)
+        if not document:
+            await update_job(job_id, "failed", error=f"文档不存在: {document_id}")
+            return None
+        if not document.get("file_path"):
+            await update_job(job_id, "failed", error=f"文档缺少 file_path: {document_id}")
+            return None
+        documents.append((document_id, document))
 
     params = build_parse_params(configuration, revision)
     await update_job(job_id, "ocr")
 
     adapter = get_parser_adapter(params)
-    try:
-        result = await adapter.parse(file_path, params)
-    except Exception as exc:
-        logger.opt(exception=exc).error(f"Parse job 失败: job_id={job_id}")
-        await update_job(job_id, "failed", error=str(exc))
-        return None
+    last_result = None
+    for document_id, document in documents:
+        file_path = document.get("file_path") or ""
+        try:
+            result = await adapter.parse(file_path, params)
+        except Exception as exc:
+            logger.opt(exception=exc).error(
+                f"Parse job 失败: job_id={job_id}, document_id={document_id}"
+            )
+            await update_job(job_id, "failed", error=str(exc))
+            return None
 
-    await update_job(job_id, "saving")
-    stored = await result_service.record_parse_result(
-        tenant_id=document.get("tenant_id") or job.get("tenant_id"),
-        document_id=document_id,
-        parse_data=result.to_dict(),
-        job_id=job_id,
-        config_revision_id=job.get("configuration_revision_id"),
-    )
-    if not stored:
-        await update_job(job_id, "failed", error="ParseResult 写入失败")
-        return None
+        await update_job(job_id, "saving")
+        stored = await result_service.record_parse_result(
+            tenant_id=document.get("tenant_id") or job.get("tenant_id"),
+            document_id=document_id,
+            parse_data=result.to_dict(),
+            job_id=job_id,
+            config_revision_id=job.get("configuration_revision_id"),
+        )
+        if not stored:
+            await update_job(job_id, "failed", error="ParseResult 写入失败")
+            return None
+        last_result = result
 
     await update_job(job_id, "completed")
-    return result
+    return last_result

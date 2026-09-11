@@ -6,7 +6,7 @@ import inspect
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -55,6 +55,34 @@ def _normalize_job_record(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, A
     normalized.setdefault("document_ids", [])
     normalized.setdefault("error", None)
     return normalized
+
+
+async def list_jobs(
+    *,
+    tenant_id: Optional[str] = None,
+    document_id: Optional[str] = None,
+    configuration_revision_id: Optional[str] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """按租户/文档/Revision 查询 Job（新→旧），供列表接口使用。"""
+
+    def _query():
+        query = _job_table().select("*").order("created_at", desc=True).limit(limit)
+        if tenant_id:
+            query = query.eq("tenant_id", tenant_id)
+        if configuration_revision_id:
+            query = query.eq("configuration_revision_id", configuration_revision_id)
+        if document_id:
+            query = query.contains("document_ids", [document_id])
+        return query.execute()
+
+    result = await _run_db(_query)
+    jobs: List[Dict[str, Any]] = []
+    for row in result.data or []:
+        normalized = _normalize_job_record(row)
+        if normalized:
+            jobs.append(normalized)
+    return jobs
 
 
 async def create_job(

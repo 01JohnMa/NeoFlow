@@ -6,8 +6,8 @@
 - field_meta：逐字段 provenance/source/confidence 与复核状态
 - review_state：样品级复核状态
 
-读取侧统一走 get_document_result（共享访问器）；旧业务表在本阶段
-仍以镜像方式写入（见 handle_processing_success），删除见 #12。
+读取侧统一走 get_document_result（共享访问器）；Result 是唯一结果事实源，
+旧业务表镜像已随 #12 移除。
 """
 
 from datetime import datetime

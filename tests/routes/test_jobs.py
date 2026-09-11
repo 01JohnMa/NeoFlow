@@ -272,3 +272,48 @@ class TestGetParseResult:
 
         assert resp.status_code == 404
         mock_results.list_results.assert_not_called()
+
+
+class TestListJobs:
+    def test_lists_jobs_for_current_tenant(self, user_client):
+        with patch(
+            "api.routes.jobs.list_jobs",
+            new_callable=AsyncMock,
+            return_value=[JOB],
+        ) as mock_list:
+            resp = user_client.get("/api/jobs")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == [JOB]
+        assert mock_list.await_args.kwargs["tenant_id"] == TENANT_ID
+        assert mock_list.await_args.kwargs["limit"] == 50
+
+    def test_user_without_tenant_gets_empty_list(self):
+        from api.main import app
+        from api.dependencies.auth import get_current_user
+
+        app.dependency_overrides[get_current_user] = lambda: _user("user", None)
+        try:
+            with TestClient(app) as client, patch(
+                "api.routes.jobs.list_jobs",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_list:
+                resp = client.get("/api/jobs")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+        mock_list.assert_not_awaited()
+
+    def test_super_admin_not_scoped_to_tenant(self, super_admin_client):
+        with patch(
+            "api.routes.jobs.list_jobs",
+            new_callable=AsyncMock,
+            return_value=[JOB],
+        ) as mock_list:
+            resp = super_admin_client.get("/api/jobs")
+
+        assert resp.status_code == 200
+        assert mock_list.await_args.kwargs["tenant_id"] is None

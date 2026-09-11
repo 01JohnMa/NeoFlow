@@ -5,14 +5,14 @@ Job 固定创建时选定的 Configuration Revision；执行统一由 JobRunner 
 租户隔离在应用层校验（API 使用 service_role 客户端，RLS 作为数据库层兜底）。
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import AuthorizationError
-from api.jobs import create_job, get_job
+from api.jobs import create_job, get_job, list_jobs
 from services.configuration_service import configuration_service
 from services.result_service import PARSE_SAMPLE_KEY, result_service
 from services.supabase_service import supabase_service
@@ -90,6 +90,30 @@ async def create_job_endpoint(
     )
     job = await get_job(job_id)
     return {"success": True, "data": job}
+
+
+@router.get("/jobs")
+async def list_jobs_endpoint(
+    document_id: Optional[str] = None,
+    configuration_revision_id: Optional[str] = None,
+    limit: int = 50,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """列出当前租户的 Job（新→旧）；super_admin 可查全部。"""
+    if user.is_super_admin():
+        tenant_id = None
+    else:
+        if not user.tenant_id:
+            return {"success": True, "data": []}
+        tenant_id = user.tenant_id
+
+    jobs = await list_jobs(
+        tenant_id=tenant_id,
+        document_id=document_id,
+        configuration_revision_id=configuration_revision_id,
+        limit=max(1, min(limit, 100)),
+    )
+    return {"success": True, "data": jobs}
 
 
 @router.get("/jobs/{job_id}")

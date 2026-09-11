@@ -169,3 +169,42 @@ class TestHandleParseJob:
 
         assert result is None
         assert mock_update.await_args_list[-1].args[1] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_multiple_documents_each_get_result(self):
+        from services.parse_service import handle_parse_job
+
+        second_document_id = "77777777-7777-4777-8777-777777777777"
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+        documents = {
+            DOCUMENT_ID: _document(),
+            second_document_id: _document(id=second_document_id, file_path="/tmp/demo2.pdf"),
+        }
+
+        async def fake_get_document(document_id):
+            return documents.get(document_id)
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.parse_service.result_service") as mock_result, \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+            mock_supabase.get_document = AsyncMock(side_effect=fake_get_document)
+            mock_result.record_parse_result = AsyncMock(return_value={"id": "r-1"})
+
+            result = await handle_parse_job(
+                job=_job(document_ids=[DOCUMENT_ID, second_document_id])
+            )
+
+        assert result is not None
+        assert adapter.parse.await_count == 2
+        assert [call.args[0] for call in adapter.parse.await_args_list] == [
+            "/tmp/demo.pdf",
+            "/tmp/demo2.pdf",
+        ]
+        stored_documents = [
+            call.kwargs["document_id"]
+            for call in mock_result.record_parse_result.await_args_list
+        ]
+        assert stored_documents == [DOCUMENT_ID, second_document_id]
+        assert mock_update.await_args_list[-1].args[1] == "completed"
