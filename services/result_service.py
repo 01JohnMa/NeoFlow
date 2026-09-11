@@ -6,10 +6,11 @@
 - field_meta：逐字段 provenance/source/confidence 与复核状态
 - review_state：样品级复核状态
 
-旧业务表在本阶段仍以镜像方式写入（见 handle_processing_success），
-读取侧迁移见后续票。
+读取侧统一走 get_document_result（共享访问器）；旧业务表在本阶段
+仍以镜像方式写入（见 handle_processing_success），删除见 #12。
 """
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -20,6 +21,62 @@ RESULTS_TABLE = "results"
 DEFAULT_SAMPLE_KEY = "default"
 PARSE_SAMPLE_KEY = "parse"
 DEFAULT_REVIEW_STATE = "pending"
+APPROVED_REVIEW_STATE = "approved"
+REJECTED_REVIEW_STATE = "rejected"
+
+# 无 job_id 的同步抽取按时间窗口归批（逐样品写入发生在同一次处理内）。
+RESULT_BATCH_WINDOW_SECONDS = 120
+
+
+def result_to_extraction_data(
+    row: Dict[str, Any],
+    document_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """把 Result 行适配为旧业务表行的形状，保持 API/推送响应兼容。"""
+    data = dict(row.get("data") or {})
+    data["document_id"] = document_id or row.get("document_id")
+    data["is_validated"] = row.get("review_state") == APPROVED_REVIEW_STATE
+    return data
+
+
+def _sample_sort_key(row: Dict[str, Any]) -> tuple:
+    """逐页抽取时第一页为主样品；非数字 key 排在数字之后。"""
+    key = str(row.get("sample_key") or DEFAULT_SAMPLE_KEY)
+    if key.isdigit():
+        return (0, int(key))
+    return (1, key)
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _latest_batch(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """把 desc 排序的样品行切成“最新一批”。"""
+    newest = samples[0]
+    newest_job_id = newest.get("job_id")
+    if newest_job_id:
+        return [row for row in samples if row.get("job_id") == newest_job_id]
+
+    newest_time = _parse_timestamp(newest.get("created_at"))
+    if newest_time is None:
+        return [newest]
+
+    batch: List[Dict[str, Any]] = []
+    for row in samples:
+        row_time = _parse_timestamp(row.get("created_at"))
+        if (
+            row_time is None
+            or abs((newest_time - row_time).total_seconds()) > RESULT_BATCH_WINDOW_SECONDS
+        ):
+            break
+        batch.append(row)
+    return batch
 
 
 def build_field_meta(
@@ -43,7 +100,7 @@ def build_field_meta(
 
 
 class ResultService(SupabaseClientMixin):
-    """Result 读写封装（创建/读取；不提供删除入口）。"""
+    """Result 读写封装（创建/读取/复核；不提供删除入口）。"""
 
     _instance: Optional['ResultService'] = None
     _client = None
@@ -135,6 +192,85 @@ class ResultService(SupabaseClientMixin):
         except Exception as e:
             logger.error(f"列出 Result 失败: {e}")
             return []
+
+    async def get_document_result(
+        self,
+        document_id: str,
+        *,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """获取文档最新一批抽取的 Result 主样品行（排除 parse 结果）。
+
+        这是读取侧的唯一入口：详情、审核、飞书/Excel、CRM 都从这里取数据。
+        逐页抽取时主样品为 sample_key 最小（第一页）的那条，
+        与旧业务表镜像写入的 extraction_data 保持一致。
+        """
+        rows = await self.list_results(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            limit=200,
+        )
+        samples = [
+            row for row in rows if row.get("sample_key") != PARSE_SAMPLE_KEY
+        ]
+        if not samples:
+            return None
+
+        batch = _latest_batch(samples)
+        return min(batch, key=_sample_sort_key)
+
+    async def update_result_review(
+        self,
+        *,
+        document_id: str,
+        review_state: str,
+        data: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """把审核结果写回文档最新的 Result 行。
+
+        - data：字段修正，合并进原 JSONB（不整行覆盖）
+        - field_meta：逐字段保留 source/confidence，更新 review_state
+        - review_state：样品级复核状态（approved / rejected）
+
+        文档没有 Result（历史数据）时返回 None，由调用方决定是否走镜像兜底。
+        """
+        row = await self.get_document_result(document_id, tenant_id=tenant_id)
+        if not row:
+            logger.warning(f"审核写回时未找到 Result: document_id={document_id}")
+            return None
+
+        merged_data = {**(row.get("data") or {})}
+        if data:
+            merged_data.update(data)
+
+        existing_meta = row.get("field_meta") or {}
+        merged_meta: Dict[str, Any] = {}
+        for field_key in merged_data:
+            meta = {
+                "source": None,
+                "confidence": None,
+                **(existing_meta.get(field_key) or {}),
+            }
+            meta["review_state"] = review_state
+            merged_meta[field_key] = meta
+
+        payload = {
+            "data": merged_data,
+            "field_meta": merged_meta,
+            "review_state": review_state,
+        }
+        try:
+            updated = await self._run_sync(
+                lambda: self._get_client().table(RESULTS_TABLE)
+                .update(payload)
+                .eq("id", row["id"])
+                .execute()
+            )
+        except Exception as e:
+            logger.error(f"更新 Result 复核状态失败: {e}")
+            raise
+        return updated.data[0] if updated.data else None
 
     async def record_extraction_result(
         self,

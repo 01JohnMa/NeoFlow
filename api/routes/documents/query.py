@@ -9,6 +9,7 @@ import inspect
 import os
 
 from services.supabase_service import supabase_service
+from services.result_service import result_service, result_to_extraction_data
 from services.template_service import template_service
 from api.dependencies.auth import get_current_user, get_crm_current_user, CurrentUser
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError
@@ -22,12 +23,6 @@ async def _run_supabase(fn):
     if runner is not None and inspect.iscoroutinefunction(runner):
         return await runner(fn)
     return fn()
-
-
-async def _maybe_await(value):
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 @router.get("/{document_id}/status")
@@ -136,88 +131,15 @@ async def get_extraction_result(
         document_type = document.get("document_type")
         doc_status = document.get("status")
 
-        # 优先用 template_id 查 target_table，fallback 到 TABLE_MAP
-        table_name = await _maybe_await(supabase_service.resolve_table_name(
-            template_id=document.get("template_id"),
-            document_type=document_type,
-        ))
+        # 读取侧唯一数据源：文档最新一批抽取的 Result 主样品行
+        result_row = await result_service.get_document_result(
+            document_id,
+            tenant_id=document.get("tenant_id"),
+        )
         
-        # 如果文档正在处理中或尚未有类型
-        if not document_type:
-            if doc_status in ("uploaded", "queued", "processing"):
-                message = "文档正在排队中，请稍后重试" if doc_status == "queued" else "文档正在处理中，请稍后重试"
-                return JSONResponse(
-                    status_code=202,
-                    content={
-                        "document_id": document_id,
-                        "status": doc_status,
-                        "message": message
-                    }
-                )
-            elif doc_status in ("completed", "pending_review"):
-                # 兜底逻辑：尝试从所有结果表查询
-                logger.warning(f"文档 {document_id} 状态为 {doc_status} 但 document_type 为空")
-                
-                result = None
-                inferred_type = None
-                for type_name, tbl_name in [("检测报告", "inspection_reports"), ("快递单", "expresses"), ("抽样单", "sampling_forms")]:
-                    try:
-                        query_result = await _run_supabase(
-                            lambda tbl_name=tbl_name: supabase_service.client.table(tbl_name).select("*").eq("document_id", document_id).execute()
-                        )
-                        if query_result.data:
-                            result = query_result.data[0]
-                            inferred_type = type_name
-                            logger.info(f"从 {tbl_name} 表找到结果，推断文档类型为: {type_name}")
-                            break
-                    except Exception as e:
-                        logger.debug(f"查询 {tbl_name} 失败: {e}")
-                        continue
-                
-                if result and inferred_type:
-                    try:
-                        await _run_supabase(
-                            lambda: supabase_service.client.table("documents").update({"document_type": inferred_type}).eq("id", document_id).execute()
-                        )
-                        logger.info(f"已自动修复文档 {document_id} 的 document_type")
-                    except Exception as e:
-                        logger.warning(f"自动修复 document_type 失败: {e}")
-                    
-                    document_type = inferred_type
-                else:
-                    return JSONResponse(
-                        status_code=202,
-                        content={
-                            "document_id": document_id,
-                            "status": doc_status,
-                            "message": "提取结果正在同步中，请稍后重试"
-                        }
-                    )
-            elif doc_status == "failed":
-                raise HTTPException(status_code=422, detail=document.get("error_message") or "文档处理失败")
-            else:
-                return JSONResponse(
-                    status_code=202,
-                    content={
-                        "document_id": document_id,
-                        "status": doc_status or "unknown",
-                        "message": "文档尚未完成处理，请稍后重试"
-                    }
-                )
-        else:
-            result = None
-        
-        # 按 document_type 查询（复用上面已解析的 table_name）
-        if result is None:
-            if table_name:
-                result_query = await _run_supabase(
-                    lambda: supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
-                )
-                result = result_query.data[0] if result_query.data else None
-        
-        if not result:
+        if not result_row:
             if doc_status in ("completed", "pending_review"):
-                logger.warning(f"文档 {document_id} 状态为 {doc_status} 但提取结果尚未查询到")
+                logger.warning(f"文档 {document_id} 状态为 {doc_status} 但 Result 尚未查询到")
                 return JSONResponse(
                     status_code=202,
                     content={
@@ -239,6 +161,8 @@ async def get_extraction_result(
                     }
                 )
         
+        # 兼容旧业务表行的响应形状：字段值 + document_id + is_validated
+        extraction_data = result_to_extraction_data(result_row, document_id)
         ocr_text = document.get("ocr_text") or ""
 
         # 从模板字段中收集：
@@ -284,11 +208,11 @@ async def get_extraction_result(
         return {
             "document_id": document_id,
             "document_type": document_type,
-            "extraction_data": result,
+            "extraction_data": extraction_data,
             "ocr_text": ocr_text[:1000] if ocr_text else "",
             "ocr_confidence": document.get("ocr_confidence"),
-            "created_at": result.get("created_at"),
-            "is_validated": result.get("is_validated", False),
+            "created_at": result_row.get("created_at"),
+            "is_validated": result_row.get("review_state") == "approved",
             "review_hint_fields": review_hint_fields,
             "template_fields": template_fields,
         }

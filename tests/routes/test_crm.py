@@ -464,7 +464,7 @@ def test_crm_submit_rejects_express_template():
 
 
 def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
-    """CRM 审核后推送飞书，成功后才标记完成。"""
+    """CRM 审核后推送飞书，成功后才标记完成；识别值从 Result 读取。"""
     import api.routes.crm as crm_route
 
     client = _build_test_app(crm_route, _mock_quality_admin)
@@ -488,14 +488,17 @@ def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
         "template_fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
     }
     result_row = {
+        "id": "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrrrrr",
         "document_id": DOCUMENT_ID,
-        "sample_name": "原识别值",
-        "is_validated": False,
+        "sample_key": "default",
+        "review_state": "pending",
+        "data": {"sample_name": "原识别值"},
+        "field_meta": {},
     }
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
          patch("api.routes.crm.template_service") as mock_template_service, \
-         patch("api.routes.crm._fetch_extraction_result", new_callable=AsyncMock, return_value=result_row), \
+         patch("api.routes.crm.result_service") as mock_result_service, \
          patch("api.routes.crm._mark_crm_push_completed", new_callable=AsyncMock) as mock_mark_completed, \
          patch("api.routes.crm.has_feishu_push_record", new_callable=AsyncMock, return_value=False), \
          patch("api.routes.crm.build_feishu_push_dedupe_key", return_value="crm-dedupe"), \
@@ -503,6 +506,7 @@ def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
         mock_svc.get_document = AsyncMock(return_value=document)
         mock_svc.resolve_table_name = AsyncMock(return_value="inspection_reports")
         mock_template_service.get_template_with_details = AsyncMock(return_value=template)
+        mock_result_service.get_document_result = AsyncMock(return_value=result_row)
 
         response = client.post(
             f"/api/crm/documents/{DOCUMENT_ID}/feishu/push",
@@ -523,6 +527,7 @@ def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
 
     assert response.status_code == 200
     assert response.json()["status"] == "pushed"
+    mock_result_service.get_document_result.assert_awaited_once_with(DOCUMENT_ID)
     mock_push.assert_awaited_once()
     push_kwargs = mock_push.await_args.kwargs
     assert push_kwargs["extraction_data"]["sample_name"] == "CRM修正值"
@@ -736,8 +741,34 @@ def test_crm_feishu_push_existing_record_marks_completed_without_second_push():
 
 
 @pytest.mark.asyncio
-async def test_mark_crm_push_completed_refetches_updated_result(monkeypatch):
-    """完成标记应先更新再查询结果，兼容不支持 update().select() 的 Supabase builder。"""
+async def test_fetch_extraction_result_reads_result_store(monkeypatch):
+    """CRM 识别结果读取走 Result 共享访问器，并适配旧行形状。"""
+    import api.routes.crm as crm_route
+
+    monkeypatch.setattr(
+        crm_route,
+        "result_service",
+        SimpleNamespace(get_document_result=AsyncMock(return_value={
+            "id": "r-1",
+            "document_id": DOCUMENT_ID,
+            "sample_key": "default",
+            "review_state": "approved",
+            "data": {"sample_name": "Result值"},
+            "field_meta": {},
+        })),
+    )
+
+    row = await crm_route._fetch_extraction_result(DOCUMENT_ID)
+
+    assert row["sample_name"] == "Result值"
+    assert row["document_id"] == DOCUMENT_ID
+    assert row["is_validated"] is True
+    crm_route.result_service.get_document_result.assert_awaited_once_with(DOCUMENT_ID)
+
+
+@pytest.mark.asyncio
+async def test_mark_crm_push_completed_writes_result_and_legacy_mirror(monkeypatch):
+    """CRM 完成标记先写 Result，再写旧表镜像，最后置文档完成。"""
     import api.routes.crm as crm_route
 
     class FakeUpdateQuery:
@@ -756,44 +787,16 @@ async def test_mark_crm_push_completed_refetches_updated_result(monkeypatch):
             self.eq_args = args
             return self
 
-        def select(self, *args):
-            raise AttributeError("'SyncFilterRequestBuilder' object has no attribute 'select'")
-
         def execute(self):
             self.calls.append("execute")
             return SimpleNamespace(data=[])
 
-    class FakeSelectQuery:
-        def __init__(self):
-            self.eq_args = None
-            self.select_args = None
-            self.calls = []
-
-        def select(self, *args):
-            self.calls.append("select")
-            self.select_args = args
-            return self
-
-        def eq(self, *args):
-            self.calls.append("eq")
-            self.eq_args = args
-            return self
-
-        def execute(self):
-            self.calls.append("execute")
-            return SimpleNamespace(data=[{"document_id": DOCUMENT_ID, "is_validated": True}])
-
     update_query = FakeUpdateQuery()
-    select_query = FakeSelectQuery()
 
     class FakeClient:
-        def __init__(self):
-            self.calls = 0
-
         def table(self, table_name):
             assert table_name == "inspection_reports"
-            self.calls += 1
-            return update_query if self.calls == 1 else select_query
+            return update_query
 
     class FakeSupabaseService:
         client = FakeClient()
@@ -801,6 +804,16 @@ async def test_mark_crm_push_completed_refetches_updated_result(monkeypatch):
 
     fake_service = FakeSupabaseService()
     monkeypatch.setattr(crm_route, "supabase_service", fake_service)
+    monkeypatch.setattr(
+        crm_route,
+        "result_service",
+        SimpleNamespace(update_result_review=AsyncMock(return_value={"id": "r-1"})),
+    )
+    monkeypatch.setattr(
+        crm_route,
+        "_fetch_extraction_result",
+        AsyncMock(return_value={"sample_name": "CRM修正值", "is_validated": True}),
+    )
 
     await crm_route._mark_crm_push_completed(
         "inspection_reports",
@@ -809,51 +822,32 @@ async def test_mark_crm_push_completed_refetches_updated_result(monkeypatch):
         USER_ID,
     )
 
+    crm_route.result_service.update_result_review.assert_awaited_once_with(
+        document_id=DOCUMENT_ID,
+        review_state="approved",
+        data={"sample_name": "CRM修正值"},
+    )
     assert update_query.update_data["sample_name"] == "CRM修正值"
     assert update_query.update_data["is_validated"] is True
     assert update_query.update_data["validated_by"] == USER_ID
     assert update_query.update_data["validated_at"]
     assert update_query.eq_args == ("document_id", DOCUMENT_ID)
     assert update_query.calls == ["update", "eq", "execute"]
-    assert select_query.select_args == ("*",)
-    assert select_query.eq_args == ("document_id", DOCUMENT_ID)
-    assert select_query.calls == ["select", "eq", "execute"]
     fake_service.update_document.assert_awaited_once_with(DOCUMENT_ID, {"status": "completed"})
 
 
 @pytest.mark.asyncio
-async def test_mark_crm_push_completed_fails_when_refetch_has_no_validated_row(monkeypatch):
-    """完成标记后重新查询不到已审核结果时应失败，避免误报飞书推送完成。"""
+async def test_mark_crm_push_completed_fails_when_result_missing(monkeypatch):
+    """Result 不存在时不得只写旧表镜像后标记完成。"""
     import api.routes.crm as crm_route
-
-    class FakeUpdateQuery:
-        def update(self, _data):
-            return self
-
-        def eq(self, *_args):
-            return self
-
-        def execute(self):
-            return SimpleNamespace(data=[])
-
-    class FakeSelectQuery:
-        def select(self, *_args):
-            return self
-
-        def eq(self, *_args):
-            return self
-
-        def execute(self):
-            return SimpleNamespace(data=[])
 
     class FakeClient:
         def __init__(self):
             self.calls = 0
 
-        def table(self, table_name):
-            assert table_name == "inspection_reports"
+        def table(self, _table_name):
             self.calls += 1
-            return FakeUpdateQuery() if self.calls == 1 else FakeSelectQuery()
+            return SimpleNamespace()
 
     class FakeSupabaseService:
         client = FakeClient()
@@ -861,6 +855,11 @@ async def test_mark_crm_push_completed_fails_when_refetch_has_no_validated_row(m
 
     fake_service = FakeSupabaseService()
     monkeypatch.setattr(crm_route, "supabase_service", fake_service)
+    monkeypatch.setattr(
+        crm_route,
+        "result_service",
+        SimpleNamespace(update_result_review=AsyncMock(return_value=None)),
+    )
 
     with pytest.raises(crm_route.ProcessingError, match="CRM推送成功后更新审核结果失败"):
         await crm_route._mark_crm_push_completed(
@@ -870,12 +869,13 @@ async def test_mark_crm_push_completed_fails_when_refetch_has_no_validated_row(m
             USER_ID,
         )
 
+    assert fake_service.client.calls == 0
     fake_service.update_document.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_mark_crm_push_completed_fails_when_refetch_row_is_not_validated(monkeypatch):
-    """完成标记后重新查询到未审核结果时应失败，避免状态提前完成。"""
+async def test_mark_crm_push_completed_fails_when_result_refetch_not_validated(monkeypatch):
+    """Result 写回后复核仍非通过时不得标记完成。"""
     import api.routes.crm as crm_route
 
     class FakeUpdateQuery:
@@ -888,24 +888,9 @@ async def test_mark_crm_push_completed_fails_when_refetch_row_is_not_validated(m
         def execute(self):
             return SimpleNamespace(data=[])
 
-    class FakeSelectQuery:
-        def select(self, *_args):
-            return self
-
-        def eq(self, *_args):
-            return self
-
-        def execute(self):
-            return SimpleNamespace(data=[{"document_id": DOCUMENT_ID, "is_validated": False}])
-
     class FakeClient:
-        def __init__(self):
-            self.calls = 0
-
-        def table(self, table_name):
-            assert table_name == "inspection_reports"
-            self.calls += 1
-            return FakeUpdateQuery() if self.calls == 1 else FakeSelectQuery()
+        def table(self, _table_name):
+            return FakeUpdateQuery()
 
     class FakeSupabaseService:
         client = FakeClient()
@@ -913,6 +898,16 @@ async def test_mark_crm_push_completed_fails_when_refetch_row_is_not_validated(m
 
     fake_service = FakeSupabaseService()
     monkeypatch.setattr(crm_route, "supabase_service", fake_service)
+    monkeypatch.setattr(
+        crm_route,
+        "result_service",
+        SimpleNamespace(update_result_review=AsyncMock(return_value={"id": "r-1"})),
+    )
+    monkeypatch.setattr(
+        crm_route,
+        "_fetch_extraction_result",
+        AsyncMock(return_value={"sample_name": "CRM修正值", "is_validated": False}),
+    )
 
     with pytest.raises(crm_route.ProcessingError, match="CRM推送成功后更新审核结果失败"):
         await crm_route._mark_crm_push_completed(

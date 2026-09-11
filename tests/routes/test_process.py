@@ -373,6 +373,45 @@ class TestProcessingHandlers:
         assert kwargs["source"] == "ocr_llm"
 
     @pytest.mark.asyncio
+    async def test_handle_success_auto_approve_pushes_result_data(self):
+        """auto_approve 时飞书与固定 Excel 使用 Result 数据而非工作流返回值。"""
+        from api.routes.documents.process import _handle_processing_success
+        result = {
+            "document_type": "inspection_report",
+            "extraction_data": {"sample_name": "工作流原值"},
+        }
+        with _patch_supabase_in_helpers() as mock_svc, \
+             patch("api.routes.documents.helpers.template_service") as mock_ts, \
+             patch("api.routes.documents.helpers.result_service") as mock_result, \
+             patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock) as mock_push:
+            mock_result.record_extraction_result = AsyncMock()
+            mock_result.get_document_result = AsyncMock(return_value={
+                "data": {"sample_name": "Result值"},
+                "review_state": "approved",
+            })
+            mock_svc.save_extraction_result = AsyncMock()
+            mock_svc.generate_display_name.return_value = "报告_LED灯"
+            mock_svc.update_document_status = AsyncMock()
+            mock_svc.update_document = AsyncMock()
+            mock_ts.get_template_with_details = AsyncMock(return_value={
+                "id": TEMPLATE_ID,
+                "name": "检测报告",
+                "template_fields": [],
+                "feishu_bitable_token": "bitable-token",
+                "feishu_table_id": "table-id",
+            })
+            await _handle_processing_success(
+                document_id="doc-001",
+                result=result,
+                template_id=TEMPLATE_ID,
+                tenant_id=TENANT_ID,
+                auto_approve=True,
+            )
+
+        mock_push.assert_awaited_once()
+        assert mock_push.await_args.kwargs["extraction_data"] == {"sample_name": "Result值"}
+
+    @pytest.mark.asyncio
     async def test_handle_failure_updates_status(self):
         """失败处理更新文档状态为 failed"""
         from api.routes.documents.process import _handle_processing_failure

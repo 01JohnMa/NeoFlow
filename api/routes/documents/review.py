@@ -7,6 +7,12 @@ from loguru import logger
 import inspect
 
 from services.supabase_service import supabase_service
+from services.result_service import (
+    APPROVED_REVIEW_STATE,
+    REJECTED_REVIEW_STATE,
+    result_service,
+    result_to_extraction_data,
+)
 from services.template_service import template_service
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import (
@@ -93,15 +99,7 @@ async def validate_document(
         if template:
             _validate_review_rules(template, request.data)
 
-        # 准备更新数据
-        update_data = {**request.data}
-        update_data["is_validated"] = True
-        update_data["validated_at"] = datetime.now().isoformat()
-        update_data["validated_by"] = user.user_id
-        if request.validation_notes:
-            update_data["validation_notes"] = request.validation_notes
-        
-        # 根据文档类型更新对应表（优先用 template_id 查 target_table）
+        # 根据文档类型确定镜像业务表（旧表写入保留到 #12）
         table_name = await _maybe_await(supabase_service.resolve_table_name(
             template_id=document.get("template_id"),
             document_type=request.document_type,
@@ -109,6 +107,22 @@ async def validate_document(
 
         if not table_name:
             raise DocumentTypeError(request.document_type)
+
+        # 审核修正先写 Result（读取侧唯一数据源）
+        updated_result = await result_service.update_result_review(
+            document_id=document_id,
+            review_state=APPROVED_REVIEW_STATE,
+            data=request.data,
+            tenant_id=tenant_id,
+        )
+
+        # 旧业务表镜像写入保持不变
+        update_data = {**request.data}
+        update_data["is_validated"] = True
+        update_data["validated_at"] = datetime.now().isoformat()
+        update_data["validated_by"] = user.user_id
+        if request.validation_notes:
+            update_data["validation_notes"] = request.validation_notes
 
         result = await _run_supabase(
             lambda: supabase_service.client.table(table_name).update(update_data).eq("document_id", document_id).execute()
@@ -134,9 +148,15 @@ async def validate_document(
 
         if template:
             try:
+                if updated_result:
+                    push_data = result_to_extraction_data(updated_result, document_id)
+                else:
+                    # 历史数据无 Result 时的临时兜底，删除业务表后移除
+                    logger.warning(f"文档 {document_id} 无 Result，飞书推送回退到旧表镜像")
+                    push_data = result.data[0]
                 await push_to_feishu(
                     template=template,
-                    extraction_data=result.data[0],
+                    extraction_data=push_data,
                     display_name=file_name_for_push,
                     document_id=document_id,
                     source_file_path=document.get("file_path", ""),
@@ -238,7 +258,14 @@ async def reject_document(
         
         # 验证用户权限（只有文档所有者或管理员可以打回）
         _check_document_access(document, user, document_id)
-        
+
+        # 打回写入 Result 复核状态（旧表镜像不做变更）
+        await result_service.update_result_review(
+            document_id=document_id,
+            review_state=REJECTED_REVIEW_STATE,
+            tenant_id=document.get("tenant_id"),
+        )
+
         # 更新文档状态为失败
         await _run_supabase(
             lambda: supabase_service.client.table("documents").update({

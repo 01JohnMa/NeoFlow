@@ -315,9 +315,17 @@ async def handle_processing_success(
                 )
 
             if template:
+                # 飞书字段与固定 Excel 附件都从 Result 取值
+                result_row = await result_service.get_document_result(
+                    document_id, tenant_id=tenant_id
+                )
+                extraction_data = (
+                    (result_row or {}).get("data")
+                    or result.get("extraction_data", {})
+                )
                 await push_to_feishu(
                     template=template,
-                    extraction_data=result.get("extraction_data", {}),
+                    extraction_data=extraction_data,
                     display_name=display_name,
                     document_id=document_id,
                     source_file_path=source_file_path,

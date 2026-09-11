@@ -34,6 +34,11 @@ from api.jobs import build_feishu_push_dedupe_key, create_job, has_feishu_push_r
 from api.routes.documents.helpers import push_to_feishu
 from api.routes.documents.query import _check_document_access
 from config.settings import settings
+from services.result_service import (
+    APPROVED_REVIEW_STATE,
+    result_service,
+    result_to_extraction_data,
+)
 from services.supabase_service import supabase_service
 from services.template_service import template_service
 
@@ -360,11 +365,12 @@ async def _prepare_crm_json_upload(document_id: str, request: CrmSubmitRequest) 
         raise
 
 
-async def _fetch_extraction_result(table_name: str, document_id: str) -> Optional[Dict[str, Any]]:
-    result = await _run_supabase(
-        lambda: supabase_service.client.table(table_name).select("*").eq("document_id", document_id).execute()
-    )
-    return result.data[0] if result.data else None
+async def _fetch_extraction_result(document_id: str) -> Optional[Dict[str, Any]]:
+    """从 Result 读取文档最近一批抽取的主样品，适配成旧业务表行的形状。"""
+    row = await result_service.get_document_result(document_id)
+    if not row:
+        return None
+    return result_to_extraction_data(row, document_id)
 
 
 async def _mark_crm_push_completed(
@@ -373,6 +379,16 @@ async def _mark_crm_push_completed(
     reviewed_data: Dict[str, Any],
     user_id: str,
 ) -> None:
+    # 1. 审核修正先写 Result（读取侧唯一数据源）
+    updated_result = await result_service.update_result_review(
+        document_id=document_id,
+        review_state=APPROVED_REVIEW_STATE,
+        data=reviewed_data,
+    )
+    if not updated_result:
+        raise ProcessingError("CRM推送成功后更新审核结果失败")
+
+    # 2. 旧业务表镜像写入保持不变（#12 前保留）
     update_data = {**reviewed_data}
     update_data["is_validated"] = True
     update_data["validated_at"] = datetime.now().isoformat()
@@ -387,7 +403,7 @@ async def _mark_crm_push_completed(
         )
     )
 
-    result_row = await _fetch_extraction_result(table_name, document_id)
+    result_row = await _fetch_extraction_result(document_id)
     if not result_row or result_row.get("is_validated") is not True:
         raise ProcessingError("CRM推送成功后更新审核结果失败")
 
@@ -503,7 +519,7 @@ async def push_crm_document_to_feishu(
         if not table_name:
             raise ProcessingError("无法确定文档结果表")
 
-        result_row = await _fetch_extraction_result(table_name, document_id)
+        result_row = await _fetch_extraction_result(document_id)
         if not result_row:
             raise ProcessingError("文档提取结果不存在，无法推送飞书")
 
