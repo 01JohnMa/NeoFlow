@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # GoTrue 签发的 JWT 密钥（与 supabase/docker-compose.yml 的 JWT_SECRET 一致）。
     # 留空时 API 拒绝所有 Bearer token（fail closed）。
     JWT_SECRET: str = ""
+    # Supabase 云项目 JWKS 地址（如 https://<project>.supabase.co/auth/v1/.well-known/jwks.json）。
+    # 配置后支持 ES256/RS256 非对称 token；与 JWT_SECRET 按 token alg 自动选择。
+    JWKS_URL: str = ""
     DATABASE_URL: Optional[str] = None
 
     # ============ LLM配置 ============

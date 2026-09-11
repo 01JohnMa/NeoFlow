@@ -18,6 +18,8 @@ email-validator==2.2.0
 supabase==2.11.0
 # postgrest 由 supabase 自动管理依赖
 realtime==2.5.3
+# JWT 非对称验签（Supabase 云 JWKS）
+cryptography==50.0.1
 
 # ============ LangChain & LangGraph ============
 langchain==0.2.17

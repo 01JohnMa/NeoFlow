@@ -1,11 +1,14 @@
 """Supabase/GoTrue JWT 验签测试（无需数据库）。"""
 
 import base64
+import http.server
 import json
+import threading
 import time
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
@@ -179,3 +182,130 @@ def test_optional_user_accepts_valid_token(auth_client):
 
     assert response.status_code == 200
     assert response.json() == {"authenticated": True}
+
+
+# ============ JWKS 非对称验签（Supabase 云项目） ============
+
+JWKS_KID = "test-es256-kid"
+
+
+def _make_es256_key():
+    return ec.generate_private_key(ec.SECP256R1())
+
+
+def _make_es256_token(private_key, kid=JWKS_KID, **overrides) -> str:
+    payload = {
+        "sub": USER_ID,
+        "aud": "authenticated",
+        "role": "authenticated",
+        "exp": int(time.time()) + 3600,
+    }
+    payload.update(overrides)
+    return jwt.encode(
+        payload,
+        private_key,
+        algorithm="ES256",
+        headers={"kid": kid},
+    )
+
+
+def _b64url_uint(value: int) -> str:
+    length = (value.bit_length() + 7) // 8
+    return base64.urlsafe_b64encode(value.to_bytes(length, "big")).rstrip(b"=").decode()
+
+
+def _public_jwk(private_key) -> dict:
+    numbers = private_key.public_key().public_numbers()
+    return {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": _b64url_uint(numbers.x),
+        "y": _b64url_uint(numbers.y),
+        "kid": JWKS_KID,
+        "use": "sig",
+        "alg": "ES256",
+    }
+
+
+@pytest.fixture
+def jwks_server():
+    """本地 JWKS HTTP 服务，测试不依赖外网。"""
+    private_key = _make_es256_key()
+    body = json.dumps({"keys": [_public_jwk(private_key)]}).encode()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield private_key, f"http://127.0.0.1:{server.server_address[1]}/jwks"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def jwks_env(monkeypatch, jwks_server):
+    private_key, jwks_url = jwks_server
+    monkeypatch.setattr(settings, "JWKS_URL", jwks_url)
+    monkeypatch.setattr("api.dependencies.auth._jwks_client", None)
+    yield private_key
+    monkeypatch.setattr("api.dependencies.auth._jwks_client", None)
+
+
+def test_jwks_es256_token_passes(jwks_env, auth_client):
+    token = _make_es256_token(jwks_env)
+
+    response = auth_client.get("/protected", headers=_auth_headers(token))
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == USER_ID
+
+
+def test_jwks_forged_es256_token_is_rejected(jwks_env, auth_client):
+    token = _make_es256_token(_make_es256_key())
+
+    response = auth_client.get("/protected", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_jwks_unknown_kid_is_rejected(jwks_env, auth_client):
+    token = _make_es256_token(jwks_env, kid="unknown-kid")
+
+    response = auth_client.get("/protected", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_jwks_expired_token_is_rejected(jwks_env, auth_client):
+    token = _make_es256_token(jwks_env, exp=int(time.time()) - 60)
+
+    response = auth_client.get("/protected", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_es256_without_jwks_url_fails_closed(auth_client, monkeypatch):
+    monkeypatch.setattr(settings, "JWKS_URL", "")
+    token = _make_es256_token(_make_es256_key())
+
+    response = auth_client.get("/protected", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_hs256_still_uses_secret_when_jwks_configured(jwks_env, auth_client):
+    response = auth_client.get("/protected", headers=_auth_headers(_make_token()))
+
+    assert response.status_code == 200
