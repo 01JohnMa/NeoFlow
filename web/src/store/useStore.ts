@@ -18,7 +18,6 @@ export interface Template {
   name: string
   code: string
   description?: string
-  required_doc_count: number
   is_active?: boolean
 }
 

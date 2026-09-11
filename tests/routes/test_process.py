@@ -20,6 +20,24 @@ def _patch_workflow():
     return patch("api.routes.documents.process.ocr_workflow")
 
 
+def _mock_configuration(**overrides):
+    configuration = {
+        "id": TEMPLATE_ID,
+        "name": "检测报告",
+        "code": "inspection_report",
+        "tenant_id": TENANT_ID,
+        "auto_approve": False,
+        "extraction_mode": "ocr_llm",
+        "revision_id": None,
+        "fields": [],
+        "examples": [],
+        "feishu": {},
+        "excel": {},
+    }
+    configuration.update(overrides)
+    return configuration
+
+
 # ============ process ============
 
 class TestProcessDocument:
@@ -31,17 +49,20 @@ class TestProcessDocument:
         with _patch_supabase() as mock_svc, \
              _patch_workflow(), \
              patch("os.path.exists", return_value=True), \
-             patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-001"), \
+             patch("api.routes.documents.process.configuration_service") as mock_cs, \
+             patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-001") as mock_create, \
              patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task:
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
+            mock_cs.get_extraction_configuration = AsyncMock(return_value=_mock_configuration())
             resp = client.post(f"/api/documents/{DOCUMENT_ID}/process")
         assert resp.status_code == 200
         data = resp.json()
         assert data["document_id"] == DOCUMENT_ID
         assert data["job_id"] == "job-001"
         assert data["status"] == "queued"
+        assert mock_create.await_args.kwargs["configuration_revision_id"] is None
         mock_task.assert_not_called()
 
     def test_process_document_not_found(self, client):
@@ -79,12 +100,12 @@ class TestProcessDocument:
              _patch_workflow() as mock_wf, \
              patch("os.path.exists", return_value=True), \
              patch("api.routes.documents.process._handle_processing_success", new_callable=AsyncMock), \
-             patch("api.routes.documents.process.template_service") as mock_ts:
+             patch("api.routes.documents.process.configuration_service") as mock_cs:
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
-            mock_wf.process_with_template = AsyncMock(return_value=mock_result)
-            mock_ts.get_template = AsyncMock(return_value={"id": TEMPLATE_ID, "auto_approve": False})
+            mock_wf.process_with_configuration = AsyncMock(return_value=mock_result)
+            mock_cs.get_extraction_configuration = AsyncMock(return_value=_mock_configuration())
             resp = client.post(f"/api/documents/{DOCUMENT_ID}/process?sync=true")
         assert resp.status_code == 200
         data = resp.json()
@@ -113,11 +134,13 @@ class TestProcessDocument:
         doc = {**MOCK_DOCUMENT, "file_path": "/tmp/test.pdf", "template_id": TEMPLATE_ID, "status": "uploaded"}
         with _patch_supabase() as mock_svc, \
              patch("os.path.exists", return_value=True), \
+             patch("api.routes.documents.process.configuration_service") as mock_cs, \
              patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-002"), \
              patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task:
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
+            mock_cs.get_extraction_configuration = AsyncMock(return_value=_mock_configuration())
             resp = client.post(f"/api/documents/{DOCUMENT_ID}/process")
         assert resp.status_code == 200
         data = resp.json()
@@ -158,14 +181,11 @@ class TestProcessWithTemplate:
              patch("os.path.exists", return_value=True), \
              patch("api.routes.documents.process.create_job", new_callable=AsyncMock, return_value="job-003"), \
              patch("api.routes.documents.process.process_document_with_template_task", new_callable=AsyncMock) as mock_task, \
-             patch("api.routes.documents.process.template_service") as mock_ts:
+             patch("api.routes.documents.process.configuration_service") as mock_cs:
             mock_svc.get_document = AsyncMock(return_value=doc)
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
-            mock_ts.get_template = AsyncMock(return_value={
-                "id": TEMPLATE_ID, "name": "检测报告", "tenant_id": TENANT_ID,
-                "auto_approve": False,
-            })
+            mock_cs.get_extraction_configuration = AsyncMock(return_value=_mock_configuration())
             resp = client.post(
                 f"/api/documents/{DOCUMENT_ID}/process-with-template",
                 json={"template_id": TEMPLATE_ID},
@@ -200,22 +220,19 @@ class TestProcessingHandlers:
 
     @pytest.mark.asyncio
     async def test_handle_success_saves_result(self):
-        """成功处理保存提取结果"""
+        """成功处理只写统一 Result 存储。"""
         from api.routes.documents.process import _handle_processing_success
         result = {
             "document_type": "inspection_report",
             "extraction_data": {"sample_name": "LED灯"},
         }
         with _patch_supabase_in_helpers() as mock_svc, \
-             patch("api.routes.documents.helpers.template_service") as mock_ts, \
+             patch("api.routes.documents.helpers.result_service") as mock_result, \
              patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock):
-            mock_svc.save_extraction_result = AsyncMock()
+            mock_result.record_extraction_result = AsyncMock()
             mock_svc.generate_display_name.return_value = "报告_LED灯"
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
-            mock_ts.get_template = AsyncMock(return_value=None)
-            mock_ts.get_template_with_details = AsyncMock(return_value=None)
-            mock_ts.get_template_by_code = AsyncMock(return_value=None)
             await _handle_processing_success(
                 document_id="doc-001",
                 result=result,
@@ -225,11 +242,12 @@ class TestProcessingHandlers:
                 auto_approve=False,
                 source_file_path=None,
             )
-        mock_svc.save_extraction_result.assert_called_once()
+        mock_result.record_extraction_result.assert_awaited_once()
+        mock_svc.update_document.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_handle_success_writes_result_and_legacy_mirror(self):
-        """抽取成功同时写旧业务表与统一 Result 存储。"""
+    async def test_handle_success_writes_result_with_pinned_revision(self):
+        """抽取成功把 Job 固定的 Revision 写入 Result。"""
         from api.routes.documents.process import _handle_processing_success
 
         revision_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
@@ -239,17 +257,12 @@ class TestProcessingHandlers:
             "extraction_results": [{"sample_index": 1, "data": {"sample_name": "LED灯"}}],
         }
         with _patch_supabase_in_helpers() as mock_svc, \
-             patch("api.routes.documents.helpers.template_service") as mock_ts, \
              patch("api.routes.documents.helpers.result_service") as mock_result, \
              patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock):
             mock_result.record_extraction_result = AsyncMock()
-            mock_svc.save_extraction_result = AsyncMock()
             mock_svc.generate_display_name.return_value = "报告_LED灯"
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
-            mock_ts.get_template = AsyncMock(return_value=None)
-            mock_ts.get_template_with_details = AsyncMock(return_value=None)
-            mock_ts.get_template_by_code = AsyncMock(return_value=None)
             await _handle_processing_success(
                 document_id="doc-001",
                 result=result,
@@ -259,7 +272,6 @@ class TestProcessingHandlers:
                 source="ocr_llm",
             )
 
-        mock_svc.save_extraction_result.assert_awaited_once()
         mock_result.record_extraction_result.assert_awaited_once_with(
             tenant_id=TENANT_ID,
             document_id="doc-001",
@@ -270,8 +282,8 @@ class TestProcessingHandlers:
         )
 
     @pytest.mark.asyncio
-    async def test_process_task_respects_template_review_requirement(self):
-        """模板 auto_approve=False 时应保持待审核，不由 CRM worker 覆盖。"""
+    async def test_process_task_respects_configuration_review_requirement(self):
+        """配置 auto_approve=False 时应保持待审核，不由 CRM worker 覆盖。"""
         from api.routes.documents.process import process_document_task
 
         result = {
@@ -282,12 +294,14 @@ class TestProcessingHandlers:
         }
         with _patch_supabase() as mock_svc, \
              _patch_workflow() as mock_wf, \
-             patch("api.routes.documents.process.template_service") as mock_ts, \
+             patch("api.routes.documents.process.configuration_service") as mock_cs, \
              patch("api.routes.documents.process.update_job", new_callable=AsyncMock), \
              patch("api.routes.documents.process.handle_processing_success", new_callable=AsyncMock) as mock_success:
             mock_svc.update_document_status = AsyncMock()
-            mock_wf.process_with_template = AsyncMock(return_value=result)
-            mock_ts.get_template = AsyncMock(return_value={"id": TEMPLATE_ID, "auto_approve": False})
+            mock_wf.process_with_configuration = AsyncMock(return_value=result)
+            mock_cs.get_extraction_configuration = AsyncMock(
+                return_value=_mock_configuration(auto_approve=False)
+            )
 
             await process_document_task(
                 document_id=DOCUMENT_ID,
@@ -301,8 +315,8 @@ class TestProcessingHandlers:
         assert mock_success.await_args.kwargs["auto_approve"] is False
 
     @pytest.mark.asyncio
-    async def test_process_task_force_pending_review_overrides_template_auto_approve(self):
-        """CRM job 即使模板 auto_approve=True，也必须等待 CRM 审核推送。"""
+    async def test_process_task_force_pending_review_overrides_configuration_auto_approve(self):
+        """CRM job 即使配置 auto_approve=True，也必须等待 CRM 审核推送。"""
         from api.routes.documents.process import process_document_task
 
         result = {
@@ -313,12 +327,14 @@ class TestProcessingHandlers:
         }
         with _patch_supabase() as mock_svc, \
              _patch_workflow() as mock_wf, \
-             patch("api.routes.documents.process.template_service") as mock_ts, \
+             patch("api.routes.documents.process.configuration_service") as mock_cs, \
              patch("api.routes.documents.process.update_job", new_callable=AsyncMock), \
              patch("api.routes.documents.process.handle_processing_success", new_callable=AsyncMock) as mock_success:
             mock_svc.update_document_status = AsyncMock()
-            mock_wf.process_with_template = AsyncMock(return_value=result)
-            mock_ts.get_template = AsyncMock(return_value={"id": TEMPLATE_ID, "auto_approve": True})
+            mock_wf.process_with_configuration = AsyncMock(return_value=result)
+            mock_cs.get_extraction_configuration = AsyncMock(
+                return_value=_mock_configuration(auto_approve=True)
+            )
 
             await process_document_task(
                 document_id=DOCUMENT_ID,
@@ -347,16 +363,14 @@ class TestProcessingHandlers:
         }
         with _patch_supabase() as mock_svc, \
              _patch_workflow() as mock_wf, \
-             patch("api.routes.documents.process.template_service") as mock_ts, \
+             patch("api.routes.documents.process.configuration_service") as mock_cs, \
              patch("api.routes.documents.process.update_job", new_callable=AsyncMock), \
              patch("api.routes.documents.process.handle_processing_success", new_callable=AsyncMock) as mock_success:
             mock_svc.update_document_status = AsyncMock()
-            mock_wf.process_with_template = AsyncMock(return_value=result)
-            mock_ts.get_template = AsyncMock(return_value={
-                "id": TEMPLATE_ID,
-                "auto_approve": False,
-                "extraction_mode": "ocr_llm",
-            })
+            mock_wf.process_with_configuration = AsyncMock(return_value=result)
+            mock_cs.get_extraction_configuration_by_revision = AsyncMock(
+                return_value=_mock_configuration(extraction_mode="ocr_llm", revision_id=revision_id)
+            )
 
             await process_document_task(
                 document_id=DOCUMENT_ID,
@@ -381,7 +395,7 @@ class TestProcessingHandlers:
             "extraction_data": {"sample_name": "工作流原值"},
         }
         with _patch_supabase_in_helpers() as mock_svc, \
-             patch("api.routes.documents.helpers.template_service") as mock_ts, \
+             patch("api.routes.documents.helpers.configuration_service") as mock_cs, \
              patch("api.routes.documents.helpers.result_service") as mock_result, \
              patch("api.routes.documents.helpers.push_to_feishu", new_callable=AsyncMock) as mock_push:
             mock_result.record_extraction_result = AsyncMock()
@@ -389,17 +403,13 @@ class TestProcessingHandlers:
                 "data": {"sample_name": "Result值"},
                 "review_state": "approved",
             })
-            mock_svc.save_extraction_result = AsyncMock()
             mock_svc.generate_display_name.return_value = "报告_LED灯"
             mock_svc.update_document_status = AsyncMock()
             mock_svc.update_document = AsyncMock()
-            mock_ts.get_template_with_details = AsyncMock(return_value={
-                "id": TEMPLATE_ID,
-                "name": "检测报告",
-                "template_fields": [],
-                "feishu_bitable_token": "bitable-token",
-                "feishu_table_id": "table-id",
-            })
+            mock_cs.get_extraction_configuration = AsyncMock(return_value=_mock_configuration(
+                fields=[],
+                feishu={"bitable_token": "bitable-token", "table_id": "table-id"},
+            ))
             await _handle_processing_success(
                 document_id="doc-001",
                 result=result,

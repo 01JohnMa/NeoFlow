@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 from loguru import logger
 
+from services.configuration_service import configuration_service
 from services.tenant_service import tenant_service
-from services.template_service import template_service
 from api.dependencies.auth import get_current_user, CurrentUser, invalidate_profile_cache
 
 router = APIRouter(prefix="/tenants", tags=["租户管理"])
@@ -23,13 +23,13 @@ class TenantResponse(BaseModel):
     description: Optional[str] = None
 
 
-class TemplateResponse(BaseModel):
-    """模板响应"""
+class ExtractionConfigurationResponse(BaseModel):
+    """抽取配置响应（上传页选择用）"""
     id: str
     name: str
-    code: str
+    code: Optional[str] = None
     description: Optional[str] = None
-    required_doc_count: int = 1
+    is_active: bool = True
 
 
 class UpdateProfileRequest(BaseModel):
@@ -136,34 +136,47 @@ async def update_my_profile(
         raise HTTPException(status_code=500, detail="更新失败，请稍后重试")
 
 
-@router.get("/me/templates", response_model=List[TemplateResponse])
+@router.get("/me/templates", response_model=List[ExtractionConfigurationResponse])
 async def get_my_templates(user: CurrentUser = Depends(get_current_user)):
     """
-    获取当前用户所属租户的文档模板列表
+    获取当前用户所属租户可用于处理的已发布抽取配置列表
     """
     if not user.tenant_id:
         return []
-    
-    templates = await template_service.get_tenant_templates(user.tenant_id)
-    return templates
+
+    configurations = await configuration_service.list_published_extract_configurations(
+        user.tenant_id
+    )
+    return [
+        {
+            "id": configuration["id"],
+            "name": configuration["name"],
+            "code": configuration.get("code"),
+            "description": configuration.get("description"),
+            "is_active": True,
+        }
+        for configuration in configurations
+    ]
 
 
-@router.get("/me/templates/{template_code}")
+@router.get("/me/templates/{configuration_key}")
 async def get_my_template_detail(
-    template_code: str,
+    configuration_key: str,
     user: CurrentUser = Depends(get_current_user)
 ):
     """
-    获取指定模板的详细信息（含字段定义）
+    获取指定配置的详细信息（含字段定义）
     """
     if not user.tenant_id:
         raise HTTPException(status_code=400, detail="请先选择所属部门")
-    
-    template = await template_service.get_template_by_code(user.tenant_id, template_code)
-    
-    if not template:
-        raise HTTPException(status_code=404, detail="模板不存在")
-    
-    return template
+
+    configuration = await configuration_service.resolve_extraction_configuration(
+        user.tenant_id, configuration_key
+    )
+
+    if not configuration:
+        raise HTTPException(status_code=404, detail="配置不存在")
+
+    return configuration
 
 

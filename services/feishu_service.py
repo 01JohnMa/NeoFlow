@@ -38,8 +38,8 @@ def _is_retryable_feishu_error(exception: Exception) -> bool:
 class FeishuService:
     """飞书 API 服务封装 - 支持多租户
     
-    推送目标表格（bitable_token / table_id）统一从 document_templates
-    数据库配置读取，由调用方传入；
+    推送目标表格（bitable_token / table_id）统一从 Configuration
+    定义读取，由调用方传入；
     """
     
     _instance: Optional['FeishuService'] = None

@@ -1,9 +1,7 @@
 """CRM 集成入口。"""
 
 import asyncio
-from datetime import datetime
 import ipaddress
-import inspect
 import mimetypes
 import os
 from pathlib import Path
@@ -34,20 +32,20 @@ from api.jobs import build_feishu_push_dedupe_key, create_job, has_feishu_push_r
 from api.routes.documents.helpers import push_to_feishu
 from api.routes.documents.query import _check_document_access
 from config.settings import settings
+from services.configuration_service import configuration_service
 from services.result_service import (
     APPROVED_REVIEW_STATE,
     result_service,
     result_to_extraction_data,
 )
 from services.supabase_service import supabase_service
-from services.template_service import template_service
 
 
 router = APIRouter(prefix="/crm", tags=["CRM集成"])
 
-QUALITY_CRM_TEMPLATE_IDS = {
-    "b0000000-0000-0000-0000-000000000001",  # 检测报告
-    "b0000000-0000-0000-0000-000000000003",  # 抽样单
+CRM_SUPPORTED_CONFIGURATION_CODES = {
+    "inspection_report",  # 检测报告
+    "sampling",           # 抽样单
 }
 CRM_EXTRA_FIELD_MAPPING = {
     "alipay_account": "支付宝账号",
@@ -98,19 +96,6 @@ class CrmFeishuPushRequest(BaseModel):
     custom_push_name: Optional[str] = None
 
 
-async def _run_supabase(fn):
-    runner = getattr(supabase_service, "_run_sync", None)
-    if runner is not None and inspect.iscoroutinefunction(runner):
-        return await runner(fn)
-    return fn()
-
-
-async def _maybe_await(value):
-    if inspect.isawaitable(value):
-        return await value
-    return value
-
-
 def _ensure_crm_admin(user: CurrentUser) -> None:
     if not user.is_tenant_admin():
         raise AuthorizationError("仅管理员或 CRM 服务账号可访问此接口")
@@ -118,35 +103,38 @@ def _ensure_crm_admin(user: CurrentUser) -> None:
         raise ProcessingError("请先为 CRM 调用用户配置所属部门")
 
 
-def _ensure_supported_crm_template(template: dict) -> None:
-    if template.get("id") not in QUALITY_CRM_TEMPLATE_IDS:
-        raise ValidationError("CRM接口仅支持质量管理中心的检测报告和抽样单模板")
+def _ensure_supported_crm_configuration(configuration: dict) -> None:
+    if (
+        configuration.get("type") != "extract"
+        or configuration.get("code") not in CRM_SUPPORTED_CONFIGURATION_CODES
+    ):
+        raise ValidationError("CRM接口仅支持质量管理中心的检测报告和抽样单配置")
 
 
-def _template_field_keys(template: dict) -> set[str]:
+def _configuration_field_keys(configuration: dict) -> set[str]:
     return {
         field.get("field_key")
-        for field in template.get("template_fields") or []
+        for field in configuration.get("fields") or []
         if field.get("field_key")
     }
 
 
-def _sanitize_reviewed_data(template: dict, reviewed_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _sanitize_reviewed_data(configuration: dict, reviewed_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     cleaned = dict(reviewed_data or {})
     for crm_only_key in CRM_EXTRA_FIELD_MAPPING:
         cleaned.pop(crm_only_key, None)
     if not cleaned:
         return {}
 
-    allowed_keys = _template_field_keys(template)
+    allowed_keys = _configuration_field_keys(configuration)
     unknown_keys = sorted(set(cleaned) - allowed_keys)
     if unknown_keys:
         raise ValidationError(f"reviewed_data包含不支持的字段: {', '.join(unknown_keys)}")
     return cleaned
 
 
-def _extract_template_data(template: dict, result_row: Dict[str, Any]) -> Dict[str, Any]:
-    allowed_keys = _template_field_keys(template)
+def _extract_configuration_data(configuration: dict, result_row: Dict[str, Any]) -> Dict[str, Any]:
+    allowed_keys = _configuration_field_keys(configuration)
     return {key: result_row.get(key) for key in allowed_keys if key in result_row}
 
 
@@ -374,37 +362,17 @@ async def _fetch_extraction_result(document_id: str) -> Optional[Dict[str, Any]]
 
 
 async def _mark_crm_push_completed(
-    table_name: str,
     document_id: str,
     reviewed_data: Dict[str, Any],
     user_id: str,
 ) -> None:
-    # 1. 审核修正先写 Result（读取侧唯一数据源）
+    """CRM 推送成功后把审核修正写回 Result，并把文档标记完成。"""
     updated_result = await result_service.update_result_review(
         document_id=document_id,
         review_state=APPROVED_REVIEW_STATE,
         data=reviewed_data,
     )
-    if not updated_result:
-        raise ProcessingError("CRM推送成功后更新审核结果失败")
-
-    # 2. 旧业务表镜像写入保持不变（#12 前保留）
-    update_data = {**reviewed_data}
-    update_data["is_validated"] = True
-    update_data["validated_at"] = datetime.now().isoformat()
-    update_data["validated_by"] = user_id
-
-    await _run_supabase(
-        lambda: (
-            supabase_service.client.table(table_name)
-            .update(update_data)
-            .eq("document_id", document_id)
-            .execute()
-        )
-    )
-
-    result_row = await _fetch_extraction_result(document_id)
-    if not result_row or result_row.get("is_validated") is not True:
+    if not updated_result or updated_result.get("review_state") != APPROVED_REVIEW_STATE:
         raise ProcessingError("CRM推送成功后更新审核结果失败")
 
     await supabase_service.update_document(document_id, {"status": "completed"})
@@ -419,12 +387,12 @@ async def submit_crm_document(
     try:
         _ensure_crm_admin(user)
 
-        template = await template_service.get_template(request.template_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="模板不存在")
-        if not user.can_access_tenant(template.get("tenant_id")):
-            raise AuthorizationError("无权使用此模板")
-        _ensure_supported_crm_template(template)
+        configuration = await configuration_service.get_extraction_configuration(request.template_id)
+        if not configuration:
+            raise HTTPException(status_code=404, detail="配置不存在")
+        if not user.can_access_tenant(configuration.get("tenant_id")):
+            raise AuthorizationError("无权使用此配置")
+        _ensure_supported_crm_configuration(configuration)
 
         document_id = str(uuid.uuid4())
         upload_info = await _prepare_crm_json_upload(document_id, request)
@@ -504,26 +472,23 @@ async def push_crm_document_to_feishu(
         _check_document_access(document, user, document_id)
 
         template_id = document.get("template_id")
-        template = await template_service.get_template_with_details(template_id) if template_id else None
-        if not template:
-            raise HTTPException(status_code=404, detail="模板不存在")
-        if not user.can_access_tenant(template.get("tenant_id")):
-            raise AuthorizationError("无权使用此模板")
-        _ensure_supported_crm_template(template)
-        reviewed_data = _sanitize_reviewed_data(template, request.reviewed_data)
-
-        table_name = await _maybe_await(supabase_service.resolve_table_name(
-            template_id=template_id,
-            document_type=document.get("document_type"),
-        ))
-        if not table_name:
-            raise ProcessingError("无法确定文档结果表")
+        configuration = (
+            await configuration_service.get_extraction_configuration(template_id)
+            if template_id
+            else None
+        )
+        if not configuration:
+            raise HTTPException(status_code=404, detail="配置不存在")
+        if not user.can_access_tenant(configuration.get("tenant_id")):
+            raise AuthorizationError("无权使用此配置")
+        _ensure_supported_crm_configuration(configuration)
+        reviewed_data = _sanitize_reviewed_data(configuration, request.reviewed_data)
 
         result_row = await _fetch_extraction_result(document_id)
         if not result_row:
             raise ProcessingError("文档提取结果不存在，无法推送飞书")
 
-        push_data = {**_extract_template_data(template, result_row), **reviewed_data}
+        push_data = {**_extract_configuration_data(configuration, result_row), **reviewed_data}
         extra_data = {
             "alipay_account": alipay_account,
             "alipay_name": alipay_name,
@@ -533,12 +498,12 @@ async def push_crm_document_to_feishu(
         }
         dedupe_key = build_feishu_push_dedupe_key(
             document_id,
-            template.get("id"),
+            configuration.get("id"),
             {**push_data, **extra_data},
         )
         if await has_feishu_push_record(dedupe_key):
             if document.get("status") == "pending_review":
-                await _mark_crm_push_completed(table_name, document_id, reviewed_data, user.user_id)
+                await _mark_crm_push_completed(document_id, reviewed_data, user.user_id)
             return {
                 "success": True,
                 "status": "skipped",
@@ -556,7 +521,7 @@ async def push_crm_document_to_feishu(
         )
 
         pushed = await push_to_feishu(
-            template=template,
+            configuration=configuration,
             extraction_data=push_data,
             display_name=document.get("display_name"),
             document_id=document_id,
@@ -569,7 +534,7 @@ async def push_crm_document_to_feishu(
         if not pushed:
             raise ExternalServiceError("飞书", "CRM审核后推送失败")
 
-        await _mark_crm_push_completed(table_name, document_id, reviewed_data, user.user_id)
+        await _mark_crm_push_completed(document_id, reviewed_data, user.user_id)
         logger.info(f"CRM审核后飞书推送完成: {document_id}, 用户: {user.user_id}")
 
         return {

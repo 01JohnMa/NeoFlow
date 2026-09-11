@@ -1,7 +1,6 @@
 # services/supabase_service.py
 """Supabase 数据库服务 - 本地部署版"""
 
-import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -9,7 +8,6 @@ from loguru import logger
 from postgrest import SyncPostgrestClient
 
 from config.settings import settings
-from constants.document_types import DocumentTypeTable, DOC_TYPE_TABLE_MAP
 from services.base import SupabaseClientMixin
 
 
@@ -19,114 +17,10 @@ class SupabaseService(SupabaseClientMixin):
     _instance: Optional['SupabaseService'] = None
     _client: Optional[SyncPostgrestClient] = None
     
-    # ============ 表格映射（使用常量模块） ============
-    # 支持模板 code、中文名和历史别名，降低耦合性
-    TABLE_MAP = DOC_TYPE_TABLE_MAP
-    
-    # 各表的日期字段定义（使用常量模块的表名）
-    DATE_FIELDS = {
-        DocumentTypeTable.SAMPLING_FORM: ["sampling_date", "production_date", "expiry_date"],
-        DocumentTypeTable.INSPECTION_REPORT: ["report_date", "inspection_date", "sample_date"],
-        DocumentTypeTable.EXPRESS: ["shipping_date", "delivery_date"],
-    }
-    
-    # 非日期字段（字段名包含 date 但不应进行日期格式校验的复合字段）
-    NON_DATE_FIELDS = ["production_date_batch"]
-    
-    # ALLOWED_FIELDS 白名单已移除。
-    # 入库前字段过滤现在通过 schema_sync_service.get_columns() 动态读取
-    # 结果表的实际物理列来实现，详见 _filter_allowed_fields()。
-    
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def _clean_data_for_db(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
-        """清理数据，将无效日期字段转换为 None"""
-        cleaned = data.copy()
-        date_fields = self.DATE_FIELDS.get(table_name, [])
-        
-        for key, value in cleaned.items():
-            # 判断是否为日期字段（排除复合字段如 production_date_batch）
-            is_date_field = (key in date_fields or "date" in key.lower()) and key not in self.NON_DATE_FIELDS
-            
-            if is_date_field and isinstance(value, str):
-                # 空字符串转为 None
-                if value == "" or value.strip() == "":
-                    cleaned[key] = None
-                else:
-                    # 验证日期格式是否有效 (YYYY-MM-DD)
-                    validated_date = self._validate_and_fix_date(value)
-                    cleaned[key] = validated_date
-        
-        return cleaned
-
-    async def _filter_allowed_fields(self, data: Dict[str, Any], table_name: str) -> Dict[str, Any]:
-        """
-        过滤数据，只保留结果表中实际存在的物理列。
-
-        使用 schema_sync_service 动态读取列名（带本地缓存），
-        避免硬编码白名单与数据库实际结构脱节。
-
-        降级策略：若无法获取列名（如网络异常），允许所有字段通过，
-        让数据库层自行报错（已记录 warning 日志）。
-        """
-        from services.schema_sync_service import schema_sync_service
-
-        actual_columns = await schema_sync_service.get_columns(table_name)
-
-        if not actual_columns:
-            logger.warning(f"无法获取表 {table_name} 的列名，跳过字段过滤（降级模式）")
-            return data
-
-        filtered = {k: v for k, v in data.items() if k in actual_columns}
-
-        removed = set(data.keys()) - set(filtered.keys())
-        if removed:
-            logger.warning(f"过滤掉不在表 {table_name} 中的字段: {removed}")
-
-        return filtered
-    
-    def _validate_and_fix_date(self, date_str: str) -> Optional[str]:
-        """
-        验证并修复日期格式，返回有效的 YYYY-MM-DD 格式或 None
-        
-        支持的输入格式：
-        - YYYY-MM-DD (标准格式，直接返回)
-        - YYYY/MM/DD, YYYY.MM.DD (转换为标准格式)
-        - YYYYMMDD (8位数字格式)
-        - 无效格式返回 None
-        """
-        if not date_str or not isinstance(date_str, str):
-            return None
-        
-        date_str = date_str.strip()
-        
-        # 清理 OCR 识别中常见的尾部/头部噪声字符
-        # 例如 '2025-03-29//' -> '2025-03-29'
-        date_str = re.sub(r'^[/\-.\s]+|[/\-.\s]+$', '', date_str)
-        
-        # 尝试多种日期格式解析
-        date_formats = [
-            "%Y-%m-%d",   # 2025-01-07
-            "%Y/%m/%d",   # 2025/01/07
-            "%Y.%m.%d",   # 2025.01.07
-            "%Y年%m月%d日",  # 2025年01月07日
-            "%Y%m%d",     # 20250107 (8位数字)
-        ]
-        
-        for fmt in date_formats:
-            try:
-                parsed_date = datetime.strptime(date_str, fmt)
-                return parsed_date.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-        
-        # 如果所有格式都失败，检查是否只有年份或年月
-        # 这种情况下返回 None，因为数据库要求完整日期
-        logger.warning(f"无效的日期格式 '{date_str}'，将设为 None")
-        return None
     
     def _build_rest_client(
         self,
@@ -173,31 +67,6 @@ class SupabaseService(SupabaseClientMixin):
             authorization=f"Bearer {user_token}",
         )
     
-    def get_table_name(self, document_type: str) -> Optional[str]:
-        """根据文档类型获取表名（支持中文和英文）"""
-        return self.TABLE_MAP.get(document_type)
-
-    async def resolve_table_name(
-        self,
-        template_id: Optional[str] = None,
-        document_type: Optional[str] = None,
-    ) -> Optional[str]:
-        """
-        统一解析业务表名。
-
-        查找顺序：
-        1. 若提供 template_id，查询 document_templates.target_table（优先）
-        2. fallback 到 TABLE_MAP 静态映射（兼容旧数据）
-        """
-        if template_id:
-            row = await self._run_sync(
-                lambda: self.client.table("document_templates").select("target_table").eq("id", template_id).execute()
-            )
-            target = (row.data[0].get("target_table") or "") if row.data else ""
-            if target:
-                return target
-        return self.TABLE_MAP.get(document_type) if document_type else None
-
     # ============ 文档操作 ============
     
     async def create_document(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -414,176 +283,6 @@ class SupabaseService(SupabaseClientMixin):
         except Exception as e:
             logger.error(f"统计文档失败: {e}")
             return 0
-    
-    # ============ 通用数据操作方法 ============
-    
-    async def _save_to_table(
-        self, 
-        table_name: str, 
-        document_id: str, 
-        data: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
-        """通用保存方法 - 保存数据到指定表
-        
-        Args:
-            table_name: 数据库表名
-            document_id: 文档ID
-            data: 要保存的数据
-            
-        Returns:
-            保存后的记录，失败时抛出异常
-        """
-        try:
-            filtered_data = await self._filter_allowed_fields(data, table_name)
-            filtered_data["raw_extraction_data"] = data.copy()
-            filtered_data["document_id"] = document_id
-            cleaned_data = self._clean_data_for_db(filtered_data, table_name)
-            result = await self._run_sync(
-                lambda: self.client.table(table_name).upsert(
-                    cleaned_data, on_conflict="document_id"
-                ).execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"保存到 {table_name} 失败: {e}")
-            raise
-    
-    async def _get_from_table(
-        self, 
-        table_name: str, 
-        document_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """通用获取方法 - 根据文档ID获取记录
-        
-        Args:
-            table_name: 数据库表名
-            document_id: 文档ID
-            
-        Returns:
-            记录数据，不存在或失败时返回 None
-        """
-        try:
-            result = await self._run_sync(
-                lambda: self.client.table(table_name).select("*").eq(
-                    "document_id", document_id
-                ).execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"从 {table_name} 获取数据失败: {e}")
-            return None
-    
-    # ============ 检验报告操作 ============
-    
-    async def save_inspection_report(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保存检验报告"""
-        return await self._save_to_table("inspection_reports", document_id, data)
-    
-    async def get_inspection_report(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """获取检验报告"""
-        return await self._get_from_table("inspection_reports", document_id)
-    
-    # ============ 快递单操作 ============
-    
-    async def save_express(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保存快递单"""
-        return await self._save_to_table("expresses", document_id, data)
-    
-    async def get_express(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """获取快递单"""
-        return await self._get_from_table("expresses", document_id)
-    
-    # ============ 抽样单操作 ============
-    
-    async def save_sampling_form(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保存抽样单"""
-        return await self._save_to_table("sampling_forms", document_id, data)
-    
-    async def get_sampling_form(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """获取抽样单"""
-        return await self._get_from_table("sampling_forms", document_id)
-    
-    # ============ 包装操作 ============
-
-    async def save_packaging(self, document_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """保存包装信息"""
-        return await self._save_to_table("packagings", document_id, data)
-
-    async def get_packaging(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """获取包装信息"""
-        return await self._get_from_table("packagings", document_id)
-
-    # ============ 文档查询辅助方法 ============
-    
-    async def get_document_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """根据文件路径获取文档"""
-        try:
-            result = await self._run_sync(
-                lambda: self.client.table("documents").select("*").eq("file_path", file_path).execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"根据路径获取文档失败: {e}")
-            return None
-    
-    # ============ 通用保存方法 ============
-    
-    async def save_extraction_result(
-        self,
-        document_id: str,
-        document_type: str,
-        extraction_data: Dict[str, Any],
-        template_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """根据文档类型保存提取结果（优先 template_id → target_table，fallback TABLE_MAP）。"""
-        table_name = await self.resolve_table_name(template_id=template_id, document_type=document_type)
-        if not table_name:
-            logger.error(
-                f"未知文档类型: {document_type}，无法保存提取结果。"
-                f"document_id={document_id}, fields={list(extraction_data.keys())}"
-            )
-            return None
-        return await self._save_to_table(table_name, document_id, extraction_data)
-    
-    async def get_extraction_result(
-        self, 
-        document_id: str, 
-        document_type: str
-    ) -> Optional[Dict[str, Any]]:
-        """根据文档类型获取提取结果"""
-        table_name = self.get_table_name(document_type)
-        if not table_name:
-            return None
-        
-        try:
-            result = await self._run_sync(
-                lambda: self.client.table(table_name).select("*").eq("document_id", document_id).execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"获取提取结果失败: {e}")
-            return None
-    
-    async def update_extraction_result(
-        self,
-        document_id: str,
-        document_type: str,
-        data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """根据文档类型更新提取结果"""
-        try:
-            table_name = self.get_table_name(document_type)
-            if not table_name:
-                logger.warning(f"未知文档类型: {document_type}")
-                return None
-            
-            result = await self._run_sync(
-                lambda: self.client.table(table_name).update(data).eq("document_id", document_id).execute()
-            )
-            return result.data[0] if result.data else None
-        except Exception as e:
-            logger.error(f"更新提取结果失败: {e}")
-            raise
     
     # ============ 处理日志 ============
     

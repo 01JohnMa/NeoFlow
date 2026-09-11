@@ -8,9 +8,9 @@ from loguru import logger
 import inspect
 import os
 
+from services.configuration_service import configuration_service
 from services.supabase_service import supabase_service
 from services.result_service import result_service, result_to_extraction_data
-from services.template_service import template_service
 from api.dependencies.auth import get_current_user, get_crm_current_user, CurrentUser
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError
 from .helpers import parse_allowed_values, raise_auth_or_processing_error
@@ -165,22 +165,27 @@ async def get_extraction_result(
         extraction_data = result_to_extraction_data(result_row, document_id)
         ocr_text = document.get("ocr_text") or ""
 
-        # 从模板字段中收集：
+        # 从配置字段中收集：
         #   1. review_hint_fields — 有 review_allowed_values 的字段，用于前端保存前提示
-        #   2. template_fields    — 完整白名单字段列表，供前端详情页纯模板驱动渲染
+        #   2. fields             — 完整白名单字段列表，供前端详情页纯配置驱动渲染
         review_hint_fields = []
-        template_fields = []
+        fields_payload = []
         template_id = document.get("template_id")
         tenant_id = document.get("tenant_id")
         try:
             fields_list: list = []
+            configuration = None
             if template_id:
-                # 直接查询字段表，避免不必要的关联查询
-                fields_list = await template_service.get_template_fields(template_id)
+                configuration = await configuration_service.get_extraction_configuration(
+                    template_id,
+                    revision_id=result_row.get("config_revision_id"),
+                )
             elif tenant_id and document_type:
-                template = await template_service.get_template_by_code(tenant_id, document_type)
-                if template:
-                    fields_list = template.get("template_fields") or []
+                configuration = await configuration_service.resolve_extraction_configuration(
+                    tenant_id, document_type
+                )
+            if configuration:
+                fields_list = configuration.get("fields") or []
             for field in fields_list:
                 allowed = parse_allowed_values(field.get("review_allowed_values"))
                 if allowed:
@@ -190,7 +195,7 @@ async def get_extraction_result(
                         "allowed_values": allowed,
                     })
             # 构造前端渲染所需白名单字段列表（按 sort_order 升序）
-            template_fields = [
+            fields_payload = [
                 {
                     "field_key": f.get("field_key"),
                     "field_label": f.get("field_label") or f.get("field_key"),
@@ -203,7 +208,7 @@ async def get_extraction_result(
                 for f in sorted(fields_list, key=lambda x: x.get("sort_order", 0))
             ]
         except Exception as hint_err:
-            logger.warning(f"获取模板字段失败（不影响主流程）: {hint_err}")
+            logger.warning(f"获取配置字段失败（不影响主流程）: {hint_err}")
 
         return {
             "document_id": document_id,
@@ -214,7 +219,7 @@ async def get_extraction_result(
             "created_at": result_row.get("created_at"),
             "is_validated": result_row.get("review_state") == "approved",
             "review_hint_fields": review_hint_fields,
-            "template_fields": template_fields,
+            "fields": fields_payload,
         }
         
     except (DocumentNotFoundError, HTTPException):

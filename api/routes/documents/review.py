@@ -2,10 +2,10 @@
 """文档路由 - 审核相关端点"""
 
 from fastapi import APIRouter, Depends
-from datetime import datetime
 from loguru import logger
 import inspect
 
+from services.configuration_service import configuration_service
 from services.supabase_service import supabase_service
 from services.result_service import (
     APPROVED_REVIEW_STATE,
@@ -13,11 +13,9 @@ from services.result_service import (
     result_service,
     result_to_extraction_data,
 )
-from services.template_service import template_service
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import (
     DocumentNotFoundError, 
-    DocumentTypeError, 
     ValidationError,
     ProcessingError
 )
@@ -35,14 +33,8 @@ async def _run_supabase(fn):
     return fn()
 
 
-async def _maybe_await(value):
-    if inspect.isawaitable(value):
-        return await value
-    return value
-
-
-def _validate_review_rules(template: dict, data: dict) -> None:
-    fields = template.get("template_fields") or []
+def _validate_review_rules(configuration: dict, data: dict) -> None:
+    fields = configuration.get("fields") or []
     for field in fields:
         if not field or not field.get("review_enforced"):
             continue
@@ -91,45 +83,25 @@ async def validate_document(
         # 校验强制审核条件（如果配置了字段规则）
         template_id = document.get("template_id")
         tenant_id = document.get("tenant_id")
-        template = None
+        configuration = None
         if template_id:
-            template = await template_service.get_template_with_details(template_id)
+            configuration = await configuration_service.get_extraction_configuration(template_id)
         elif tenant_id and request.document_type:
-            template = await template_service.get_template_by_code(tenant_id, request.document_type)
-        if template:
-            _validate_review_rules(template, request.data)
+            configuration = await configuration_service.resolve_extraction_configuration(
+                tenant_id, request.document_type
+            )
+        if configuration:
+            _validate_review_rules(configuration, request.data)
 
-        # 根据文档类型确定镜像业务表（旧表写入保留到 #12）
-        table_name = await _maybe_await(supabase_service.resolve_table_name(
-            template_id=document.get("template_id"),
-            document_type=request.document_type,
-        ))
-
-        if not table_name:
-            raise DocumentTypeError(request.document_type)
-
-        # 审核修正先写 Result（读取侧唯一数据源）
+        # 审核修正写回 Result（唯一数据源）
         updated_result = await result_service.update_result_review(
             document_id=document_id,
             review_state=APPROVED_REVIEW_STATE,
             data=request.data,
             tenant_id=tenant_id,
         )
-
-        # 旧业务表镜像写入保持不变
-        update_data = {**request.data}
-        update_data["is_validated"] = True
-        update_data["validated_at"] = datetime.now().isoformat()
-        update_data["validated_by"] = user.user_id
-        if request.validation_notes:
-            update_data["validation_notes"] = request.validation_notes
-
-        result = await _run_supabase(
-            lambda: supabase_service.client.table(table_name).update(update_data).eq("document_id", document_id).execute()
-        )
-
-        if not result.data:
-            raise ProcessingError("更新失败")
+        if not updated_result:
+            raise ProcessingError("提取结果不存在，无法审核")
 
         # 审核通过后，更新文档主表状态为 completed
         await _run_supabase(
@@ -146,16 +118,11 @@ async def validate_document(
             or (document.get("file_name") or "").strip()
         )
 
-        if template:
+        if configuration:
             try:
-                if updated_result:
-                    push_data = result_to_extraction_data(updated_result, document_id)
-                else:
-                    # 历史数据无 Result 时的临时兜底，删除业务表后移除
-                    logger.warning(f"文档 {document_id} 无 Result，飞书推送回退到旧表镜像")
-                    push_data = result.data[0]
+                push_data = result_to_extraction_data(updated_result, document_id)
                 await push_to_feishu(
-                    template=template,
+                    configuration=configuration,
                     extraction_data=push_data,
                     display_name=file_name_for_push,
                     document_id=document_id,
@@ -164,7 +131,7 @@ async def validate_document(
             except Exception as feishu_error:
                 logger.bind(document_id=document_id).opt(exception=feishu_error).warning("飞书推送失败，不影响审核结果")
         else:
-            logger.bind(document_id=document_id).info("模板未配置飞书，跳过推送")
+            logger.bind(document_id=document_id).info("配置未配置飞书，跳过推送")
         
         return {
             "success": True,
@@ -172,7 +139,7 @@ async def validate_document(
             "document_id": document_id
         }
         
-    except (DocumentNotFoundError, DocumentTypeError, ProcessingError):
+    except (DocumentNotFoundError, ProcessingError):
         raise
     except Exception as e:
         logger.bind(document_id=document_id).opt(exception=e).error("审核失败")

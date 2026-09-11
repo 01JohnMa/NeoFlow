@@ -1,6 +1,7 @@
 # services/configuration_service.py
 """配置服务 - Project / Configuration / Configuration Revision 领域模型"""
 
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -146,45 +147,41 @@ def merge_definition(
     return merged
 
 
-def build_definition_from_template(
-    template: Dict[str, Any],
-    fields: Optional[List[Dict[str, Any]]] = None,
-    examples: Optional[List[Dict[str, Any]]] = None,
+def build_extraction_config(
+    configuration: Dict[str, Any],
+    definition: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    将旧 document_templates 记录映射为 Configuration definition。
+    把 Configuration + 选定 Revision definition 组装成抽取执行视图。
 
-    与 021_configurations.sql 的 build_legacy_template_definition 保持同构，
-    用于数据迁移映射的回归测试及后续兼容读取。
+    这是工作流/审核/推送/CRM 读取配置的唯一形态：字段、示例、prompt、
+    提取模式与飞书/Excel 输出参数都在这里归一化。
     """
-    mapped_fields = []
-    for field in sorted(fields or [], key=lambda f: (f.get("sort_order") or 0, f.get("field_key") or "")):
-        mapped_fields.append(normalize_field(field))
-
-    mapped_examples = []
-    for example in sorted(examples or [], key=lambda e: (e.get("sort_order") or 0, str(e.get("created_at") or ""))):
-        mapped_examples.append(normalize_example(example))
-
-    return normalize_definition({
-        "fields": mapped_fields,
-        "examples": mapped_examples,
-        "extraction_prompt": template.get("extraction_prompt_template"),
-        "extraction_mode": template.get("extraction_mode") or "ocr_llm",
-        "per_page_extraction": bool(template.get("per_page_extraction")),
-        "cleaner_module": template.get("cleaner_module"),
-        "output_mode": template.get("output_mode") or "bitable",
-        "push_attachment": bool(template.get("push_attachment", True)),
-        "auto_approve": bool(template.get("auto_approve")),
-        "feishu": {
-            "bitable_token": template.get("feishu_bitable_token"),
-            "table_id": template.get("feishu_table_id"),
-        },
-        "excel": {
-            "file_name": template.get("excel_template_file_name"),
-            "path": template.get("excel_template_path"),
-            "placeholders": template.get("excel_template_placeholders") or [],
-        },
-    })
+    definition = normalize_definition(
+        definition if definition is not None else configuration.get("draft_definition")
+    )
+    return {
+        "id": configuration["id"],
+        "tenant_id": configuration.get("tenant_id"),
+        "project_id": configuration.get("project_id"),
+        "name": configuration.get("name"),
+        "code": configuration.get("code"),
+        "description": configuration.get("description"),
+        "type": configuration.get("type"),
+        "status": configuration.get("status"),
+        "revision_id": configuration.get("current_revision_id"),
+        "fields": definition["fields"],
+        "examples": definition["examples"],
+        "extraction_prompt": definition["extraction_prompt"],
+        "extraction_mode": definition["extraction_mode"],
+        "per_page_extraction": definition["per_page_extraction"],
+        "cleaner_module": definition["cleaner_module"],
+        "output_mode": definition["output_mode"],
+        "push_attachment": definition["push_attachment"],
+        "auto_approve": definition["auto_approve"],
+        "feishu": definition["feishu"],
+        "excel": definition["excel"],
+    }
 
 
 class ConfigurationService(SupabaseClientMixin):
@@ -306,6 +303,136 @@ class ConfigurationService(SupabaseClientMixin):
             revision = await self.get_revision(configuration["current_revision_id"])
         detail["current_revision"] = revision
         return detail
+
+    # ============ 抽取执行视图（工作流/审核/推送/CRM 的统一读取入口） ============
+
+    _UUID_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+
+    async def _definition_for(
+        self,
+        configuration: Dict[str, Any],
+        revision_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """取指定 Revision（或当前已发布 Revision）的 definition；无则回退草稿。"""
+        if revision_id:
+            revision = await self.get_revision(str(revision_id))
+            if revision and revision.get("configuration_id") == configuration["id"]:
+                return revision.get("definition") or {}
+        if configuration.get("current_revision_id"):
+            revision = await self.get_revision(configuration["current_revision_id"])
+            if revision:
+                return revision.get("definition") or {}
+        return configuration.get("draft_definition") or {}
+
+    async def get_extraction_configuration(
+        self,
+        configuration_id: Optional[str],
+        revision_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """按 Configuration 引用加载抽取执行视图（默认取当前已发布 Revision）。"""
+        if not configuration_id or not self._UUID_RE.match(str(configuration_id)):
+            return None
+        configuration = await self.get_configuration(configuration_id)
+        if not configuration:
+            return None
+        definition = await self._definition_for(configuration, revision_id)
+        return build_extraction_config(configuration, definition)
+
+    async def get_extraction_configuration_by_revision(
+        self,
+        revision_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """按 Job 固定的 Revision 加载抽取执行视图。"""
+        if not revision_id:
+            return None
+        revision = await self.get_revision(str(revision_id))
+        if not revision:
+            return None
+        configuration = await self.get_configuration(revision["configuration_id"])
+        if not configuration:
+            return None
+        config = build_extraction_config(configuration, revision.get("definition"))
+        config["revision_id"] = revision["id"]
+        return config
+
+    async def _get_extract_configuration_by_field(
+        self,
+        tenant_id: str,
+        field: str,
+        value: Any,
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            result = await self._run_sync(
+                lambda: self._get_client().table("configurations").select("*")
+                .eq("tenant_id", tenant_id)
+                .eq(field, value)
+                .eq("type", "extract")
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"按 {field} 解析配置失败: {e}")
+            return None
+
+    async def resolve_extraction_configuration(
+        self,
+        tenant_id: Optional[str],
+        key: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        按租户解析一个抽取配置引用。
+
+        key 依次尝试：Configuration ID、legacy_template_id（历史文档的
+        documents.template_id）、code、name。
+        """
+        if not tenant_id or not key:
+            return None
+
+        configuration = None
+        if self._UUID_RE.match(str(key)):
+            candidate = await self.get_configuration(str(key))
+            if candidate and candidate.get("tenant_id") == tenant_id:
+                configuration = candidate
+            if not configuration:
+                candidate = await self._get_extract_configuration_by_field(
+                    tenant_id, "legacy_template_id", str(key)
+                )
+                if candidate:
+                    configuration = candidate
+
+        if not configuration:
+            configuration = await self._get_extract_configuration_by_field(
+                tenant_id, "code", key
+            )
+        if not configuration:
+            configuration = await self._get_extract_configuration_by_field(
+                tenant_id, "name", key
+            )
+        if not configuration:
+            return None
+
+        definition = await self._definition_for(configuration)
+        return build_extraction_config(configuration, definition)
+
+    async def list_published_extract_configurations(
+        self,
+        tenant_id: str,
+    ) -> List[Dict[str, Any]]:
+        """列出租户可用于新上传/处理的已发布抽取配置（按名称排序）。"""
+        configurations = await self.list_configurations(
+            tenant_id=tenant_id,
+            type="extract",
+            status="published",
+        )
+        configs: List[Dict[str, Any]] = []
+        for configuration in configurations:
+            definition = await self._definition_for(configuration)
+            configs.append(build_extraction_config(configuration, definition))
+        return sorted(configs, key=lambda item: (item.get("name") or ""))
 
     async def create_configuration(
         self,

@@ -12,8 +12,8 @@ import uuid
 import os
 
 from config.settings import settings
+from services.configuration_service import configuration_service
 from services.supabase_service import supabase_service
-from services.template_service import template_service
 from agents.workflow import ocr_workflow
 from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
 from api.dependencies.auth import get_current_user, get_crm_current_user, CurrentUser
@@ -84,7 +84,7 @@ async def process_document(
             if not os.path.exists(file_path):
                 raise FileNotFoundError(file_path)
         
-        # 检查文档是否关联了模板
+        # 检查文档关联的抽取配置
         template_id = document.get("template_id") if document else None
         # 优先使用当前用户的 tenant_id（支持重新处理时使用更新后的租户）
         tenant_id = user.tenant_id or document.get("tenant_id")
@@ -111,42 +111,43 @@ async def process_document(
         if document and not document.get("tenant_id") and user.tenant_id:
             await supabase_service.update_document(document_id, {"tenant_id": user.tenant_id})
         
+        configuration = None
+        if template_id:
+            configuration = await configuration_service.get_extraction_configuration(template_id)
+            if not configuration:
+                raise ProcessingError(f"配置不存在或不可用: {template_id}")
+
         if sync:
             # 同步处理
-            if template_id:
-                # 使用模板化处理
-                result = await ocr_workflow.process_with_template(
+            if configuration:
+                # 使用 Configuration 处理
+                result = await ocr_workflow.process_with_configuration(
                     document_id=document_id,
                     file_path=file_path,
-                    template_id=template_id,
+                    configuration=configuration,
                     tenant_id=tenant_id
                 )
             else:
                 # 原有流程（质量管理中心分类）
                 result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
             
-            # 保存结果到数据库
+            # 保存结果到 Result 存储
             if result["success"] and result.get("extraction_data"):
                 try:
-                    auto_approve = False
-                    template = None
-                    if template_id:
-                        template = await template_service.get_template(template_id)
-                    elif tenant_id and result.get("document_type"):
-                        template = await template_service.get_template_by_code(tenant_id, result.get("document_type"))
-                    if template:
-                        auto_approve = bool(template.get("auto_approve", False))
+                    auto_approve = bool((configuration or {}).get("auto_approve", False))
 
                     await _handle_processing_success(
                         document_id=document_id,
                         result=result,
-                        template_id=template_id or (template.get("id") if template else None),
+                        template_id=template_id or (configuration or {}).get("id"),
                         tenant_id=tenant_id,
                         generate_display_name=True,
                         auto_approve=auto_approve,
                         source_file_path=file_path,
                         custom_push_name=document.get("custom_push_name") if document else None,
-                        source=(template or {}).get("extraction_mode"),
+                        source=(configuration or {}).get("extraction_mode"),
+                        configuration=configuration,
+                        configuration_revision_id=(configuration or {}).get("revision_id"),
                     )
                 except Exception as e:
                     logger.warning(f"保存结果到数据库失败: {e}")
@@ -158,6 +159,8 @@ async def process_document(
                 job_type="template" if template_id else "single",
                 created_by=user.user_id,
                 related_document_ids=[document_id],
+                tenant_id=tenant_id,
+                configuration_revision_id=(configuration or {}).get("revision_id"),
             )
             try:
                 await supabase_service.update_document_status(document_id, "queued")
@@ -196,35 +199,40 @@ async def process_document_task(
             if job_id:
                 await update_job(job_id, "ocr")
             await supabase_service.update_document_status(document_id, "processing")
-            logger.info(f"开始后台处理: {document_id}, 模板: {template_id or '无(自动分类)'}")
 
-            # 根据是否有模板选择处理方式
-            if template_id:
-                result = await ocr_workflow.process_with_template(
+            # Job 固定的 Revision 优先；否则按文档关联的 Configuration 取当前发布版本
+            configuration = None
+            if configuration_revision_id:
+                configuration = await configuration_service.get_extraction_configuration_by_revision(
+                    configuration_revision_id
+                )
+            if configuration is None and template_id:
+                configuration = await configuration_service.get_extraction_configuration(template_id)
+
+            logger.info(
+                f"开始后台处理: {document_id}, "
+                f"配置: {(configuration or {}).get('name') or '无(自动分类)'}"
+            )
+
+            if configuration:
+                result = await ocr_workflow.process_with_configuration(
                     document_id=document_id,
                     file_path=file_path,
-                    template_id=template_id,
+                    configuration=configuration,
                     tenant_id=tenant_id
                 )
             else:
                 result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
 
             if result["success"] and result.get("extraction_data"):
-                auto_approve = False
-                template = None
-                if template_id:
-                    template = await template_service.get_template(template_id)
-                elif tenant_id and result.get("document_type"):
-                    template = await template_service.get_template_by_code(tenant_id, result.get("document_type"))
-                if template:
-                    auto_approve = bool(template.get("auto_approve", False))
+                auto_approve = bool((configuration or {}).get("auto_approve", False))
                 if force_pending_review:
                     auto_approve = False
 
                 await handle_processing_success(
                     document_id=document_id,
                     result=result,
-                    template_id=template_id or (template.get("id") if template else None),
+                    template_id=template_id or (configuration or {}).get("id"),
                     tenant_id=tenant_id,
                     generate_display_name=True,
                     auto_approve=auto_approve,
@@ -232,8 +240,9 @@ async def process_document_task(
                     custom_push_name=custom_push_name,
                     skip_feishu_push=force_pending_review,
                     job_id=job_id,
-                    configuration_revision_id=configuration_revision_id,
-                    source=(template or {}).get("extraction_mode"),
+                    configuration_revision_id=configuration_revision_id or (configuration or {}).get("revision_id"),
+                    source=(configuration or {}).get("extraction_mode"),
+                    configuration=configuration,
                 )
                 if job_id:
                     await update_job(job_id, "completed", document_ids=[document_id], error=None)
@@ -278,7 +287,7 @@ async def process_text_directly(
         raise ProcessingError(f"处理失败: {str(e)}")
 
 
-# ============ 模板化处理端点 ============
+# ============ 配置化处理端点 ============
 
 @router.post("/{document_id}/process-with-template")
 async def process_document_with_template(
@@ -288,10 +297,10 @@ async def process_document_with_template(
     user: CurrentUser = Depends(get_current_user)
 ):
     """
-    使用指定模板处理文档
+    使用指定配置处理文档
     
     - **document_id**: 文档ID
-    - **template_id**: 模板ID
+    - **template_id**: Configuration ID（兼容字段名）
     - **sync**: 是否同步处理（默认异步后台处理）
     """
     try:
@@ -308,16 +317,16 @@ async def process_document_with_template(
         if not file_path or not os.path.exists(file_path):
             raise FileNotFoundError(file_path or "未知路径")
         
-        # 获取模板信息
-        template = await template_service.get_template(request.template_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="模板不存在")
+        # 获取配置信息
+        configuration = await configuration_service.get_extraction_configuration(request.template_id)
+        if not configuration:
+            raise HTTPException(status_code=404, detail="配置不存在")
         
-        # 检查模板是否属于用户的租户
-        if template.get("tenant_id") != user.tenant_id and not user.is_super_admin():
-            raise HTTPException(status_code=403, detail="无权使用此模板")
+        # 检查配置是否属于用户的租户
+        if configuration.get("tenant_id") != user.tenant_id and not user.is_super_admin():
+            raise HTTPException(status_code=403, detail="无权使用此配置")
         
-        auto_approve = bool(template.get("auto_approve", False))
+        auto_approve = bool(configuration.get("auto_approve", False))
         custom_push_name = document.get("custom_push_name")
 
         current_status = document.get("status")
@@ -338,18 +347,18 @@ async def process_document_with_template(
 
         if request.sync:
             # 同步处理
-            result = await ocr_workflow.process_with_template(
+            result = await ocr_workflow.process_with_configuration(
                 document_id=document_id,
                 file_path=file_path,
-                template_id=request.template_id,
+                configuration=configuration,
                 tenant_id=user.tenant_id
             )
 
             # 保存结果
             if result["success"] and result.get("extraction_data"):
-                await _save_template_extraction_result(
+                await _persist_extraction_result(
                     document_id=document_id,
-                    template=template,
+                    configuration=configuration,
                     result=result,
                     user=user,
                     file_path=file_path,
@@ -364,6 +373,8 @@ async def process_document_with_template(
                 job_type="template",
                 created_by=user.user_id,
                 related_document_ids=[document_id],
+                tenant_id=user.tenant_id,
+                configuration_revision_id=configuration.get("revision_id"),
             )
             await supabase_service.update_document_status(document_id, "queued")
 
@@ -378,7 +389,7 @@ async def process_document_with_template(
     except (DocumentNotFoundError, FileNotFoundError, HTTPException):
         raise
     except Exception as e:
-        logger.error(f"模板化处理失败: {e}")
+        logger.error(f"配置化处理失败: {e}")
         raise ProcessingError(f"处理失败: {str(e)}")
 
 
@@ -391,18 +402,22 @@ async def process_document_with_template_task(
     custom_push_name: Optional[str] = None,
     job_id: Optional[str] = None,
 ):
-    """模板化处理后台任务"""
+    """配置化处理后台任务"""
     try:
         async with _DOC_PROCESS_SEMAPHORE:
             if job_id:
                 await update_job(job_id, "ocr")
             await supabase_service.update_document_status(document_id, "processing")
-            logger.info(f"开始模板化后台处理: {document_id}, 模板: {template_id}")
 
-            result = await ocr_workflow.process_with_template(
+            configuration = await configuration_service.get_extraction_configuration(template_id)
+            if not configuration:
+                raise ProcessingError(f"配置不存在或不可用: {template_id}")
+            logger.info(f"开始配置化后台处理: {document_id}, 配置: {configuration.get('name')}")
+
+            result = await ocr_workflow.process_with_configuration(
                 document_id=document_id,
                 file_path=file_path,
-                template_id=template_id,
+                configuration=configuration,
                 tenant_id=tenant_id
             )
 
@@ -416,6 +431,8 @@ async def process_document_with_template_task(
                     auto_approve=auto_approve,
                     source_file_path=file_path,
                     custom_push_name=custom_push_name,
+                    source=configuration.get("extraction_mode"),
+                    configuration=configuration,
                 )
                 if job_id:
                     await update_job(job_id, "completed", document_ids=[document_id], error=None)
@@ -483,27 +500,29 @@ async def _can_access_job(job: dict, user: CurrentUser) -> bool:
     return False
 
 
-async def _save_template_extraction_result(
+async def _persist_extraction_result(
     document_id: str,
-    template: dict,
+    configuration: dict,
     result: dict,
     user: CurrentUser,
     file_path: Optional[str] = None,
     auto_approve: bool = False,
     custom_push_name: Optional[str] = None,
 ):
-    """保存模板化提取结果"""
+    """保存配置化提取结果"""
     try:
         await handle_processing_success(
             document_id=document_id,
             result=result,
-            template_id=template.get("id"),
+            template_id=configuration.get("id"),
             tenant_id=user.tenant_id,
             generate_display_name=False,
             auto_approve=auto_approve,
             source_file_path=file_path,
             custom_push_name=custom_push_name,
-            source=template.get("extraction_mode"),
+            source=configuration.get("extraction_mode"),
+            configuration=configuration,
+            configuration_revision_id=configuration.get("revision_id"),
         )
     except Exception as e:
-        logger.error(f"保存模板提取结果失败: {e}")
+        logger.error(f"保存配置提取结果失败: {e}")

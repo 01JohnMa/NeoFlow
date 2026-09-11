@@ -5,7 +5,7 @@ import { Upload } from '@/pages/Upload'
 const profileState = vi.hoisted(() => ({
   tenantName: '测试部门' as string | null,
   tenantCode: 'quality' as string | null,
-  templates: [] as Array<{ id: string; name: string; code: string; required_doc_count: number; is_active?: boolean }>,
+  templates: [] as Array<{ id: string; name: string; code: string; is_active?: boolean }>,
   isLoading: false,
 }))
 
@@ -27,8 +27,8 @@ describe('Upload page', () => {
     profileState.tenantName = '测试部门'
     profileState.tenantCode = 'quality'
     profileState.templates = [
-      { id: 'tpl-inspection', name: '检测报告', code: 'inspection_report', required_doc_count: 1 },
-      { id: 'tpl-express', name: '快递单', code: 'express', required_doc_count: 1 },
+      { id: 'tpl-inspection', name: '检测报告', code: 'inspection_report' },
+      { id: 'tpl-express', name: '快递单', code: 'express' },
     ]
 
     const html = renderToStaticMarkup(<Upload />)

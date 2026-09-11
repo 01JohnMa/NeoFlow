@@ -19,6 +19,20 @@ SAMPLING_TEMPLATE_ID = "b0000000-0000-0000-0000-000000000003"
 EXPRESS_TEMPLATE_ID = "b0000000-0000-0000-0000-000000000002"
 
 
+def _crm_configuration(configuration_id, tenant_id=QUALITY_TENANT_ID, code="inspection_report", **overrides):
+    configuration = {
+        "id": configuration_id,
+        "tenant_id": tenant_id,
+        "name": "检测报告",
+        "code": code,
+        "type": "extract",
+        "fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
+        "feishu": {"bitable_token": "bitable-token", "table_id": "table-id"},
+    }
+    configuration.update(overrides)
+    return configuration
+
+
 def _crm_feishu_push_payload(**overrides):
     payload = {
         "alipay_account": "pay@example.com",
@@ -77,13 +91,12 @@ def test_crm_submit_uploads_document_and_queues_review_required_job(tmp_path, mo
     monkeypatch.setattr(crm_route.uuid, "uuid4", lambda: DOCUMENT_ID)
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service, \
+         patch("api.routes.crm.configuration_service") as mock_configuration_service, \
          patch("api.routes.crm.create_job", new_callable=AsyncMock, return_value="job-crm"), \
          patch("api.routes.crm._prepare_crm_json_upload", new_callable=AsyncMock) as mock_prepare:
-        mock_template_service.get_template = AsyncMock(return_value={
-            "id": INSPECTION_TEMPLATE_ID,
-            "tenant_id": QUALITY_TENANT_ID,
-        })
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=_crm_configuration(INSPECTION_TEMPLATE_ID)
+        )
         mock_prepare.return_value = {
             "file_name": f"{DOCUMENT_ID}.pdf",
             "original_file_name": "CRM单据.pdf",
@@ -138,13 +151,12 @@ def test_crm_submit_accepts_configured_fixed_token(tmp_path, monkeypatch):
     monkeypatch.setattr(crm_route.uuid, "uuid4", lambda: DOCUMENT_ID)
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service, \
+         patch("api.routes.crm.configuration_service") as mock_configuration_service, \
          patch("api.routes.crm.create_job", new_callable=AsyncMock, return_value="job-crm"), \
          patch("api.routes.crm._prepare_crm_json_upload", new_callable=AsyncMock) as mock_prepare:
-        mock_template_service.get_template = AsyncMock(return_value={
-            "id": INSPECTION_TEMPLATE_ID,
-            "tenant_id": QUALITY_TENANT_ID,
-        })
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=_crm_configuration(INSPECTION_TEMPLATE_ID)
+        )
         mock_prepare.return_value = {
             "file_name": f"{DOCUMENT_ID}.pdf",
             "original_file_name": "crm_url_document.pdf",
@@ -417,17 +429,18 @@ def test_crm_submit_rejects_regular_user():
     assert response.status_code == 403
 
 
-def test_crm_submit_rejects_template_from_other_tenant():
-    """CRM 入口不能使用当前调用方无权访问的模板。"""
+def test_crm_submit_rejects_configuration_from_other_tenant():
+    """CRM 入口不能使用当前调用方无权访问的配置。"""
     import api.routes.crm as crm_route
 
     client = _build_test_app(crm_route, _mock_current_user)
 
-    with patch("api.routes.crm.template_service") as mock_template_service:
-        mock_template_service.get_template = AsyncMock(return_value={
-            "id": TEMPLATE_ID,
-            "tenant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        })
+    with patch("api.routes.crm.configuration_service") as mock_configuration_service:
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=_crm_configuration(
+                TEMPLATE_ID, tenant_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            )
+        )
 
         response = client.post(
             "/api/crm/documents/submit",
@@ -440,17 +453,16 @@ def test_crm_submit_rejects_template_from_other_tenant():
     assert response.status_code == 403
 
 
-def test_crm_submit_rejects_express_template():
-    """CRM 入口不支持快递单模板。"""
+def test_crm_submit_rejects_express_configuration():
+    """CRM 入口不支持快递单配置。"""
     import api.routes.crm as crm_route
 
     client = _build_test_app(crm_route, _mock_quality_admin)
 
-    with patch("api.routes.crm.template_service") as mock_template_service:
-        mock_template_service.get_template = AsyncMock(return_value={
-            "id": EXPRESS_TEMPLATE_ID,
-            "tenant_id": QUALITY_TENANT_ID,
-        })
+    with patch("api.routes.crm.configuration_service") as mock_configuration_service:
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=_crm_configuration(EXPRESS_TEMPLATE_ID, code="express")
+        )
 
         response = client.post(
             "/api/crm/documents/submit",
@@ -478,15 +490,7 @@ def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
         "file_path": "/tmp/report.pdf",
         "custom_push_name": "原始推送名",
     }
-    template = {
-        "id": INSPECTION_TEMPLATE_ID,
-        "tenant_id": QUALITY_TENANT_ID,
-        "code": "inspection_report",
-        "name": "检测报告",
-        "feishu_bitable_token": "bitable-token",
-        "feishu_table_id": "table-id",
-        "template_fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
-    }
+    configuration = _crm_configuration(INSPECTION_TEMPLATE_ID)
     result_row = {
         "id": "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrrrrr",
         "document_id": DOCUMENT_ID,
@@ -497,15 +501,16 @@ def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
     }
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service, \
+         patch("api.routes.crm.configuration_service") as mock_configuration_service, \
          patch("api.routes.crm.result_service") as mock_result_service, \
          patch("api.routes.crm._mark_crm_push_completed", new_callable=AsyncMock) as mock_mark_completed, \
          patch("api.routes.crm.has_feishu_push_record", new_callable=AsyncMock, return_value=False), \
          patch("api.routes.crm.build_feishu_push_dedupe_key", return_value="crm-dedupe"), \
          patch("api.routes.crm.push_to_feishu", new_callable=AsyncMock, return_value=True) as mock_push:
         mock_svc.get_document = AsyncMock(return_value=document)
-        mock_svc.resolve_table_name = AsyncMock(return_value="inspection_reports")
-        mock_template_service.get_template_with_details = AsyncMock(return_value=template)
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=configuration
+        )
         mock_result_service.get_document_result = AsyncMock(return_value=result_row)
 
         response = client.post(
@@ -551,7 +556,6 @@ def test_crm_feishu_push_merges_reviewed_data_and_alipay_then_completes():
     assert push_kwargs["custom_push_name"] == "CRM审核单"
     assert push_kwargs["dedupe_key"] == "crm-dedupe"
     mock_mark_completed.assert_awaited_once_with(
-        "inspection_reports",
         DOCUMENT_ID,
         {"sample_name": "CRM修正值"},
         USER_ID,
@@ -572,7 +576,7 @@ def test_crm_feishu_push_requires_manual_fields():
     assert response.status_code == 400
 
 
-def test_crm_feishu_push_rejects_express_template():
+def test_crm_feishu_push_rejects_express_configuration():
     """CRM 飞书推送仅支持检测报告和抽样单。"""
     import api.routes.crm as crm_route
 
@@ -587,14 +591,11 @@ def test_crm_feishu_push_rejects_express_template():
     }
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service:
+         patch("api.routes.crm.configuration_service") as mock_configuration_service:
         mock_svc.get_document = AsyncMock(return_value=document)
-        mock_template_service.get_template_with_details = AsyncMock(return_value={
-            "id": EXPRESS_TEMPLATE_ID,
-            "tenant_id": QUALITY_TENANT_ID,
-            "code": "express",
-            "name": "快递单",
-        })
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=_crm_configuration(EXPRESS_TEMPLATE_ID, code="express")
+        )
 
         response = client.post(
             f"/api/crm/documents/{DOCUMENT_ID}/feishu/push",
@@ -618,26 +619,19 @@ def test_crm_feishu_push_does_not_complete_when_push_fails():
         "document_type": "sampling",
         "file_path": "/tmp/sampling.pdf",
     }
-    template = {
-        "id": SAMPLING_TEMPLATE_ID,
-        "tenant_id": QUALITY_TENANT_ID,
-        "code": "sampling",
-        "name": "抽样单",
-        "feishu_bitable_token": "bitable-token",
-        "feishu_table_id": "table-id",
-        "template_fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
-    }
+    configuration = _crm_configuration(SAMPLING_TEMPLATE_ID, code="sampling")
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service, \
+         patch("api.routes.crm.configuration_service") as mock_configuration_service, \
          patch("api.routes.crm._fetch_extraction_result", new_callable=AsyncMock, return_value={"sample_name": "样品"}), \
          patch("api.routes.crm._mark_crm_push_completed", new_callable=AsyncMock) as mock_mark_completed, \
          patch("api.routes.crm.has_feishu_push_record", new_callable=AsyncMock, return_value=False), \
          patch("api.routes.crm.build_feishu_push_dedupe_key", return_value="crm-dedupe"), \
          patch("api.routes.crm.push_to_feishu", new_callable=AsyncMock, return_value=False):
         mock_svc.get_document = AsyncMock(return_value=document)
-        mock_svc.resolve_table_name = AsyncMock(return_value="sampling_forms")
-        mock_template_service.get_template_with_details = AsyncMock(return_value=template)
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=configuration
+        )
 
         response = client.post(
             f"/api/crm/documents/{DOCUMENT_ID}/feishu/push",
@@ -662,23 +656,16 @@ def test_crm_feishu_push_rejects_unknown_reviewed_data_fields_before_push():
         "document_type": "inspection_report",
         "file_path": "/tmp/report.pdf",
     }
-    template = {
-        "id": INSPECTION_TEMPLATE_ID,
-        "tenant_id": QUALITY_TENANT_ID,
-        "code": "inspection_report",
-        "name": "检测报告",
-        "feishu_bitable_token": "bitable-token",
-        "feishu_table_id": "table-id",
-        "template_fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
-    }
+    configuration = _crm_configuration(INSPECTION_TEMPLATE_ID)
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service, \
+         patch("api.routes.crm.configuration_service") as mock_configuration_service, \
          patch("api.routes.crm._fetch_extraction_result", new_callable=AsyncMock, return_value={"sample_name": "样品"}), \
          patch("api.routes.crm.push_to_feishu", new_callable=AsyncMock) as mock_push:
         mock_svc.get_document = AsyncMock(return_value=document)
-        mock_svc.resolve_table_name = AsyncMock(return_value="inspection_reports")
-        mock_template_service.get_template_with_details = AsyncMock(return_value=template)
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=configuration
+        )
 
         response = client.post(
             f"/api/crm/documents/{DOCUMENT_ID}/feishu/push",
@@ -703,26 +690,19 @@ def test_crm_feishu_push_existing_record_marks_completed_without_second_push():
         "document_type": "inspection_report",
         "file_path": "/tmp/report.pdf",
     }
-    template = {
-        "id": INSPECTION_TEMPLATE_ID,
-        "tenant_id": QUALITY_TENANT_ID,
-        "code": "inspection_report",
-        "name": "检测报告",
-        "feishu_bitable_token": "bitable-token",
-        "feishu_table_id": "table-id",
-        "template_fields": [{"field_key": "sample_name", "feishu_column": "样品名称"}],
-    }
+    configuration = _crm_configuration(INSPECTION_TEMPLATE_ID)
 
     with patch("api.routes.crm.supabase_service") as mock_svc, \
-         patch("api.routes.crm.template_service") as mock_template_service, \
+         patch("api.routes.crm.configuration_service") as mock_configuration_service, \
          patch("api.routes.crm._fetch_extraction_result", new_callable=AsyncMock, return_value={"sample_name": "样品"}), \
          patch("api.routes.crm._mark_crm_push_completed", new_callable=AsyncMock) as mock_mark_completed, \
          patch("api.routes.crm.has_feishu_push_record", new_callable=AsyncMock, return_value=True), \
          patch("api.routes.crm.build_feishu_push_dedupe_key", return_value="crm-dedupe"), \
          patch("api.routes.crm.push_to_feishu", new_callable=AsyncMock) as mock_push:
         mock_svc.get_document = AsyncMock(return_value=document)
-        mock_svc.resolve_table_name = AsyncMock(return_value="inspection_reports")
-        mock_template_service.get_template_with_details = AsyncMock(return_value=template)
+        mock_configuration_service.get_extraction_configuration = AsyncMock(
+            return_value=configuration
+        )
 
         response = client.post(
             f"/api/crm/documents/{DOCUMENT_ID}/feishu/push",
@@ -733,7 +713,6 @@ def test_crm_feishu_push_existing_record_marks_completed_without_second_push():
     assert response.json()["status"] == "skipped"
     mock_push.assert_not_awaited()
     mock_mark_completed.assert_awaited_once_with(
-        "inspection_reports",
         DOCUMENT_ID,
         {},
         USER_ID,
@@ -767,39 +746,11 @@ async def test_fetch_extraction_result_reads_result_store(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mark_crm_push_completed_writes_result_and_legacy_mirror(monkeypatch):
-    """CRM 完成标记先写 Result，再写旧表镜像，最后置文档完成。"""
+async def test_mark_crm_push_completed_writes_result_and_completes_document(monkeypatch):
+    """CRM 完成标记写 Result，最后置文档完成；不再写旧业务表。"""
     import api.routes.crm as crm_route
 
-    class FakeUpdateQuery:
-        def __init__(self):
-            self.update_data = None
-            self.eq_args = None
-            self.calls = []
-
-        def update(self, data):
-            self.calls.append("update")
-            self.update_data = data
-            return self
-
-        def eq(self, *args):
-            self.calls.append("eq")
-            self.eq_args = args
-            return self
-
-        def execute(self):
-            self.calls.append("execute")
-            return SimpleNamespace(data=[])
-
-    update_query = FakeUpdateQuery()
-
-    class FakeClient:
-        def table(self, table_name):
-            assert table_name == "inspection_reports"
-            return update_query
-
     class FakeSupabaseService:
-        client = FakeClient()
         update_document = AsyncMock()
 
     fake_service = FakeSupabaseService()
@@ -807,16 +758,13 @@ async def test_mark_crm_push_completed_writes_result_and_legacy_mirror(monkeypat
     monkeypatch.setattr(
         crm_route,
         "result_service",
-        SimpleNamespace(update_result_review=AsyncMock(return_value={"id": "r-1"})),
-    )
-    monkeypatch.setattr(
-        crm_route,
-        "_fetch_extraction_result",
-        AsyncMock(return_value={"sample_name": "CRM修正值", "is_validated": True}),
+        SimpleNamespace(update_result_review=AsyncMock(return_value={
+            "id": "r-1",
+            "review_state": "approved",
+        })),
     )
 
     await crm_route._mark_crm_push_completed(
-        "inspection_reports",
         DOCUMENT_ID,
         {"sample_name": "CRM修正值"},
         USER_ID,
@@ -827,30 +775,15 @@ async def test_mark_crm_push_completed_writes_result_and_legacy_mirror(monkeypat
         review_state="approved",
         data={"sample_name": "CRM修正值"},
     )
-    assert update_query.update_data["sample_name"] == "CRM修正值"
-    assert update_query.update_data["is_validated"] is True
-    assert update_query.update_data["validated_by"] == USER_ID
-    assert update_query.update_data["validated_at"]
-    assert update_query.eq_args == ("document_id", DOCUMENT_ID)
-    assert update_query.calls == ["update", "eq", "execute"]
     fake_service.update_document.assert_awaited_once_with(DOCUMENT_ID, {"status": "completed"})
 
 
 @pytest.mark.asyncio
 async def test_mark_crm_push_completed_fails_when_result_missing(monkeypatch):
-    """Result 不存在时不得只写旧表镜像后标记完成。"""
+    """Result 不存在时不得标记完成。"""
     import api.routes.crm as crm_route
 
-    class FakeClient:
-        def __init__(self):
-            self.calls = 0
-
-        def table(self, _table_name):
-            self.calls += 1
-            return SimpleNamespace()
-
     class FakeSupabaseService:
-        client = FakeClient()
         update_document = AsyncMock()
 
     fake_service = FakeSupabaseService()
@@ -863,37 +796,20 @@ async def test_mark_crm_push_completed_fails_when_result_missing(monkeypatch):
 
     with pytest.raises(crm_route.ProcessingError, match="CRM推送成功后更新审核结果失败"):
         await crm_route._mark_crm_push_completed(
-            "inspection_reports",
             DOCUMENT_ID,
             {"sample_name": "CRM修正值"},
             USER_ID,
         )
 
-    assert fake_service.client.calls == 0
     fake_service.update_document.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_mark_crm_push_completed_fails_when_result_refetch_not_validated(monkeypatch):
+async def test_mark_crm_push_completed_fails_when_result_not_approved(monkeypatch):
     """Result 写回后复核仍非通过时不得标记完成。"""
     import api.routes.crm as crm_route
 
-    class FakeUpdateQuery:
-        def update(self, _data):
-            return self
-
-        def eq(self, *_args):
-            return self
-
-        def execute(self):
-            return SimpleNamespace(data=[])
-
-    class FakeClient:
-        def table(self, _table_name):
-            return FakeUpdateQuery()
-
     class FakeSupabaseService:
-        client = FakeClient()
         update_document = AsyncMock()
 
     fake_service = FakeSupabaseService()
@@ -901,17 +817,14 @@ async def test_mark_crm_push_completed_fails_when_result_refetch_not_validated(m
     monkeypatch.setattr(
         crm_route,
         "result_service",
-        SimpleNamespace(update_result_review=AsyncMock(return_value={"id": "r-1"})),
-    )
-    monkeypatch.setattr(
-        crm_route,
-        "_fetch_extraction_result",
-        AsyncMock(return_value={"sample_name": "CRM修正值", "is_validated": False}),
+        SimpleNamespace(update_result_review=AsyncMock(return_value={
+            "id": "r-1",
+            "review_state": "pending",
+        })),
     )
 
     with pytest.raises(crm_route.ProcessingError, match="CRM推送成功后更新审核结果失败"):
         await crm_route._mark_crm_push_completed(
-            "inspection_reports",
             DOCUMENT_ID,
             {"sample_name": "CRM修正值"},
             USER_ID,

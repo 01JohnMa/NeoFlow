@@ -53,19 +53,20 @@ class TestDocumentResultRead:
     def test_reads_result_store_and_keeps_response_shape(self, client):
         with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run, \
              patch("api.routes.documents.query.result_service") as mock_result_service, \
-             patch("api.routes.documents.query.template_service") as mock_template_service, \
-             patch("api.routes.documents.query.supabase_service") as mock_supabase:
+             patch("api.routes.documents.query.configuration_service") as mock_configuration_service:
             mock_run.return_value = SimpleNamespace(data=[_document()])
             mock_result_service.get_document_result = AsyncMock(return_value=_result_row())
-            mock_template_service.get_template_fields = AsyncMock(return_value=[
-                {
-                    "field_key": "sample_name",
-                    "field_label": "样品名称",
-                    "field_type": "text",
-                    "sort_order": 1,
-                },
-            ])
-            mock_supabase.resolve_table_name = AsyncMock()
+            mock_configuration_service.get_extraction_configuration = AsyncMock(return_value={
+                "id": TEMPLATE_ID,
+                "fields": [
+                    {
+                        "field_key": "sample_name",
+                        "field_label": "样品名称",
+                        "field_type": "text",
+                        "sort_order": 1,
+                    },
+                ],
+            })
 
             response = client.get(f"/api/documents/{DOCUMENT_ID}/result")
 
@@ -77,20 +78,22 @@ class TestDocumentResultRead:
         assert body["is_validated"] is True
         assert body["created_at"] == "2026-01-02T00:00:00+00:00"
         assert body["ocr_text"] == "OCR 文本"
-        assert body["template_fields"][0]["field_key"] == "sample_name"
+        assert body["fields"][0]["field_key"] == "sample_name"
         mock_result_service.get_document_result.assert_awaited_once_with(
             DOCUMENT_ID, tenant_id=TENANT_ID
         )
-        # 读取侧不再解析/查询旧业务表
-        mock_supabase.resolve_table_name.assert_not_awaited()
+        # 字段白名单来自 Configuration，不再解析旧业务表
+        mock_configuration_service.get_extraction_configuration.assert_awaited_once_with(
+            TEMPLATE_ID, revision_id=None
+        )
 
     def test_returns_202_when_result_row_not_found(self, client):
         with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run, \
              patch("api.routes.documents.query.result_service") as mock_result_service, \
-             patch("api.routes.documents.query.template_service") as mock_template_service:
+             patch("api.routes.documents.query.configuration_service") as mock_configuration_service:
             mock_run.return_value = SimpleNamespace(data=[_document(status="completed")])
             mock_result_service.get_document_result = AsyncMock(return_value=None)
-            mock_template_service.get_template_fields = AsyncMock(return_value=[])
+            mock_configuration_service.get_extraction_configuration = AsyncMock(return_value=None)
 
             response = client.get(f"/api/documents/{DOCUMENT_ID}/result")
 
@@ -99,30 +102,27 @@ class TestDocumentResultRead:
 
 
 class TestDocumentReviewWrite:
-    """PUT validate/reject 写 Result 且保留旧表镜像。"""
+    """PUT validate/reject 只写 Result。"""
 
-    def test_validate_writes_result_then_legacy_mirror_and_pushes_result_data(self, client):
+    def test_validate_writes_result_and_pushes_result_data(self, client):
         corrected = {"sample_name": "修正后"}
         updated_result = _result_row(data={"sample_name": "修正后", "report_date": "2026-01-01"})
 
         with patch("api.routes.documents.review._run_supabase", new_callable=AsyncMock) as mock_run, \
-             patch("api.routes.documents.review.supabase_service") as mock_supabase, \
+             patch("api.routes.documents.review.supabase_service"), \
              patch("api.routes.documents.review.result_service") as mock_result_service, \
-             patch("api.routes.documents.review.template_service") as mock_template_service, \
+             patch("api.routes.documents.review.configuration_service") as mock_configuration_service, \
              patch("api.routes.documents.review.push_to_feishu", new_callable=AsyncMock) as mock_push:
             mock_run.side_effect = [
                 SimpleNamespace(data=[_document()]),
-                SimpleNamespace(data=[{**corrected, "is_validated": True}]),
                 SimpleNamespace(data=[{"id": DOCUMENT_ID}]),
             ]
-            mock_supabase.resolve_table_name = AsyncMock(return_value="inspection_reports")
             mock_result_service.update_result_review = AsyncMock(return_value=updated_result)
-            mock_template_service.get_template_with_details = AsyncMock(return_value={
+            mock_configuration_service.get_extraction_configuration = AsyncMock(return_value={
                 "id": TEMPLATE_ID,
                 "name": "检测报告",
-                "template_fields": [],
-                "feishu_bitable_token": "bitable-token",
-                "feishu_table_id": "table-id",
+                "fields": [],
+                "feishu": {"bitable_token": "bitable-token", "table_id": "table-id"},
             })
 
             response = client.put(
@@ -137,18 +137,37 @@ class TestDocumentReviewWrite:
             data=corrected,
             tenant_id=TENANT_ID,
         )
-        # Result 与旧业务表镜像都写（document select + mirror update + status update）
-        assert mock_run.await_count == 3
+        # 只有 document select + status update，不再写旧业务表镜像
+        assert mock_run.await_count == 2
         # 飞书推送（含固定 Excel 附件）取 Result 数据
         mock_push.assert_awaited_once()
         assert mock_push.await_args.kwargs["extraction_data"]["sample_name"] == "修正后"
         assert mock_push.await_args.kwargs["extraction_data"]["document_id"] == DOCUMENT_ID
 
+    def test_validate_raises_when_result_missing(self, client):
+        with patch("api.routes.documents.review._run_supabase", new_callable=AsyncMock) as mock_run, \
+             patch("api.routes.documents.review.supabase_service"), \
+             patch("api.routes.documents.review.result_service") as mock_result_service, \
+             patch("api.routes.documents.review.configuration_service") as mock_configuration_service, \
+             patch("api.routes.documents.review.push_to_feishu", new_callable=AsyncMock) as mock_push:
+            mock_run.side_effect = [SimpleNamespace(data=[_document()])]
+            mock_result_service.update_result_review = AsyncMock(return_value=None)
+            mock_configuration_service.get_extraction_configuration = AsyncMock(return_value=None)
+
+            response = client.put(
+                f"/api/documents/{DOCUMENT_ID}/validate",
+                json={"document_type": "inspection_report", "data": {}},
+            )
+
+        assert response.status_code == 500
+        assert "无法审核" in response.json()["error"]
+        mock_push.assert_not_awaited()
+
     def test_reject_marks_result_rejected(self, client):
         with patch("api.routes.documents.review._run_supabase", new_callable=AsyncMock) as mock_run, \
              patch("api.routes.documents.review.supabase_service"), \
              patch("api.routes.documents.review.result_service") as mock_result_service, \
-             patch("api.routes.documents.review.template_service"):
+             patch("api.routes.documents.review.configuration_service"):
             mock_run.side_effect = [
                 SimpleNamespace(data=[_document()]),
                 SimpleNamespace(data=[{"id": DOCUMENT_ID}]),

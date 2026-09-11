@@ -31,7 +31,7 @@ class TenantService(SupabaseClientMixin):
             租户列表
         """
         try:
-            query = self._get_client().table("tenants").select("id, name, code, description, settings")
+            query = self._get_client().table("tenants").select("id, name, code, description")
             
             if active_only:
                 query = query.eq("is_active", True)

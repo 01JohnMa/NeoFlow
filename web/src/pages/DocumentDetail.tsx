@@ -20,7 +20,7 @@ import { cn, getStatusColor, getStatusText, formatDate, getDocumentTypeText } fr
 import { documentsService } from '@/services/documents'
 import { shouldHideDownloadForType } from '@/config/features'
 import {
-  type TemplateFieldForDetail,
+  type ConfigurationFieldForDetail,
   type ReviewHintField,
 } from '@/types'
 import {
@@ -79,7 +79,7 @@ export function DocumentDetail() {
     }
   }, [result])
 
-  const fields: TemplateFieldForDetail[] = result?.template_fields ?? []
+  const fields: ConfigurationFieldForDetail[] = result?.fields ?? []
   const hideDownload = shouldHideDownloadForType(status?.document_type || result?.document_type)
 
   // Handle field change
