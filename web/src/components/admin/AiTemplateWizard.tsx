@@ -29,14 +29,14 @@ import { cn } from '@/lib/utils'
 
 interface AiTemplateWizardProps {
   tenantId: string
-  onCommitted: () => void | Promise<void>
+  onCommitted: (configurationId: string) => void | Promise<void>
 }
 
 const steps = [
   { key: 'upload', label: '上传 OCR' },
   { key: 'analyze', label: 'AI 分析' },
   { key: 'confirm', label: '确认配置' },
-  { key: 'commit', label: '写入模板' },
+  { key: 'commit', label: '发布配置' },
 ]
 
 const formatJson = (value: Record<string, unknown>) => JSON.stringify(value ?? {}, null, 2)
@@ -246,7 +246,7 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
         cleaner_code: codeIsCurrent ? cleanerCode || null : null,
       })
       setCommitResult(result)
-      await onCommitted()
+      await onCommitted(result.configuration_id)
     })
   }
 
@@ -751,7 +751,7 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
                   disabled={!canCommit}
                   loading={loadingAction === 'commit'}
                 >
-                  写入 Supabase
+                  创建并发布配置
                 </Button>
               </div>
 
@@ -797,7 +797,9 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
 
           {commitResult && (
             <div className="rounded-lg border border-success-500/30 bg-success-500/10 px-4 py-3 text-sm text-success-500">
-              已写入模板 {commitResult.template_id}，新增 {commitResult.field_ids.length} 个字段和 {commitResult.example_ids.length} 个示例。
+              已创建并发布配置 {commitResult.configuration_id}（修订 #
+              {commitResult.revision_number}），包含 {commitResult.field_count} 个字段和{' '}
+              {commitResult.example_count} 条示例。
             </div>
           )}
         </div>

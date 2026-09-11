@@ -1,52 +1,106 @@
-// ============ Admin Config Types ============
+// ============ Configuration Types ============
 
-export interface TemplateField {
-  id: string
-  template_id: string
+export type ConfigurationType = 'parse' | 'extract' | 'classify' | 'split' | 'composite'
+export type ConfigurationStatus = 'draft' | 'published' | 'archived'
+export type ExtractionMode = 'ocr_llm' | 'vlm'
+export type OutputMode = 'bitable' | 'excel_template' | 'both'
+export type FieldType = 'text' | 'date' | 'number' | 'boolean'
+
+export interface ConfigurationField {
   field_key: string
   field_label: string
-  field_type: 'text' | 'date' | 'number'
-  extraction_hint: string | null
-  feishu_column: string | null
+  field_type: FieldType
+  extraction_hint: string
+  feishu_column: string
   sort_order: number
   review_enforced: boolean
   review_allowed_values: string[] | null
+  is_required: boolean
+  default_value: string | null
+  source_doc_type: string | null
 }
 
-export interface TemplateExample {
-  id: string
-  template_id: string
+export interface ConfigurationExample {
   example_input: string
   example_output: Record<string, unknown>
+  description: string | null
   sort_order: number
   is_active: boolean
 }
 
-export interface AdminTemplate {
+export interface FeishuOutputConfig {
+  bitable_token: string | null
+  table_id: string | null
+}
+
+export interface ExcelOutputConfig {
+  file_name: string | null
+  path: string | null
+  placeholders: SDKExcelPlaceholder[]
+}
+
+export interface ConfigurationDefinition {
+  fields: ConfigurationField[]
+  examples: ConfigurationExample[]
+  extraction_prompt: string | null
+  extraction_mode: ExtractionMode
+  per_page_extraction: boolean
+  cleaner_module: string | null
+  output_mode: OutputMode
+  push_attachment: boolean
+  auto_approve: boolean
+  feishu: FeishuOutputConfig
+  excel: ExcelOutputConfig
+}
+
+export interface ConfigurationRevision {
+  id: string
+  configuration_id: string
+  revision_number: number
+  definition: ConfigurationDefinition
+  created_by: string | null
+  created_at: string
+  published_at: string | null
+}
+
+export interface Configuration {
   id: string
   tenant_id: string
+  project_id: string
   name: string
-  code: string
+  code: string | null
   description: string | null
-  required_doc_count: number
-  sort_order: number
-  is_active: boolean
-  auto_approve: boolean
-  push_attachment: boolean
-  extraction_mode: 'ocr_llm' | 'vlm'
-  per_page_extraction: boolean
-  output_mode?: 'bitable' | 'excel_template' | 'both'
-  excel_template_file_name?: string | null
-  excel_template_path?: string | null
-  excel_template_placeholders?: SDKExcelPlaceholder[]
-  feishu_bitable_token: string | null
-  feishu_table_id: string | null
+  type: ConfigurationType
+  status: ConfigurationStatus
+  draft_definition: ConfigurationDefinition
+  current_revision_id: string | null
+  current_revision?: ConfigurationRevision | null
+  created_at: string
+  updated_at: string
 }
 
-export interface CreateFieldPayload {
+export interface CreateConfigurationPayload {
+  name: string
+  tenant_id?: string
+  project_id?: string
+  code?: string | null
+  description?: string | null
+  type?: ConfigurationType
+  definition?: Partial<ConfigurationDefinition>
+}
+
+export interface UpdateConfigurationPayload {
+  name?: string
+  code?: string | null
+  description?: string | null
+  type?: ConfigurationType
+  definition?: Partial<ConfigurationDefinition>
+}
+
+export interface ConfigurationFieldPayload {
   field_key: string
   field_label: string
-  field_type: 'text' | 'date' | 'number'
+  field_type: FieldType
   extraction_hint?: string
   feishu_column?: string
   sort_order?: number
@@ -54,33 +108,11 @@ export interface CreateFieldPayload {
   review_allowed_values?: string[] | null
 }
 
-export type UpdateFieldPayload = Partial<CreateFieldPayload>
-
-export interface CreateExamplePayload {
+export interface ConfigurationExamplePayload {
   example_input: string
   example_output: Record<string, unknown>
   sort_order?: number
   is_active?: boolean
-}
-
-export type UpdateExamplePayload = Partial<CreateExamplePayload>
-
-export interface UpdateTemplateConfigPayload {
-  feishu_bitable_token?: string
-  feishu_table_id?: string
-  auto_approve?: boolean
-  push_attachment?: boolean
-  extraction_mode?: 'ocr_llm' | 'vlm'
-  per_page_extraction?: boolean
-  output_mode?: 'bitable' | 'excel_template' | 'both'
-  excel_template_file_name?: string | null
-  excel_template_path?: string | null
-  excel_template_placeholders?: SDKExcelPlaceholder[]
-}
-
-export interface ReorderItem {
-  id: string
-  sort_order: number
 }
 
 // ============ AI Template SDK types ============
@@ -146,10 +178,11 @@ export interface SDKConfirmTemplatePayload {
 
 export interface SDKCommitResult {
   tenant_id: string
-  template_id: string
-  field_ids: string[]
-  example_ids: string[]
-  cleaner_module: string | null
+  configuration_id: string
+  revision_id: string
+  revision_number: number
+  field_count: number
+  example_count: number
 }
 
 export interface SDKSession {

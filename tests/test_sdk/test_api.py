@@ -288,10 +288,11 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         commit_session_payload["cleaner_code"] = session.cleaner_code
         return {
             "tenant_id": TENANT_ID,
-            "template_id": "template-1",
-            "field_ids": ["field-1"],
-            "example_ids": ["example-1"],
-            "cleaner_module": None,
+            "configuration_id": "config-1",
+            "revision_id": "revision-1",
+            "revision_number": 1,
+            "field_count": 1,
+            "example_count": 1,
         }
 
     monkeypatch.setattr(sdk_route.ocr_service, "process_document", fake_process_document)
@@ -339,7 +340,8 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         },
     )
     assert commit_response.status_code == 200
-    assert commit_response.json()["commit_result"]["template_id"] == "template-1"
+    assert commit_response.json()["commit_result"]["configuration_id"] == "config-1"
+    assert commit_response.json()["commit_result"]["revision_id"] == "revision-1"
     assert commit_session_payload == {
         "prompt": "管理员最终确认的 prompt\n{ocr_text}",
         "cleaner_code": "def clean_sample_name(value: str) -> str:\n    return value.strip()",

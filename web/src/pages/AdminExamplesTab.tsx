@@ -1,17 +1,20 @@
-import { useState, useEffect, useCallback } from 'react'
-import * as adminApi from '@/services/admin'
-import type { TemplateExample, CreateExamplePayload } from '@/types'
+import { useState } from 'react'
+import * as configurationsApi from '@/services/configurations'
+import type {
+  Configuration,
+  ConfigurationExample,
+  ConfigurationExamplePayload,
+} from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Modal } from '@/components/ui/modal'
 import { Card } from '@/components/ui/card'
-import { Spinner } from '@/components/ui/spinner'
 import { Plus, Pencil, Trash2, GripVertical, ToggleLeft, ToggleRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const EMPTY_EXAMPLE: CreateExamplePayload = {
+const EMPTY_EXAMPLE: ConfigurationExamplePayload = {
   example_input: '',
   example_output: {},
   sort_order: 0,
@@ -63,24 +66,16 @@ function ExampleFormModal({
   onSubmit,
 }: {
   open: boolean
-  initial?: Partial<CreateExamplePayload> & { id?: string }
+  initial?: Partial<ConfigurationExamplePayload> & { id?: string }
   onClose: () => void
-  onSubmit: (data: CreateExamplePayload) => Promise<void>
+  onSubmit: (data: ConfigurationExamplePayload) => Promise<void>
 }) {
-  const [form, setForm] = useState<CreateExamplePayload>({ ...EMPTY_EXAMPLE, ...initial })
+  const [form, setForm] = useState<ConfigurationExamplePayload>({ ...EMPTY_EXAMPLE, ...initial })
   const [outputStr, setOutputStr] = useState(
     initial?.example_output ? JSON.stringify(initial.example_output, null, 2) : '{}',
   )
   const [outputValid, setOutputValid] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-
-  useEffect(() => {
-    setForm({ ...EMPTY_EXAMPLE, ...initial })
-    setOutputStr(
-      initial?.example_output ? JSON.stringify(initial.example_output, null, 2) : '{}',
-    )
-    setOutputValid(true)
-  }, [initial, open])
 
   const handleSubmit = async () => {
     if (!outputValid) return
@@ -164,63 +159,86 @@ function ExampleFormModal({
   )
 }
 
-export function ExamplesTab({ templateId }: { templateId: string }) {
-  const [examples, setExamples] = useState<TemplateExample[]>([])
-  const [loading, setLoading] = useState(true)
+function toConfigurationExample(
+  payload: ConfigurationExamplePayload,
+  index: number,
+  base?: ConfigurationExample,
+): ConfigurationExample {
+  return {
+    example_input: payload.example_input,
+    example_output: payload.example_output,
+    description: base?.description ?? null,
+    sort_order: payload.sort_order ?? index,
+    is_active: payload.is_active ?? true,
+  }
+}
+
+export function ExamplesTab({
+  configuration,
+  onUpdated,
+}: {
+  configuration: Configuration
+  onUpdated: (configuration: Configuration) => void
+}) {
+  const examples = configuration.draft_definition?.examples ?? []
   const [modalOpen, setModalOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<TemplateExample | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<TemplateExample | null>(null)
-  const [deleting, setDeleting] = useState(false)
+  const [editIndex, setEditIndex] = useState<number | null>(null)
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const saveExamples = async (nextExamples: ConfigurationExample[]) => {
+    setSaving(true)
     try {
-      const data = await adminApi.fetchExamples(templateId)
-      setExamples(data)
+      const updated = await configurationsApi.updateConfiguration(configuration.id, {
+        definition: { examples: nextExamples },
+      })
+      onUpdated(updated)
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
-  }, [templateId])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  const handleCreate = async (payload: CreateExamplePayload) => {
-    await adminApi.createExample(templateId, payload)
-    await load()
   }
 
-  const handleUpdate = async (payload: CreateExamplePayload) => {
-    if (!editTarget) return
-    await adminApi.updateExample(editTarget.id, payload)
-    await load()
+  const handleCreate = async (payload: ConfigurationExamplePayload) => {
+    await saveExamples([
+      ...examples,
+      toConfigurationExample(payload, examples.length),
+    ])
+  }
+
+  const handleUpdate = async (payload: ConfigurationExamplePayload) => {
+    if (editIndex === null) return
+    const next = examples.map((example, index) =>
+      index === editIndex ? toConfigurationExample(payload, index, example) : example,
+    )
+    await saveExamples(next)
   }
 
   const handleDelete = async () => {
-    if (!deleteTarget) return
-    setDeleting(true)
+    if (deleteIndex === null) return
+    setSaving(true)
     try {
-      await adminApi.deleteExample(deleteTarget.id)
-      setDeleteTarget(null)
-      await load()
+      const next = examples
+        .filter((_, index) => index !== deleteIndex)
+        .map((example, index) => ({ ...example, sort_order: index }))
+      const updated = await configurationsApi.updateConfiguration(configuration.id, {
+        definition: { examples: next },
+      })
+      setDeleteIndex(null)
+      onUpdated(updated)
     } finally {
-      setDeleting(false)
+      setSaving(false)
     }
   }
 
-  const toggleActive = async (example: TemplateExample) => {
-    await adminApi.updateExample(example.id, { is_active: !example.is_active })
-    await load()
+  const toggleActive = async (index: number) => {
+    const next = examples.map((example, i) =>
+      i === index ? { ...example, is_active: !example.is_active } : example,
+    )
+    await saveExamples(next)
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    )
-  }
+  const editTarget = editIndex === null ? null : examples[editIndex]
+  const deleteTarget = deleteIndex === null ? null : examples[deleteIndex]
 
   return (
     <div className="space-y-4">
@@ -228,8 +246,9 @@ export function ExamplesTab({ templateId }: { templateId: string }) {
         <p className="text-sm text-text-muted">共 {examples.length} 条示例</p>
         <Button
           size="sm"
+          disabled={saving}
           onClick={() => {
-            setEditTarget(null)
+            setEditIndex(null)
             setModalOpen(true)
           }}
         >
@@ -247,7 +266,7 @@ export function ExamplesTab({ templateId }: { templateId: string }) {
         <div className="space-y-3">
           {examples.map((ex, idx) => (
             <Card
-              key={ex.id}
+              key={idx}
               className={cn(
                 'p-4 transition-opacity',
                 !ex.is_active && 'opacity-50',
@@ -285,7 +304,8 @@ export function ExamplesTab({ templateId }: { templateId: string }) {
                     variant="ghost"
                     size="icon-sm"
                     title={ex.is_active ? '禁用' : '启用'}
-                    onClick={() => toggleActive(ex)}
+                    disabled={saving}
+                    onClick={() => toggleActive(idx)}
                   >
                     {ex.is_active ? (
                       <ToggleRight className="h-4 w-4 text-primary-400" />
@@ -296,8 +316,9 @@ export function ExamplesTab({ templateId }: { templateId: string }) {
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    disabled={saving}
                     onClick={() => {
-                      setEditTarget(ex)
+                      setEditIndex(idx)
                       setModalOpen(true)
                     }}
                   >
@@ -307,7 +328,8 @@ export function ExamplesTab({ templateId }: { templateId: string }) {
                     variant="ghost"
                     size="icon-sm"
                     className="hover:text-error-500"
-                    onClick={() => setDeleteTarget(ex)}
+                    disabled={saving}
+                    onClick={() => setDeleteIndex(idx)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -318,30 +340,32 @@ export function ExamplesTab({ templateId }: { templateId: string }) {
         </div>
       )}
 
-      <ExampleFormModal
-        open={modalOpen}
-        initial={
-          editTarget
-            ? {
-                id: editTarget.id,
-                example_input: editTarget.example_input,
-                example_output: editTarget.example_output,
-                sort_order: editTarget.sort_order,
-                is_active: editTarget.is_active,
-              }
-            : undefined
-        }
-        onClose={() => setModalOpen(false)}
-        onSubmit={editTarget ? handleUpdate : handleCreate}
-      />
+      {modalOpen && (
+        <ExampleFormModal
+          open
+          initial={
+            editTarget
+              ? {
+                  id: String(editIndex),
+                  example_input: editTarget.example_input,
+                  example_output: editTarget.example_output,
+                  sort_order: editTarget.sort_order,
+                  is_active: editTarget.is_active,
+                }
+              : undefined
+          }
+          onClose={() => setModalOpen(false)}
+          onSubmit={editIndex === null ? handleCreate : handleUpdate}
+        />
+      )}
 
       <Modal
-        open={!!deleteTarget}
+        open={deleteTarget !== null}
         title="删除示例"
         message="确定删除此 few-shot 示例？此操作不可恢复。"
-        confirmText={deleting ? '删除中...' : '删除'}
+        confirmText={saving ? '删除中...' : '删除'}
         cancelText="取消"
-        onClose={() => setDeleteTarget(null)}
+        onClose={() => setDeleteIndex(null)}
         onConfirm={handleDelete}
       />
     </div>
