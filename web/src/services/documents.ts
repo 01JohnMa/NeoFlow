@@ -95,6 +95,14 @@ export const documentsService = {
     return response.data
   },
 
+  // Fetch raw document blob (with auth token), for in-page preview
+  async fetchFileBlob(documentId: string): Promise<Blob> {
+    const response = await api.get(`/documents/${documentId}/download`, {
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   // Download document (with auth token)
   async download(documentId: string, filename?: string): Promise<void> {
     const response = await api.get(`/documents/${documentId}/download`, {

@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Upload,
   FileText,
+  FileSearch,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -18,6 +19,7 @@ const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
   { name: '上传文档', href: '/upload', icon: Upload },
   { name: '文档列表', href: '/documents', icon: FileText },
+  { name: '解析结果', href: '/parse', icon: FileSearch },
 ]
 
 export function Sidebar() {

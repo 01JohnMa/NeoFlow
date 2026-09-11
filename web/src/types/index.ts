@@ -289,3 +289,80 @@ export interface ExtractionResultResponse {
   review_hint_fields?: ReviewHintField[]
   template_fields: TemplateFieldForDetail[]
 }
+
+// ============ Parse Result / Job types ============
+
+export type ParseBlockType =
+  | 'title'
+  | 'text'
+  | 'list'
+  | 'table'
+  | 'figure'
+  | 'formula'
+  | 'header'
+  | 'footer'
+
+export type ParseSource = 'native-text' | 'ocr' | 'vlm' | 'office-xml'
+
+export type ParseCoordinateSpace = 'pixel' | 'normalized-1000'
+
+export interface ParseBlock {
+  id: string
+  type: ParseBlockType
+  bbox: number[]
+  text: string | null
+  table_html: string | null
+  image_path: string | null
+  latex: string | null
+  source: ParseSource
+  confidence: number | null
+  reading_order: number
+}
+
+export interface ParsePage {
+  page_no: number
+  width: number
+  height: number
+  coordinate_space: ParseCoordinateSpace | string
+  markdown: string | null
+  blocks: ParseBlock[]
+}
+
+export interface ParseEngine {
+  name?: string
+  backend?: string
+  effort?: string
+  version?: string
+  model_version?: string
+  method?: string
+}
+
+export interface ParseResult {
+  pages: ParsePage[]
+  markdown: string
+  engine: ParseEngine
+  warnings: string[]
+}
+
+export interface ParseResultResponse {
+  success: boolean
+  result_id: string
+  data: ParseResult
+}
+
+export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed'
+
+export interface ProcessingJob {
+  job_id: string
+  job_type: string
+  status: JobStatus | string
+  stage: string
+  progress: number
+  document_ids: string[]
+  error: string | null
+  tenant_id: string | null
+  configuration_revision_id: string | null
+  created_at: string
+  updated_at: string
+  finished_at?: string | null
+}
