@@ -90,6 +90,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.opt(exception=e).warning("Supabase服务初始化失败，请检查配置")
 
+    # 预热 JWKS 公钥（云项目非对称验签），避免首个请求在鉴权路径上等待
+    from api.dependencies.auth import warm_jwks_cache
+    await warm_jwks_cache()
+
     # 启动超时文档恢复后台任务
     asyncio.create_task(_stuck_recovery_loop())
     logger.info("✓ 超时文档恢复任务已启动（每 10 分钟执行一次）")

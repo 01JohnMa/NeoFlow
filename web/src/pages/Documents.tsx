@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useDocumentList, useDeleteDocument } from '@/hooks/useDocuments'
+import { useQueryClient } from '@tanstack/react-query'
+import { useDocumentList, useDeleteDocument, documentKeys } from '@/hooks/useDocuments'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +37,22 @@ export function Documents() {
   })
 
   const deleteMutation = useDeleteDocument()
+  const queryClient = useQueryClient()
+
+  // 悬停时预取详情数据，点击进入详情页不再等第一跳
+  const prefetchDocument = (doc: { id: string; status: DocumentStatus }) => {
+    void queryClient.prefetchQuery({
+      queryKey: documentKeys.status(doc.id),
+      queryFn: () => documentsService.getStatus(doc.id),
+    })
+    if (doc.status === 'completed' || doc.status === 'pending_review') {
+      void queryClient.prefetchQuery({
+        queryKey: documentKeys.result(doc.id),
+        queryFn: () => documentsService.getResult(doc.id),
+        staleTime: 60000,
+      })
+    }
+  }
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault()
@@ -164,6 +181,7 @@ export function Documents() {
                     <Link
                       key={doc.id}
                       to={`/documents/${doc.id}`}
+                      onMouseEnter={() => prefetchDocument(doc)}
                       className="block hover:bg-bg-hover transition-colors cursor-pointer"
                     >
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-4 px-6 py-4 items-center">

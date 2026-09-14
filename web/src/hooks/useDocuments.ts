@@ -42,6 +42,7 @@ export function useDocumentStatus(documentId: string, enabled: boolean = true) {
     queryKey: documentKeys.status(documentId),
     queryFn: () => documentsService.getStatus(documentId),
     enabled: enabled && !!documentId,
+    staleTime: 30000,
     refetchInterval: (query) => {
       const status = query.state.data?.status
       // 终态停止轮询（pending_review 只会在人工审核后变化）
@@ -57,12 +58,14 @@ export function useDocumentStatus(documentId: string, enabled: boolean = true) {
   })
 }
 
-// Extraction result hook
+// Extraction result hook（结果就绪后短期复用缓存；404 表示还没结果，直接交给页面按状态决定是否等待）
 export function useExtractionResult(documentId: string, enabled: boolean = true) {
   return useQuery({
     queryKey: documentKeys.result(documentId),
     queryFn: () => documentsService.getResult(documentId),
     enabled: enabled && !!documentId,
+    staleTime: 60000,
+    retry: false,
   })
 }
 

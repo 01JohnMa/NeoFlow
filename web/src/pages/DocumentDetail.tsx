@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   useDocumentStatus,
@@ -62,10 +62,26 @@ export function DocumentDetail() {
   const [newDisplayName, setNewDisplayName] = useState('')
 
   const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useDocumentStatus(id!, !!id)
-  const { data: result, isLoading: resultLoading, refetch: refetchResult } = useExtractionResult(
-    id!,
-    !!id && (status?.status === 'completed' || status?.status === 'pending_review')
-  )
+  const statusTerminal = status?.status === 'completed' || status?.status === 'pending_review'
+  // 与 status 并行拉取，缩短首屏等待；未就绪时在状态进入终态后自动重试一次
+  const {
+    data: result,
+    isLoading: resultLoading,
+    isFetching: resultFetching,
+    refetch: refetchResult,
+  } = useExtractionResult(id!, !!id)
+  const resultRetried = useRef(false)
+
+  useEffect(() => {
+    if (!statusTerminal) {
+      resultRetried.current = false
+      return
+    }
+    if (!result && !resultFetching && !resultRetried.current) {
+      resultRetried.current = true
+      void refetchResult()
+    }
+  }, [statusTerminal, result, resultFetching, refetchResult])
 
   const validateMutation = useValidateDocument()
   const deleteMutation = useDeleteDocument()
