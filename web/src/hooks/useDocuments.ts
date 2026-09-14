@@ -25,6 +25,14 @@ export function useDocumentList(params: {
     queryKey: documentKeys.list(params),
     queryFn: () => documentsService.list(params),
     staleTime: 30000, // 30 seconds
+    // 后台处理中的文档在列表里自动刷新，避免一直显示「排队中」
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? []
+      const active = items.some(
+        (item) => item.status === 'queued' || item.status === 'processing'
+      )
+      return active ? 3000 : false
+    },
   })
 }
 
@@ -36,8 +44,12 @@ export function useDocumentStatus(documentId: string, enabled: boolean = true) {
     enabled: enabled && !!documentId,
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      // Stop polling if completed or failed
-      if (status === 'completed' || status === 'failed') {
+      // 终态停止轮询（pending_review 只会在人工审核后变化）
+      if (
+        status === 'pending_review' ||
+        status === 'completed' ||
+        status === 'failed'
+      ) {
         return false
       }
       return 2000 // Poll every 2 seconds
