@@ -55,9 +55,11 @@ export function ConfigurationDetail({
     setLoading(true)
     setError(null)
     try {
-      const detail = await configurationsApi.getConfiguration(configurationId)
+      const [detail] = await Promise.all([
+        configurationsApi.getConfiguration(configurationId),
+        loadRevisions(),
+      ])
       setConfiguration(detail)
-      await loadRevisions()
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载配置失败')
     } finally {

@@ -20,9 +20,9 @@ _profile_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 QUALITY_CRM_TENANT_ID = "a0000000-0000-0000-0000-000000000001"
 CRM_SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
 
-_JWKS_CLIENT_TTL = 300  # seconds
+_JWKS_KEY_LIFESPAN = 86400  # PyJWKClient 内部公钥缓存时长；遇到未知 kid 会自动重新拉取
 _ASYMMETRIC_ALGORITHMS = ("ES256", "RS256")
-_jwks_client: Optional[Tuple[str, PyJWKClient, float]] = None
+_jwks_client: Optional[Tuple[str, PyJWKClient]] = None
 
 
 class CurrentUser(BaseModel):
@@ -60,21 +60,28 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 
 def _get_jwks_client() -> Optional[PyJWKClient]:
-    """按 JWKS_URL 懒加载公钥客户端（带缓存，避免每请求拉取）。"""
+    """按 JWKS_URL 懒加载公钥客户端（进程内单例，未知 kid 时自动刷新）。"""
     global _jwks_client
     url = settings.JWKS_URL
     if not url:
         return None
-    now = time.monotonic()
-    if (
-        _jwks_client
-        and _jwks_client[0] == url
-        and (now - _jwks_client[2]) < _JWKS_CLIENT_TTL
-    ):
+    if _jwks_client and _jwks_client[0] == url:
         return _jwks_client[1]
-    client = PyJWKClient(url, cache_keys=True, lifespan=_JWKS_CLIENT_TTL)
-    _jwks_client = (url, client, now)
+    client = PyJWKClient(url, cache_keys=True, lifespan=_JWKS_KEY_LIFESPAN)
+    _jwks_client = (url, client)
     return client
+
+
+async def warm_jwks_cache() -> None:
+    """启动时预热 JWKS，避免首个请求在验签路径上等待拉取公钥。"""
+    client = _get_jwks_client()
+    if client is None:
+        return
+    try:
+        await asyncio.to_thread(client.fetch_data)
+        logger.info("✓ JWKS 公钥已预热")
+    except Exception as e:
+        logger.warning(f"JWKS 预热失败（首个请求将重试）: {e}")
 
 
 async def _extract_token_and_user_id(

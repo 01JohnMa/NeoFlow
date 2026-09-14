@@ -273,9 +273,24 @@ class TestGetParseResult:
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
              patch("api.routes.jobs.result_service") as mock_results:
             mock_results.list_results = AsyncMock(return_value=[])
+            mock_results.get_document_parse_result = AsyncMock(return_value=None)
             resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
 
         assert resp.status_code == 404
+
+    def test_falls_back_to_document_parse_result(self, user_client):
+        """抽取内联解析的 Job 无 job_id 结果时，按关联文档取最新 ParseResult。"""
+        row = {**RESULT, "job_id": None, "sample_key": "parse", "data": self.PARSE_DATA}
+        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.result_service") as mock_results:
+            mock_results.list_results = AsyncMock(return_value=[])
+            mock_results.get_document_parse_result = AsyncMock(return_value=row)
+            resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == self.PARSE_DATA
+        assert mock_results.get_document_parse_result.await_args.args[0] == DOCUMENT_ID
+        assert mock_results.get_document_parse_result.await_args.kwargs["tenant_id"] == TENANT_ID
 
     def test_cross_tenant_job_hidden(self, user_client):
         job = {**JOB, "tenant_id": OTHER_TENANT_ID}
