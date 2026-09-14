@@ -2,7 +2,6 @@
 """服务层基类"""
 
 import asyncio
-import json
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
@@ -34,9 +33,7 @@ EXTRACTION_PROMPT_TEMPLATE = """你是一个专业的数据提取助手，专门
 2. 缺失字段值设为空字符串 ""
 3. 数值保持原文精度，保留单位
 4. 确保 JSON 语法正确（使用英文双引号、英文逗号）
-5. 所有字段值必须严格来自下方文本，禁止使用或复述示例中的具体数值
-
-{examples_section}
+5. 所有字段值必须严格来自下方文本
 
 **输出要求：**
 - 仅输出扁平的 JSON 对象，只包含上述目标字段，禁止添加任何其他字段
@@ -82,7 +79,7 @@ def build_extraction_prompt(config: Dict[str, Any], ocr_text: str) -> str:
     根据 Extraction Configuration 构建 LLM 提取 Prompt。
 
     Args:
-        config: 归一化后的抽取配置（name / fields / examples / extraction_prompt）
+        config: 归一化后的抽取配置（name / fields / extraction_prompt）
         ocr_text: OCR 识别文本
     """
     custom_prompt = config.get("extraction_prompt")
@@ -92,7 +89,6 @@ def build_extraction_prompt(config: Dict[str, Any], ocr_text: str) -> str:
     return EXTRACTION_PROMPT_TEMPLATE.format(
         doc_type=config.get("name", "文档"),
         field_list=build_field_table(config.get("fields") or []),
-        examples_section=build_examples_section(config.get("examples") or []),
         ocr_text=ocr_text,
     )
 
@@ -108,33 +104,3 @@ def build_field_mapping(config: Dict[str, Any]) -> Dict[str, str]:
     return mapping
 
 
-def build_examples_section(examples: List[Dict[str, Any]]) -> str:
-    """
-    将 few-shot 示例列表构建为 Prompt 示例段落。
-
-    只展示示例输出的键结构（值用 "..." 占位），避免模型照抄示例值。
-    供 build_extraction_prompt 和 vlm_service 共同使用。
-    """
-    if not examples:
-        return ""
-
-    section = "**参考示例（仅格式参考；值必须来自待抽取文本，禁止照抄示例）：**\n"
-    for i, ex in enumerate(examples, 1):
-        example_input = ex.get("example_input", "").strip()
-        example_output = ex.get("example_output", {})
-        if isinstance(example_output, str):
-            try:
-                example_output = json.loads(example_output)
-            except json.JSONDecodeError:
-                example_output = {}
-        structure = (
-            {key: "..." for key in example_output.keys()}
-            if isinstance(example_output, dict)
-            else {}
-        )
-        output_str = json.dumps(structure, ensure_ascii=False)
-        section += (
-            f"\n示例{i}输入文本片段：\n{example_input}\n\n"
-            f"示例{i}输出结构：\n{output_str}\n"
-        )
-    return section

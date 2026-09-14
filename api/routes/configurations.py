@@ -39,16 +39,6 @@ class ConfigurationFieldModel(BaseModel):
     source_doc_type: Optional[str] = None
 
 
-class ConfigurationExampleModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    example_input: str
-    example_output: Dict[str, Any]
-    description: Optional[str] = None
-    sort_order: int = 0
-    is_active: bool = True
-
-
 class FeishuOutputModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -68,7 +58,6 @@ class ConfigurationDefinitionModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     fields: List[ConfigurationFieldModel] = Field(default_factory=list)
-    examples: List[ConfigurationExampleModel] = Field(default_factory=list)
     extraction_prompt: Optional[str] = None
     extraction_mode: ExtractionMode = "ocr_llm"
     per_page_extraction: bool = False

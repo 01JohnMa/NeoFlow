@@ -167,21 +167,12 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
             "source_doc_type": None,
         }
     ]
-    assert definition["examples"] == [
-        {
-            "example_input": "订单号：NOZS0311046",
-            "example_output": {"order_no": "NOZS0311046"},
-            "description": None,
-            "sort_order": 0,
-            "is_active": True,
-        }
-    ]
+    assert "examples" not in definition
 
     assert result.configuration_id == "config-1"
     assert result.revision_id == "revision-1"
     assert result.revision_number == 1
     assert result.field_count == 1
-    assert result.example_count == 1
     assert session.state == SDKSessionState.COMMITTED
 
 

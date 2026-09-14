@@ -19,10 +19,9 @@ import {
 } from '@/lib/configuration'
 import { FeishuConfigTab } from './AdminFeishuTab'
 import { FieldsTab } from './AdminFieldsTab'
-import { ExamplesTab } from './AdminExamplesTab'
 import { RevisionsTab } from './AdminRevisionsTab'
 
-type Tab = 'fields' | 'output' | 'examples' | 'revisions'
+type Tab = 'fields' | 'output' | 'revisions'
 
 export function ConfigurationDetail({
   configurationId,
@@ -134,14 +133,12 @@ export function ConfigurationDetail({
 
   const definition = configuration.draft_definition
   const fieldsCount = definition?.fields?.length ?? 0
-  const examplesCount = definition?.examples?.length ?? 0
   const hasUnpublishedChanges =
     configuration.status === 'draft' && Boolean(configuration.current_revision_id)
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'fields', label: `识别字段 (${fieldsCount})` },
     { key: 'output', label: '解析与输出配置' },
-    { key: 'examples', label: `Few-shot 示例 (${examplesCount})` },
     { key: 'revisions', label: `修订历史 (${revisions.length})` },
   ]
 
@@ -239,9 +236,6 @@ export function ConfigurationDetail({
         )}
         {activeTab === 'output' && (
           <FeishuConfigTab configuration={configuration} onUpdated={handleUpdated} />
-        )}
-        {activeTab === 'examples' && (
-          <ExamplesTab configuration={configuration} onUpdated={handleUpdated} />
         )}
         {activeTab === 'revisions' && (
           <RevisionsTab

@@ -27,13 +27,6 @@ FIELD_DEFAULTS: Dict[str, Any] = {
     "source_doc_type": None,
 }
 
-EXAMPLE_DEFAULTS: Dict[str, Any] = {
-    "example_output": {},
-    "description": None,
-    "sort_order": 0,
-    "is_active": True,
-}
-
 # Type=parse 的参数默认值（#8）：
 # - backend: mineru-api（托管 API）；本地 hybrid-engine/hybrid-http-client 后续接入
 # - model_version: pipeline | vlm | MinerU-HTML（托管 API 模型版本）
@@ -55,7 +48,6 @@ PARSE_DEFAULTS: Dict[str, Any] = {
 
 DEFAULT_DEFINITION: Dict[str, Any] = {
     "fields": [],
-    "examples": [],
     "extraction_prompt": None,
     "extraction_mode": "ocr_llm",
     "per_page_extraction": False,
@@ -91,28 +83,20 @@ def normalize_field(field: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return normalized
 
 
-def normalize_example(example: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """补齐单个示例的默认键，保留额外键。"""
-    example = example or {}
-    normalized = dict(EXAMPLE_DEFAULTS)
-    normalized.update({k: v for k, v in example.items()})
-    return normalized
-
-
 def normalize_definition(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     归一化 Configuration definition：
     - 补齐已知键的默认值
-    - fields / examples 逐项归一化
+    - fields 逐项归一化；历史 Revision 的 examples 键安全忽略
     - feishu / excel 子对象合并而非整体替换
     - 保留未知键（供后续 parse/classify 等类型扩展）
     """
     base = deepcopy(DEFAULT_DEFINITION)
     for key, value in (definition or {}).items():
+        if key == "examples":
+            continue
         if key == "fields":
             base["fields"] = [normalize_field(item) for item in (value or [])]
-        elif key == "examples":
-            base["examples"] = [normalize_example(item) for item in (value or [])]
         elif key in SECTION_KEYS and isinstance(value, dict):
             section = dict(base.get(key) or {})
             section.update(value)
@@ -128,7 +112,7 @@ def merge_definition(
 ) -> Dict[str, Any]:
     """
     将补丁合并进已有 definition：
-    - fields / examples 为整体替换
+    - fields 为整体替换
     - feishu / excel 为子对象合并
     - 其余键直接覆盖（含显式 None，用于清空可空字段）
     """
@@ -140,8 +124,6 @@ def merge_definition(
             merged[key] = section
         elif key == "fields" and value is not None:
             merged["fields"] = [normalize_field(item) for item in value]
-        elif key == "examples" and value is not None:
-            merged["examples"] = [normalize_example(item) for item in value]
         else:
             merged[key] = value
     return merged
@@ -154,7 +136,7 @@ def build_extraction_config(
     """
     把 Configuration + 选定 Revision definition 组装成抽取执行视图。
 
-    这是工作流/审核/推送/CRM 读取配置的唯一形态：字段、示例、prompt、
+    这是工作流/审核/推送/CRM 读取配置的唯一形态：字段、prompt、
     提取模式与飞书/Excel 输出参数都在这里归一化。
     """
     definition = normalize_definition(
@@ -171,7 +153,6 @@ def build_extraction_config(
         "status": configuration.get("status"),
         "revision_id": configuration.get("current_revision_id"),
         "fields": definition["fields"],
-        "examples": definition["examples"],
         "extraction_prompt": definition["extraction_prompt"],
         "extraction_mode": definition["extraction_mode"],
         "per_page_extraction": definition["per_page_extraction"],

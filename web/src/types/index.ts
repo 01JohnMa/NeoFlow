@@ -20,14 +20,6 @@ export interface ConfigurationField {
   source_doc_type: string | null
 }
 
-export interface ConfigurationExample {
-  example_input: string
-  example_output: Record<string, unknown>
-  description: string | null
-  sort_order: number
-  is_active: boolean
-}
-
 export interface FeishuOutputConfig {
   bitable_token: string | null
   table_id: string | null
@@ -51,7 +43,6 @@ export interface ConfigurationParseSection {
 
 export interface ConfigurationDefinition {
   fields: ConfigurationField[]
-  examples: ConfigurationExample[]
   extraction_prompt: string | null
   extraction_mode: ExtractionMode
   per_page_extraction: boolean
@@ -119,13 +110,6 @@ export interface ConfigurationFieldPayload {
   review_allowed_values?: string[] | null
 }
 
-export interface ConfigurationExamplePayload {
-  example_input: string
-  example_output: Record<string, unknown>
-  sort_order?: number
-  is_active?: boolean
-}
-
 // ============ AI Template SDK types ============
 
 export type SDKSessionState =
@@ -155,11 +139,6 @@ export interface SDKExcelPlaceholder {
   raw_value: string
 }
 
-export interface SDKSuggestedExample {
-  example_input: string
-  example_output: Record<string, unknown>
-}
-
 export interface SDKDocumentAnalysis {
   detected_fields: SDKDetectedField[]
 }
@@ -170,7 +149,6 @@ export interface SDKConfirmTemplatePayload {
   description?: string | null
   per_page_extraction: boolean
   fields: SDKDetectedField[]
-  examples: SDKSuggestedExample[]
 }
 
 export interface SDKCommitResult {
@@ -179,7 +157,6 @@ export interface SDKCommitResult {
   revision_id: string
   revision_number: number
   field_count: number
-  example_count: number
 }
 
 export interface SDKSession {

@@ -27,11 +27,6 @@ class DetectedField(BaseModel):
     sample_value: Optional[str] = None
 
 
-class SuggestedExample(BaseModel):
-    example_input: str
-    example_output: Dict[str, Any]
-
-
 class ExcelTemplatePlaceholder(BaseModel):
     sheet_name: str
     coordinate: str
@@ -49,7 +44,6 @@ class ConfirmTemplateRequest(BaseModel):
     description: Optional[str] = None
     per_page_extraction: bool = False
     fields: List[DetectedField]
-    examples: List[SuggestedExample] = []
 
 
 class CommitSessionRequest(BaseModel):
@@ -91,7 +85,6 @@ class CommitResult(BaseModel):
     revision_id: str
     revision_number: int = 1
     field_count: int = 0
-    example_count: int = 0
 
 
 class SDKSession(BaseModel):

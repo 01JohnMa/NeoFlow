@@ -50,7 +50,7 @@ export function RevisionsTab({
               </span>
             </div>
             <p className="mt-2 text-xs text-text-muted">
-              {definition?.fields?.length ?? 0} 个字段 · {definition?.examples?.length ?? 0} 条示例
+              {definition?.fields?.length ?? 0} 个字段
               {definition?.extraction_prompt ? ' · 含提取 Prompt' : ''}
               {definition?.excel?.file_name ? ` · Excel 模板 ${definition.excel.file_name}` : ''}
             </p>

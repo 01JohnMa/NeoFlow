@@ -30,7 +30,6 @@ def _mock_configuration(**overrides):
         "extraction_mode": "ocr_llm",
         "revision_id": None,
         "fields": [],
-        "examples": [],
         "feishu": {},
         "excel": {},
     }

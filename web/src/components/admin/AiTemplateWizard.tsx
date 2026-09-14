@@ -24,7 +24,6 @@ import type {
   SDKDetectedField,
   SDKDocumentAnalysis,
   SDKSession,
-  SDKSuggestedExample,
 } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -61,11 +60,6 @@ const createEmptyField = (index: number): SDKDetectedField => ({
   sample_value: null,
 })
 
-const createEmptyExample = (): SDKSuggestedExample => ({
-  example_input: '',
-  example_output: {},
-})
-
 export function AiTemplateWizard({
   tenantId,
   tenantName,
@@ -78,9 +72,6 @@ export function AiTemplateWizard({
   const [session, setSession] = useState<SDKSession | null>(null)
   const [analysis, setAnalysis] = useState<SDKDocumentAnalysis | null>(null)
   const [fields, setFields] = useState<SDKDetectedField[]>([])
-  const [examples, setExamples] = useState<SDKSuggestedExample[]>([])
-  const [exampleOutputDrafts, setExampleOutputDrafts] = useState<string[]>([])
-  const [invalidExampleIndexes, setInvalidExampleIndexes] = useState<number[]>([])
   const [templateName, setTemplateName] = useState('')
   const [templateCode, setTemplateCode] = useState('')
   const [parseMode, setParseMode] = useState<'pipeline' | 'vlm'>('pipeline')
@@ -102,15 +93,13 @@ export function AiTemplateWizard({
     (field) => !field.field_key.trim() || !field.field_label.trim(),
   )
   const hasDuplicateFieldKeys = fieldKeys.length !== new Set(fieldKeys).size
-  const hasInvalidExamples = invalidExampleIndexes.length > 0
   const promptIsCurrent = promptRevision === configRevision
   const codeIsCurrent = codeRevision === configRevision
   const canCommit = Boolean(
     session
       && fields.length > 0
       && !hasFieldErrors
-      && !hasDuplicateFieldKeys
-      && !hasInvalidExamples,
+      && !hasDuplicateFieldKeys,
   )
 
   const validationMessage = (() => {
@@ -118,7 +107,6 @@ export function AiTemplateWizard({
     if (fields.length === 0) return '至少需要 1 个识别字段'
     if (hasFieldErrors) return '字段键名和标签不能为空'
     if (hasDuplicateFieldKeys) return '字段键名不能重复'
-    if (hasInvalidExamples) return '示例输出必须是合法 JSON'
     return null
   })()
 
@@ -136,9 +124,6 @@ export function AiTemplateWizard({
   const resetAnalysisState = () => {
     setAnalysis(null)
     setFields([])
-    setExamples([])
-    setExampleOutputDrafts([])
-    setInvalidExampleIndexes([])
     setDescription('')
     setPerPageExtraction(false)
     setConfigRevision(0)
@@ -225,9 +210,6 @@ export function AiTemplateWizard({
       const result = await sdkApi.analyzeSDKSession(session.id)
       setAnalysis(result)
       setFields(result.detected_fields)
-      setExamples([])
-      setExampleOutputDrafts([])
-      setInvalidExampleIndexes([])
       setDescription(`由 AI 根据 ${session.file_name} 建议字段`)
       setPerPageExtraction(false)
       setConfigRevision((revision) => revision + 1)
@@ -247,10 +229,6 @@ export function AiTemplateWizard({
       field_label: field.field_label.trim(),
       extraction_hint: field.extraction_hint.trim(),
       review_allowed_values: field.review_allowed_values?.length ? field.review_allowed_values : null,
-    })),
-    examples: examples.map((example) => ({
-      example_input: example.example_input.trim(),
-      example_output: example.example_output,
     })),
   })
 
@@ -330,65 +308,6 @@ export function AiTemplateWizard({
 
   const removeField = (index: number) => {
     setFields((prev) => prev.filter((_, i) => i !== index))
-    markConfigChanged()
-  }
-
-  const updateExampleInput = (index: number, value: string) => {
-    setExamples((prev) => (
-      prev.map((example, i) => (i === index ? { ...example, example_input: value } : example))
-    ))
-    markConfigChanged()
-  }
-
-  const updateExampleOutput = (index: number, value: string) => {
-    setExampleOutputDrafts((prev) => prev.map((draft, i) => (i === index ? value : draft)))
-    try {
-      const parsed = value.trim() ? JSON.parse(value) : {}
-      setExamples((prev) => (
-        prev.map((example, i) => (i === index ? { ...example, example_output: parsed } : example))
-      ))
-      setInvalidExampleIndexes((prev) => prev.filter((i) => i !== index))
-      markConfigChanged()
-    } catch {
-      setInvalidExampleIndexes((prev) => (prev.includes(index) ? prev : [...prev, index]))
-    }
-  }
-
-  const moveExample = (index: number, direction: 'up' | 'down') => {
-    const swapIndex = direction === 'up' ? index - 1 : index + 1
-    if (swapIndex < 0 || swapIndex >= examples.length) return
-    setExamples((prev) => {
-      const next = [...prev]
-      ;[next[index], next[swapIndex]] = [next[swapIndex], next[index]]
-      return next
-    })
-    setExampleOutputDrafts((prev) => {
-      const next = [...prev]
-      ;[next[index], next[swapIndex]] = [next[swapIndex], next[index]]
-      return next
-    })
-    setInvalidExampleIndexes((prev) => prev.map((i) => {
-      if (i === index) return swapIndex
-      if (i === swapIndex) return index
-      return i
-    }))
-    markConfigChanged()
-  }
-
-  const addExample = () => {
-    setExamples((prev) => [...prev, createEmptyExample()])
-    setExampleOutputDrafts((prev) => [...prev, '{}'])
-    markConfigChanged()
-  }
-
-  const removeExample = (index: number) => {
-    setExamples((prev) => prev.filter((_, i) => i !== index))
-    setExampleOutputDrafts((prev) => prev.filter((_, i) => i !== index))
-    setInvalidExampleIndexes((prev) => (
-      prev
-        .filter((i) => i !== index)
-        .map((i) => (i > index ? i - 1 : i))
-    ))
     markConfigChanged()
   }
 
@@ -771,73 +690,6 @@ export function AiTemplateWizard({
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-sm font-medium text-text-primary">Few-shot 示例</div>
-                  <Button size="sm" variant="secondary" onClick={addExample}>
-                    <Plus className="h-4 w-4" />
-                    新增示例
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  {examples.map((example, index) => (
-                    <div key={index} className="rounded-lg border border-border-default p-3">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-text-muted">示例 {index + 1}</span>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => moveExample(index, 'up')}
-                            disabled={index === 0}
-                          >
-                            <ChevronUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => moveExample(index, 'down')}
-                            disabled={index === examples.length - 1}
-                          >
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="hover:text-error-500"
-                            onClick={() => removeExample(index)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        <div>
-                          <Label>输入文本</Label>
-                          <Textarea
-                            className="mt-1 min-h-[130px] font-mono text-xs"
-                            value={example.example_input}
-                            onChange={(e) => updateExampleInput(index, e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <Label>期望输出 JSON</Label>
-                          <Textarea
-                            className="mt-1 min-h-[130px] font-mono text-xs"
-                            error={invalidExampleIndexes.includes(index)}
-                            value={exampleOutputDrafts[index] ?? '{}'}
-                            onChange={(e) => updateExampleOutput(index, e.target.value)}
-                          />
-                          {invalidExampleIndexes.includes(index) && (
-                            <p className="mt-1 text-xs text-error-500">JSON 格式有误</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
@@ -912,8 +764,7 @@ export function AiTemplateWizard({
           {commitResult && (
             <div className="rounded-lg border border-success-500/30 bg-success-500/10 px-4 py-3 text-sm text-success-500">
               已创建并发布配置 {commitResult.configuration_id}（修订 #
-              {commitResult.revision_number}），包含 {commitResult.field_count} 个字段和{' '}
-              {commitResult.example_count} 条示例。
+              {commitResult.revision_number}），包含 {commitResult.field_count} 个字段。
             </div>
           )}
         </div>

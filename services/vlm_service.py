@@ -32,34 +32,11 @@ VLM_EXTRACTION_PROMPT = """你是一个专业的数据提取助手，专门处�
 2. 缺失字段值设为空字符串 ""
 3. 数值保持原文精度，保留单位
 4. 确保 JSON 语法正确（使用英文双引号、英文逗号）
-5. 所有字段值必须严格来自当前图片原文，禁止使用示例中的具体数值
+5. 所有字段值必须严格来自当前图片原文
 
-{examples_section}
 **输出要求：**
 - 仅输出扁平的 JSON 对象，只包含上述目标字段，禁止添加任何其他字段
 - 不要包含任何解释、引言或 Markdown 代码块标记"""
-
-
-def _build_vlm_examples_section(examples: List[Dict[str, Any]]) -> str:
-    """
-    VLM 专用示例段落构建：只展示输出 JSON 的键结构（值用 "..." 占位），
-    避免模型将示例中的具体数值照抄到提取结果中。
-    """
-    if not examples:
-        return ""
-
-    section = "**输出格式示例（仅供格式参考，值必须来自图片原文）：**\n"
-    for i, ex in enumerate(examples, 1):
-        example_output = ex.get("example_output", {})
-        if isinstance(example_output, str):
-            try:
-                example_output = json.loads(example_output)
-            except json.JSONDecodeError:
-                example_output = {}
-        structure = {k: "..." for k in example_output.keys()}
-        output_str = json.dumps(structure, ensure_ascii=False)
-        section += f"\n示例{i}输出结构：\n{output_str}\n"
-    return section
 
 
 class VLMService:
@@ -142,19 +119,13 @@ class VLMService:
     def build_vlm_prompt(configuration: Dict[str, Any]) -> str:
         """
         根据 Configuration 字段构建 VLM 提取 prompt（纯字段提取，不含分类）。
-
-        示例仅展示输出 JSON 的键结构，不暴露具体值，避免模型照抄示例数据。
         """
         fields = configuration.get("fields", [])
         field_list = build_field_table(fields)
 
-        examples = configuration.get("examples", [])
-        examples_section = _build_vlm_examples_section(examples)
-
         return VLM_EXTRACTION_PROMPT.format(
             doc_type=configuration.get("name", "文档"),
             field_list=field_list,
-            examples_section=examples_section,
         )
 
     # ── VLM 调用 ──────────────────────────────────────────────────────────────

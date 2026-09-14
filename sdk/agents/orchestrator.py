@@ -34,18 +34,8 @@ def build_configuration_definition(
         }
         for index, field in enumerate(confirmed.fields)
     ]
-    examples = [
-        {
-            "example_input": example.example_input,
-            "example_output": example.example_output,
-            "sort_order": index,
-            "is_active": True,
-        }
-        for index, example in enumerate(confirmed.examples)
-    ]
     return {
         "fields": fields,
-        "examples": examples,
         "extraction_prompt": prompt,
         "parse": {"model_version": session.parse_mode},
         "per_page_extraction": confirmed.per_page_extraction,
@@ -137,7 +127,6 @@ class SDKOrchestrator:
             revision_id=revision.get("id", ""),
             revision_number=revision.get("revision_number", 1),
             field_count=len(confirmed.fields),
-            example_count=len(confirmed.examples),
         )
 
 

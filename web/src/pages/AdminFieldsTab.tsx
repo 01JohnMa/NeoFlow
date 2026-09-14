@@ -126,12 +126,12 @@ function FieldFormModal({
           </div>
         </div>
         <div>
-          <Label>提取提示</Label>
+          <Label>字段描述</Label>
           <Input
             className="mt-1"
             value={form.extraction_hint ?? ''}
             onChange={(e) => setForm((f) => ({ ...f, extraction_hint: e.target.value }))}
-            placeholder="帮助 LLM 更准确提取该字段的提示"
+            placeholder="描述取值线索；验证过的示例也写在这里"
           />
         </div>
         <div>

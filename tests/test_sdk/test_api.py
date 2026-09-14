@@ -401,7 +401,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
             "revision_id": "revision-1",
             "revision_number": 1,
             "field_count": 1,
-            "example_count": 1,
         }
 
     monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
@@ -423,7 +422,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
             "description": "AI 生成模板",
             "per_page_extraction": False,
             "fields": analysis_payload["detected_fields"],
-            "examples": [],
         },
     )
     assert confirm_response.status_code == 200
@@ -520,7 +518,6 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
             "description": "AI 生成模板",
             "per_page_extraction": False,
             "fields": analysis_payload["detected_fields"],
-            "examples": [],
         },
     )
     assert confirm_response.status_code == 200

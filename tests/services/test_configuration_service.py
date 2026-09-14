@@ -383,7 +383,13 @@ class TestDefinitionHelpers:
     def test_normalize_definition_preserves_unknown_keys(self):
         definition = normalize_definition({"custom_param": {"level": 2}})
         assert definition["custom_param"] == {"level": 2}
-        assert definition["examples"] == []
+        assert "examples" not in definition
+
+    def test_normalize_definition_drops_legacy_examples(self):
+        definition = normalize_definition(
+            {"examples": [{"example_input": "输入", "example_output": {"a": 1}}]}
+        )
+        assert "examples" not in definition
 
 
 class TestExtractionConfig:
@@ -420,7 +426,7 @@ class TestExtractionConfig:
         assert config["revision_id"] == "r-1"
         assert config["fields"][0]["field_key"] == "a"
         assert config["fields"][0]["field_type"] == "text"
-        assert config["examples"][0]["is_active"] is True
+        assert "examples" not in config
         assert config["extraction_prompt"] == "请抽取字段"
         assert config["extraction_mode"] == "vlm"
         assert config["per_page_extraction"] is True
@@ -432,7 +438,7 @@ class TestExtractionConfig:
     def test_build_extraction_config_empty_uses_defaults(self):
         config = build_extraction_config({"id": "c-1", "draft_definition": {}})
         assert config["fields"] == []
-        assert config["examples"] == []
+        assert "examples" not in config
         assert config["extraction_mode"] == "ocr_llm"
         assert config["output_mode"] == "bitable"
         assert config["push_attachment"] is True
