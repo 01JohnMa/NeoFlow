@@ -34,6 +34,7 @@ EXTRACTION_PROMPT_TEMPLATE = """你是一个专业的数据提取助手，专门
 2. 缺失字段值设为空字符串 ""
 3. 数值保持原文精度，保留单位
 4. 确保 JSON 语法正确（使用英文双引号、英文逗号）
+5. 所有字段值必须严格来自下方文本，禁止使用或复述示例中的具体数值
 
 {examples_section}
 
@@ -111,12 +112,13 @@ def build_examples_section(examples: List[Dict[str, Any]]) -> str:
     """
     将 few-shot 示例列表构建为 Prompt 示例段落。
 
+    只展示示例输出的键结构（值用 "..." 占位），避免模型照抄示例值。
     供 build_extraction_prompt 和 vlm_service 共同使用。
     """
     if not examples:
         return ""
 
-    section = "**参考示例：**\n"
+    section = "**参考示例（仅格式参考；值必须来自待抽取文本，禁止照抄示例）：**\n"
     for i, ex in enumerate(examples, 1):
         example_input = ex.get("example_input", "").strip()
         example_output = ex.get("example_output", {})
@@ -124,10 +126,15 @@ def build_examples_section(examples: List[Dict[str, Any]]) -> str:
             try:
                 example_output = json.loads(example_output)
             except json.JSONDecodeError:
-                pass
-        output_str = json.dumps(example_output, ensure_ascii=False)
+                example_output = {}
+        structure = (
+            {key: "..." for key in example_output.keys()}
+            if isinstance(example_output, dict)
+            else {}
+        )
+        output_str = json.dumps(structure, ensure_ascii=False)
         section += (
             f"\n示例{i}输入文本片段：\n{example_input}\n\n"
-            f"示例{i}输出：\n{output_str}\n"
+            f"示例{i}输出结构：\n{output_str}\n"
         )
     return section
