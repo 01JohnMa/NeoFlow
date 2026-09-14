@@ -30,6 +30,8 @@ import { cn } from '@/lib/utils'
 
 interface AiTemplateWizardProps {
   tenantId: string
+  initialSessionId?: string | null
+  onSessionChange?: (sessionId: string | null) => void
   onCommitted: (configurationId: string) => void | Promise<void>
 }
 
@@ -65,7 +67,12 @@ const createEmptyExample = (): SDKSuggestedExample => ({
   example_output: {},
 })
 
-export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProps) {
+export function AiTemplateWizard({
+  tenantId,
+  initialSessionId,
+  onSessionChange,
+  onCommitted,
+}: AiTemplateWizardProps) {
   const [file, setFile] = useState<File | null>(null)
   const [excelTemplateFile, setExcelTemplateFile] = useState<File | null>(null)
   const [session, setSession] = useState<SDKSession | null>(null)
@@ -161,6 +168,7 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
     void runAction('upload', async () => {
       const created = await sdkApi.createSDKSession(file, excelTemplateFile)
       setSession(created)
+      onSessionChange?.(created.id)
       resetAnalysisState()
     })
   }
@@ -170,11 +178,29 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
     void runAction('retry-parse', async () => {
       const updated = await sdkApi.retrySDKParse(session.id)
       setSession(updated)
+      onSessionChange?.(updated.id)
     })
   }
 
   const sessionId = session?.id
   const sessionState = session?.state
+
+  // 刷新页面或服务重启后，按 URL 中的会话 id 恢复解析状态
+  useEffect(() => {
+    if (!initialSessionId || session) return
+    let cancelled = false
+    sdkApi
+      .getSDKSession(initialSessionId)
+      .then((restored) => {
+        if (!cancelled) setSession(restored)
+      })
+      .catch(() => {
+        if (!cancelled) setError('会话已失效，请重新上传样例')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [initialSessionId, session])
 
   useEffect(() => {
     if (!sessionId || sessionState !== 'parsing') return
@@ -420,6 +446,7 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
               onChange={(event) => {
                 setFile(event.target.files?.[0] ?? null)
                 setSession(null)
+                onSessionChange?.(null)
                 resetAnalysisState()
               }}
             />
@@ -434,6 +461,7 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
                 onChange={(event) => {
                   setExcelTemplateFile(event.target.files?.[0] ?? null)
                   setSession(null)
+                  onSessionChange?.(null)
                   resetAnalysisState()
                 }}
               />

@@ -114,6 +114,7 @@ def _patch_parse_env(monkeypatch, tmp_path) -> dict:
         "ensure_parse_revision": AsyncMock(return_value={"id": "revision-1"}),
         "get_document_parse_result": AsyncMock(return_value=None),
         "get_job": AsyncMock(return_value={"status": "processing", "progress": 30}),
+        "get_document": AsyncMock(return_value=None),
     }
     monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
     monkeypatch.setattr(sdk_route.supabase_service, "create_document", mocks["create_document"])
@@ -125,6 +126,7 @@ def _patch_parse_env(monkeypatch, tmp_path) -> dict:
         mocks["get_document_parse_result"],
     )
     monkeypatch.setattr(sdk_route, "get_job", mocks["get_job"])
+    monkeypatch.setattr(sdk_route.supabase_service, "get_document", mocks["get_document"])
     return mocks
 
 
@@ -144,6 +146,7 @@ def test_create_session_starts_parse_job(admin_client, monkeypatch, tmp_path):
     assert response.status_code == 201
     payload = response.json()
     assert payload["file_name"] == "report.pdf"
+    assert payload["id"] == "job-1"
     assert payload["state"] == "parsing"
     assert payload["parse_mode"] == "pipeline"
     assert payload["parse_job_id"] == "job-1"
@@ -169,17 +172,6 @@ def test_create_session_accepts_parse_mode(admin_client, monkeypatch, tmp_path):
     assert response.status_code == 201
     assert response.json()["parse_mode"] == "vlm"
     assert mocks["ensure_parse_revision"].await_args.args[1] == "vlm"
-
-
-def test_create_session_reuses_existing_parse_result(admin_client, monkeypatch, tmp_path):
-    mocks = _patch_parse_env(monkeypatch, tmp_path)
-    mocks["get_document_parse_result"].return_value = _parse_result_row()
-
-    response = _create_session(admin_client)
-
-    assert response.status_code == 201
-    assert response.json()["state"] == "parsed"
-    mocks["create_job"].assert_not_awaited()
 
 
 def test_get_session_syncs_completed_parse(admin_client, monkeypatch, tmp_path):
@@ -225,6 +217,7 @@ def test_retry_parse_creates_new_job(admin_client, monkeypatch, tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["id"] == "job-2"
     assert payload["state"] == "parsing"
     assert payload["parse_job_id"] == "job-2"
     assert payload["parse_mode"] == "vlm"
@@ -620,3 +613,153 @@ def test_sdk_session_owner_is_enforced(admin_client, monkeypatch, tmp_path):
         test_app.dependency_overrides.clear()
 
     assert response.status_code == 403
+
+
+def _document_row(document_id: str, *, tenant_id: str = TENANT_ID, user_id: str = USER_ID):
+    return {
+        "id": document_id,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "file_name": "stored.png",
+        "original_file_name": "report.pdf",
+        "file_path": "/tmp/report.pdf",
+    }
+
+
+def _completed_job(document_id: str):
+    return {
+        "status": "completed",
+        "progress": 100,
+        "document_ids": [document_id],
+        "created_at": "2026-09-14T08:00:00+00:00",
+        "configuration_revision_id": "revision-1",
+    }
+
+
+def _stub_revision(monkeypatch, model_version: str = "vlm"):
+    monkeypatch.setattr(
+        "services.configuration_service.configuration_service.get_revision",
+        AsyncMock(
+            return_value={
+                "id": "revision-1",
+                "definition": {"parse": {"model_version": model_version}},
+            }
+        ),
+    )
+
+
+def test_get_session_rebuilds_from_job_after_restart(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    created = _create_session(admin_client).json()
+    session_id = created["id"]
+    document_id = created["document_id"]
+
+    sdk_route.session_store.delete(session_id)  # 模拟 API 重启后内存丢失
+    mocks["get_job"].return_value = _completed_job(document_id)
+    mocks["get_document"].return_value = _document_row(document_id)
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+    _stub_revision(monkeypatch, "vlm")
+
+    response = admin_client.get(f"/api/sdk/sessions/{session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"] == "parsed"
+    assert payload["parse_mode"] == "vlm"
+    assert payload["document_id"] == document_id
+    assert payload["file_name"] == "report.pdf"
+
+
+def test_get_session_rebuild_returns_404_when_document_missing(
+    admin_client,
+    monkeypatch,
+    tmp_path,
+):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    created = _create_session(admin_client).json()
+    sdk_route.session_store.delete(created["id"])
+
+    mocks["get_job"].return_value = _completed_job(created["document_id"])
+    mocks["get_document"].return_value = None
+
+    response = admin_client.get(f"/api/sdk/sessions/{created['id']}")
+
+    assert response.status_code == 404
+
+
+def test_get_session_rebuild_rejects_other_tenant(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    created = _create_session(admin_client).json()
+    sdk_route.session_store.delete(created["id"])
+
+    mocks["get_job"].return_value = _completed_job(created["document_id"])
+    mocks["get_document"].return_value = _document_row(
+        created["document_id"],
+        tenant_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        user_id="22222222-2222-4222-8222-222222222222",
+    )
+
+    response = admin_client.get(f"/api/sdk/sessions/{created['id']}")
+
+    assert response.status_code == 404
+
+
+def test_get_session_recovers_excel_template_after_restart(
+    admin_client,
+    monkeypatch,
+    tmp_path,
+):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    created = _create_session(
+        admin_client,
+        files={
+            "file": ("scan.jpg", b"image bytes", "image/jpeg"),
+            "excel_template": (
+                "template.xlsx",
+                _excel_template_bytes(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    ).json()
+    session_id = created["id"]
+    document_id = created["document_id"]
+
+    sdk_route.session_store.delete(session_id)
+    mocks["get_job"].return_value = _completed_job(document_id)
+    mocks["get_document"].return_value = _document_row(document_id)
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+    _stub_revision(monkeypatch, "pipeline")
+
+    response = admin_client.get(f"/api/sdk/sessions/{session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["excel_template_file_name"] == "template.xlsx"
+    assert [
+        (item["sheet_name"], item["coordinate"], item["field_key"])
+        for item in payload["excel_placeholders"]
+    ] == [
+        ("Report", "B1", "order_no"),
+        ("Report", "B2", "quantity"),
+    ]
+
+
+def test_delete_session_keeps_sample_document_file(admin_client, monkeypatch, tmp_path):
+    _patch_parse_env(monkeypatch, tmp_path)
+    created = _create_session(
+        admin_client,
+        files={
+            "file": ("scan.jpg", b"image bytes", "image/jpeg"),
+            "excel_template": (
+                "template.xlsx",
+                _excel_template_bytes(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    ).json()
+
+    response = admin_client.delete(f"/api/sdk/sessions/{created['id']}")
+
+    assert response.status_code == 200
+    assert list(tmp_path.glob("*.jpg")), "样例文档文件应保留"
+    assert not list((tmp_path / "sdk_sessions").glob("*")), "Excel 模板文件应被清理"

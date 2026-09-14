@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useProfileStore } from '@/store/useStore'
 import { api } from '@/services/api'
 import * as configurationsApi from '@/services/configurations'
+import { readDraftingSessionId, writeDraftingSessionId } from '@/lib/draftingSession'
 import type { Configuration, ConfigurationType } from '@/types'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
@@ -48,7 +49,10 @@ export function AdminConfig() {
 
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [selectedTenantId, setSelectedTenantId] = useState<string>('')
-  const [view, setView] = useState<View>('list')
+  const [searchParams, setSearchParams] = useSearchParams()
+  // 草拟会话 id 存在 URL（`?session=`）：刷新页面后能回到同一个向导
+  const draftingSessionId = readDraftingSessionId(searchParams.toString())
+  const [view, setView] = useState<View>(draftingSessionId ? 'ai' : 'list')
   const [configurations, setConfigurations] = useState<Configuration[]>([])
   const [loadingList, setLoadingList] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -129,7 +133,18 @@ export function AdminConfig() {
     }
   }
 
+  const handleWizardSessionChange = useCallback(
+    (sessionId: string | null) => {
+      setSearchParams(
+        (prev) => new URLSearchParams(writeDraftingSessionId(prev.toString(), sessionId)),
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
   const handleWizardCommitted = async (configurationId?: string) => {
+    handleWizardSessionChange(null)
     await refreshList()
     if (configurationId) {
       openDetail(configurationId)
@@ -220,11 +235,23 @@ export function AdminConfig() {
         />
       ) : view === 'ai' ? (
         <div className="space-y-4">
-          <Button variant="ghost" size="sm" onClick={() => setView('list')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              handleWizardSessionChange(null)
+              setView('list')
+            }}
+          >
             ← 返回配置列表
           </Button>
           <Card className="p-6">
-            <AiTemplateWizard tenantId={selectedTenantId} onCommitted={handleWizardCommitted} />
+            <AiTemplateWizard
+              tenantId={selectedTenantId}
+              initialSessionId={draftingSessionId}
+              onSessionChange={handleWizardSessionChange}
+              onCommitted={handleWizardCommitted}
+            />
           </Card>
         </div>
       ) : (

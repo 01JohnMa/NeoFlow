@@ -2,6 +2,8 @@
 
 import os
 import re
+import time
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,6 +27,7 @@ from sdk.models import (
     ExcelTemplatePlaceholder,
     ParseRetryRequest,
     SDKModelProfileRequest,
+    SDKSession,
     SDKSessionResponse,
     SDKSessionState,
 )
@@ -38,8 +41,86 @@ def _require_admin(user: CurrentUser) -> None:
         raise AuthorizationError("仅管理员可访问此接口")
 
 
-def _get_session_or_404(session_id: str, user: CurrentUser):
+async def _rebuild_session(session_id: str, user: CurrentUser):
+    """内存缺失（例如服务重启）时，从解析 Job + 文档 + Parse Result 重建会话。"""
+    job = await get_job(session_id)
+    if not job:
+        return None
+    document_ids = job.get("document_ids") or []
+    if not document_ids:
+        return None
+
+    document = await supabase_service.get_document(str(document_ids[0]))
+    if not document:
+        return None
+
+    if not user.is_super_admin():
+        tenant_ok = bool(document.get("tenant_id")) and document.get("tenant_id") == user.tenant_id
+        owner_ok = document.get("user_id") == user.user_id
+        if not (tenant_ok or owner_ok):
+            return None
+
+    tenant_id = document.get("tenant_id") or job.get("tenant_id") or ""
+    parse_mode = "pipeline"
+    revision_id = job.get("configuration_revision_id")
+    if revision_id:
+        from services.configuration_service import configuration_service
+
+        revision = await configuration_service.get_revision(str(revision_id))
+        definition = (revision or {}).get("definition") or {}
+        parse_mode = normalize_parse_mode((definition.get("parse") or {}).get("model_version"))
+
+    state = SDKSessionState.PARSING
+    parse_error = None
+    status = job.get("status")
+    if status == "failed":
+        state = SDKSessionState.PARSE_FAILED
+        parse_error = job.get("error") or "解析失败"
+    elif status == "completed":
+        row = await result_service.get_document_parse_result(
+            str(document_ids[0]),
+            tenant_id=tenant_id,
+        )
+        if row and (row.get("data") or {}).get("markdown"):
+            state = SDKSessionState.PARSED
+        else:
+            state = SDKSessionState.PARSE_FAILED
+            parse_error = "解析结果为空，请重试"
+
+    excel_name, excel_path, excel_placeholders = _recover_excel_template(str(document_ids[0]))
+    created_at = time.time()
+    raw_created = job.get("created_at")
+    if isinstance(raw_created, str):
+        try:
+            created_at = datetime.fromisoformat(raw_created).timestamp()
+        except ValueError:
+            pass
+
+    return SDKSession(
+        id=session_id,
+        file_name=document.get("original_file_name") or document.get("file_name") or "sample",
+        file_path=document.get("file_path") or "",
+        tenant_id=tenant_id,
+        document_id=str(document_ids[0]),
+        parse_job_id=session_id,
+        parse_mode=parse_mode,
+        parse_error=parse_error,
+        excel_template_file_name=excel_name,
+        excel_template_path=excel_path,
+        excel_placeholders=excel_placeholders,
+        user_id=document.get("user_id") or job.get("created_by") or user.user_id,
+        state=state,
+        created_at=created_at,
+        updated_at=time.time(),
+    )
+
+
+async def _load_session_or_404(session_id: str, user: CurrentUser):
     session = session_store.get(session_id)
+    if not session:
+        session = await _rebuild_session(session_id, user)
+        if session:
+            session_store.save(session)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
     if session.user_id != user.user_id and not user.is_super_admin():
@@ -76,14 +157,33 @@ def _safe_file_name(file_name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", base_name) or "upload.bin"
 
 
-async def _save_upload(file: UploadFile) -> str:
+async def _save_excel_template(file: UploadFile, document_id: str) -> str:
+    """Excel 模板按「文档 id + 原名」落盘，便于服务重启后重建会话时找回。"""
     upload_dir = Path(settings.UPLOAD_FOLDER) / "sdk_sessions"
     upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / f"{uuid4()}_{_safe_file_name(file.filename or 'upload.bin')}"
+    file_path = upload_dir / f"{document_id}__{_safe_file_name(file.filename or 'template.xlsx')}"
     async with aiofiles.open(file_path, "wb") as out:
         while chunk := await file.read(1024 * 1024):
             await out.write(chunk)
     return str(file_path)
+
+
+def _recover_excel_template(document_id: str) -> tuple[str | None, str | None, list]:
+    """按命名约定找回样例的 Excel 模板（服务重启后重建会话用）。"""
+    upload_dir = Path(settings.UPLOAD_FOLDER) / "sdk_sessions"
+    matches = sorted(upload_dir.glob(f"{document_id}__*")) if upload_dir.exists() else []
+    if not matches:
+        return None, None, []
+    path = matches[0]
+    name = path.name.split("__", 1)[1] if "__" in path.name else path.name
+    try:
+        placeholders = [
+            ExcelTemplatePlaceholder(**placeholder.__dict__)
+            for placeholder in scan_excel_placeholders(str(path))
+        ]
+    except Exception:
+        placeholders = []
+    return name, str(path), placeholders
 
 
 async def _save_document_file(file: UploadFile, document_id: str) -> tuple[str, int]:
@@ -115,29 +215,29 @@ async def _existing_markdown(session, parse_mode: str) -> str | None:
     return data.get("markdown") or None
 
 
-async def _start_parse(session, parse_mode: str, created_by: str):
-    """创建解析 Job 并把会话置为解析中；返回 (session, job)。"""
+async def _create_parse_job(
+    *,
+    tenant_id: str,
+    document_id: str,
+    parse_mode: str,
+    created_by: str,
+) -> str:
+    """确保解析配置 Revision 并创建 Parse Job，返回 job_id。"""
     revision = await ensure_parse_revision(
-        session.tenant_id,
+        tenant_id,
         parse_mode,
         created_by=created_by,
     )
     if not revision.get("id"):
         raise HTTPException(status_code=500, detail="解析配置不可用，请稍后重试")
 
-    job_id = await create_job(
+    return await create_job(
         job_type="parse",
         created_by=created_by,
-        related_document_ids=[session.document_id],
-        tenant_id=session.tenant_id,
+        related_document_ids=[document_id],
+        tenant_id=tenant_id,
         configuration_revision_id=revision["id"],
     )
-    session.parse_job_id = job_id
-    session.parse_mode = parse_mode
-    session.parse_error = None
-    session.state = SDKSessionState.PARSING
-    session_store.save(session)
-    return session, {"job_id": job_id, "status": "queued", "progress": 0}
 
 
 async def _sync_parse_state(session, job=None):
@@ -185,7 +285,7 @@ async def create_session(
     excel_placeholders: list[ExcelTemplatePlaceholder] = []
     try:
         if excel_template and excel_template.filename:
-            excel_template_path = await _save_upload(excel_template)
+            excel_template_path = await _save_excel_template(excel_template, document_id)
             excel_placeholders = [
                 ExcelTemplatePlaceholder(**placeholder.__dict__)
                 for placeholder in scan_excel_placeholders(excel_template_path)
@@ -214,12 +314,19 @@ async def create_session(
             os.remove(excel_template_path)
         raise
 
+    job_id = await _create_parse_job(
+        tenant_id=user.tenant_id,
+        document_id=document_id,
+        parse_mode=mode,
+        created_by=user.user_id,
+    )
     session = session_store.create(
+        session_id=job_id,
         file_name=file.filename or Path(file_path).name,
         file_path=file_path,
         tenant_id=user.tenant_id,
         document_id=document_id,
-        parse_job_id="",
+        parse_job_id=job_id,
         parse_mode=mode,
         state=SDKSessionState.PARSING,
         excel_template_file_name=excel_template.filename if excel_template else None,
@@ -227,15 +334,7 @@ async def create_session(
         excel_placeholders=excel_placeholders,
         user_id=user.user_id,
     )
-
-    markdown = await _existing_markdown(session, mode)
-    if markdown:
-        session.state = SDKSessionState.PARSED
-        session_store.save(session)
-        return _response(session)
-
-    session, job = await _start_parse(session, mode, created_by=user.user_id)
-    return _response(session, job)
+    return _response(session, {"job_id": job_id, "status": "queued", "progress": 0})
 
 
 @router.get("/sessions/{session_id}", response_model=SDKSessionResponse)
@@ -244,7 +343,7 @@ async def get_session(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     session, job = await _sync_parse_state(session)
     return _response(session, job)
 
@@ -257,7 +356,7 @@ async def retry_parse(
 ):
     """重试解析（可切换解析模式）；同模式且已有解析结果时直接复用。"""
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     session, job = await _sync_parse_state(session)
     if session.state == SDKSessionState.PARSING:
         raise HTTPException(status_code=409, detail="解析正在进行中，请稍后重试")
@@ -273,8 +372,20 @@ async def retry_parse(
         session_store.save(session)
         return _response(session)
 
-    session, job = await _start_parse(session, mode, created_by=user.user_id)
-    return _response(session, job)
+    job_id = await _create_parse_job(
+        tenant_id=session.tenant_id,
+        document_id=session.document_id,
+        parse_mode=mode,
+        created_by=user.user_id,
+    )
+    session_store.delete(session.id)
+    session.id = job_id
+    session.parse_job_id = job_id
+    session.parse_mode = mode
+    session.parse_error = None
+    session.state = SDKSessionState.PARSING
+    session_store.save(session)
+    return _response(session, {"job_id": job_id, "status": "queued", "progress": 0})
 
 
 @router.post("/sessions/{session_id}/analyze")
@@ -284,7 +395,7 @@ async def analyze_session(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     session, _ = await _sync_parse_state(session)
     if session.state == SDKSessionState.PARSING:
         raise HTTPException(status_code=409, detail="文档仍在解析中，请稍后再试")
@@ -320,7 +431,7 @@ async def confirm_template(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     session.confirmed_template = request
     session.state = SDKSessionState.TEMPLATE_CONFIRMED
     session_store.save(session)
@@ -334,7 +445,7 @@ async def generate_prompt(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     prompt = await orchestrator.generate_prompt(
         session,
         model_profile=request.model_profile if request else None,
@@ -352,7 +463,7 @@ async def generate_code(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     cleaner_code = await orchestrator.generate_code(
         session,
         model_profile=request.model_profile if request else None,
@@ -370,7 +481,7 @@ async def commit_session(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
+    session = await _load_session_or_404(session_id, user)
     if request:
         if request.prompt is not None:
             session.prompt = request.prompt
@@ -389,9 +500,8 @@ async def delete_session(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = _get_session_or_404(session_id, user)
-    if os.path.exists(session.file_path):
-        os.remove(session.file_path)
+    session = await _load_session_or_404(session_id, user)
+    # 样例文档本身保留（它是一条普通 Document），只清理会话级的 Excel 模板文件
     if session.excel_template_path and os.path.exists(session.excel_template_path):
         os.remove(session.excel_template_path)
     deleted = session_store.delete(session_id)

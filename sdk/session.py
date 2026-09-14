@@ -21,6 +21,7 @@ class SDKSessionStore:
         tenant_id: str,
         document_id: str,
         parse_job_id: str,
+        session_id: str | None = None,
         parse_mode: str = "pipeline",
         state: SDKSessionState = SDKSessionState.PARSING,
         excel_template_file_name: str | None = None,
@@ -31,7 +32,7 @@ class SDKSessionStore:
         self.cleanup()
         now = self._now()
         session = SDKSession(
-            id=str(uuid4()),
+            id=session_id or str(uuid4()),
             file_name=file_name,
             file_path=file_path,
             tenant_id=tenant_id,
