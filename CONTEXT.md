@@ -6,7 +6,7 @@ NeoFlow turns one or more source documents into reviewable, structured records a
 
 **Tenant**:
 The ownership and data-isolation boundary for one organization using NeoFlow. A Tenant owns one or more Projects.
-_Avoid_: account, customer workspace
+_Avoid_: account, customer workspace, department (use Tenant even when the UI groups by department, e.g. 质量管理中心)
 
 **Project**:
 A workspace within one Tenant that owns Configurations, Processing Jobs, and Extraction Results.
@@ -19,8 +19,8 @@ A source file tracked through ingestion, extraction, review, and completion. A d
 _Avoid_: upload, file record
 
 **Document Kind**:
-The stable semantic kind of a source document used to select an extraction policy. It is not a database table name or an external output name.
-_Avoid_: raw `document_type` string, result table
+The stable semantic kind of a source document used to select an extraction policy. It is chosen by the operator, not inferred from sample content. It is not a database table name or an external output name.
+_Avoid_: raw `document_type` string, result table, AI-predicted type
 
 **Document Ingestion**:
 The act of accepting source documents, associating them with a Project and Configuration, and creating a Processing Job.
@@ -33,6 +33,10 @@ _Avoid_: OCR result, LLM response
 **Extraction Result**:
 The structured, provenance-aware values produced for one logical sample by Extraction or Composite Extraction.
 _Avoid_: raw JSON, business table row
+
+**Parse Result**:
+The page- and block-structured markdown produced for one Document by Parsing, and the sole input to Extraction. Stored per Document and reused by every Configuration that consumes that Document.
+_Avoid_: OCR text, raw text
 
 ## Configurations and fields
 
@@ -48,12 +52,16 @@ _Avoid_: application type, route type
 An immutable historical form of a Configuration. Every Processing Job runs exactly one Configuration Revision.
 _Avoid_: mutable configuration snapshot, current template
 
+**Configuration Drafting**:
+The interactive flow that proposes a draft Field Schema (and later an extraction prompt) from a sample Document's Parse Result, for an operator to confirm before the Configuration is created. The Document Kind and Tenant are chosen by the operator up front; drafting never invents example values — examples reach field descriptions only after real results are verified.
+_Avoid_: AI wizard, auto template, SDK session
+
 **Processing Job**:
 An execution request that applies one Configuration Revision to a defined set of input Documents.
 _Avoid_: background task, batch record
 
 **Field Schema**:
-The set of fields recognized by an Extract or Composite Extraction Configuration, including each field's key, label, type, requiredness, validation rules, provenance, and output mapping.
+The set of fields recognized by an Extract or Composite Extraction Configuration, including each field's key, label, type, description (natural-language guidance that steers the extractor, and the only home for few-shot examples), requiredness, validation rules, provenance, and output mapping.
 _Avoid_: dynamic database column, ad hoc field mapping
 
 **Field Value**:
