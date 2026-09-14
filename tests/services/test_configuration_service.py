@@ -253,6 +253,14 @@ class TestPublishLifecycle:
             await svc.publish_configuration(created["id"])
 
     @pytest.mark.asyncio
+    async def test_publish_unimplemented_type_rejected(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(_create(type="classify"))
+
+        with pytest.raises(ConfigurationStateError, match="尚未实现"):
+            await svc.publish_configuration(created["id"])
+
+    @pytest.mark.asyncio
     async def test_update_published_creates_new_draft_then_new_revision(self, service):
         svc, _ = service
         created = await svc.create_configuration(_create(definition={"extraction_prompt": "v1"}))

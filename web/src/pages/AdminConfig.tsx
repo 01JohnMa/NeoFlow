@@ -18,6 +18,7 @@ import { formatDate } from '@/lib/utils'
 import {
   CONFIGURATION_STATUS_LABELS,
   CONFIGURATION_TYPE_LABELS,
+  IMPLEMENTED_CONFIGURATION_TYPES,
   configurationStatusVariant,
 } from '@/lib/configuration'
 import { AiTemplateWizard } from '@/components/admin/AiTemplateWizard'
@@ -326,11 +327,15 @@ export function AdminConfig() {
                 setCreateForm((f) => ({ ...f, type: e.target.value as ConfigurationType }))
               }
             >
-              {CONFIGURATION_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {CONFIGURATION_TYPE_LABELS[type]}
-                </option>
-              ))}
+              {CONFIGURATION_TYPES.map((type) => {
+                const implemented = IMPLEMENTED_CONFIGURATION_TYPES.includes(type)
+                return (
+                  <option key={type} value={type} disabled={!implemented}>
+                    {CONFIGURATION_TYPE_LABELS[type]}
+                    {implemented ? '' : '（未实现）'}
+                  </option>
+                )
+              })}
             </Select>
           </div>
           <div>
