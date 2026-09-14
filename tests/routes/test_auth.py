@@ -3,6 +3,7 @@
 import base64
 import http.server
 import json
+import socket
 import threading
 import time
 
@@ -247,11 +248,25 @@ def jwks_server():
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    _wait_until_accepting(server)
     try:
         yield private_key, f"http://127.0.0.1:{server.server_address[1]}/jwks"
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _wait_until_accepting(server, timeout: float = 5.0) -> None:
+    """等待本地 JWKS 服务开始接收连接，避免首次请求竞态导致 401。"""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with socket.create_connection(server.server_address, timeout=0.5):
+                return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 @pytest.fixture
