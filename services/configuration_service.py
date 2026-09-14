@@ -547,6 +547,13 @@ class ConfigurationService(SupabaseClientMixin):
         if configuration["status"] == "published":
             raise ConfigurationStateError("配置已发布且无待发布的修改")
 
+        from services.job_runner import job_runner
+
+        if configuration.get("type") not in job_runner.handlers:
+            raise ConfigurationStateError(
+                f"配置类型 {configuration.get('type')} 尚未实现，暂不可发布"
+            )
+
         definition = normalize_definition(configuration.get("draft_definition"))
         revision_number = await self._next_revision_number(configuration_id)
         published_at = datetime.now(timezone.utc).isoformat()

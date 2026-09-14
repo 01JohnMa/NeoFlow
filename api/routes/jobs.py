@@ -61,6 +61,14 @@ async def _load_pinned_configuration(
     if configuration.get("status") == "archived":
         raise HTTPException(status_code=409, detail="配置已归档，不能创建新任务")
 
+    from services.job_runner import job_runner
+
+    if configuration.get("type") not in job_runner.handlers:
+        raise HTTPException(
+            status_code=409,
+            detail=f"配置类型 {configuration.get('type')} 尚未实现，无法创建任务",
+        )
+
     return configuration
 
 
