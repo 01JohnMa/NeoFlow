@@ -131,10 +131,16 @@ def _patch_parse_env(monkeypatch, tmp_path) -> dict:
 
 
 def _create_session(admin_client, files=None, data=None):
+    form = {
+        "template_name": "检测报告",
+        "template_code": "inspection_report",
+        "tenant_id": TENANT_ID,
+    }
+    form.update(data or {})
     return admin_client.post(
         "/api/sdk/sessions",
         files=files or {"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
-        data=data or {},
+        data=form,
     )
 
 
@@ -250,15 +256,6 @@ def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
     async def fake_analyze(session, parse_text, **kwargs):
         captured["parse_text"] = parse_text
         return {
-            "recommended_doc_type": "检测报告",
-            "recommended_doc_code": "inspection_report",
-            "confidence": 0.95,
-            "recommended_tenant": {
-                "suggest_name": "品质部",
-                "suggest_code": "quality",
-                "reason": "文档中出现品质管理部",
-                "match_existing_tenant_id": TENANT_ID,
-            },
             "detected_fields": [
                 {
                     "field_key": "sample_name",
@@ -270,7 +267,6 @@ def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
                     "sample_value": "小型断路器",
                 }
             ],
-            "suggested_examples": [],
         }
 
     monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
@@ -278,7 +274,7 @@ def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
     response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
 
     assert response.status_code == 200
-    assert response.json()["analysis"]["recommended_doc_type"] == "检测报告"
+    assert response.json()["analysis"]["detected_fields"]
     assert captured["parse_text"] == PARSE_MARKDOWN
 
 
@@ -329,15 +325,6 @@ def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_
     mocks["get_document_parse_result"].return_value = _parse_result_row()
 
     analysis_payload = {
-        "recommended_doc_type": "出货单",
-        "recommended_doc_code": "shipment_report",
-        "confidence": 0.95,
-        "recommended_tenant": {
-            "suggest_name": "品质部",
-            "suggest_code": "quality",
-            "reason": "文档中出现品质管理部",
-            "match_existing_tenant_id": TENANT_ID,
-        },
         "detected_fields": [
             {
                 "field_key": "order_no",
@@ -349,7 +336,6 @@ def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_
                 "sample_value": "NOZS0311046",
             }
         ],
-        "suggested_examples": [],
     }
 
     async def fake_analyze(session, parse_text, **kwargs):
@@ -385,15 +371,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
     mocks["get_document_parse_result"].return_value = _parse_result_row()
 
     analysis_payload = {
-        "recommended_doc_type": "检测报告",
-        "recommended_doc_code": "inspection_report",
-        "confidence": 0.95,
-        "recommended_tenant": {
-            "suggest_name": "品质部",
-            "suggest_code": "quality",
-            "reason": "文档中出现品质管理部",
-            "match_existing_tenant_id": TENANT_ID,
-        },
         "detected_fields": [
             {
                 "field_key": "sample_name",
@@ -403,12 +380,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
                 "review_enforced": False,
                 "review_allowed_values": None,
                 "sample_value": "小型断路器",
-            }
-        ],
-        "suggested_examples": [
-            {
-                "example_input": "样品名称：小型断路器",
-                "example_output": {"sample_name": "小型断路器"},
             }
         ],
     }
@@ -442,7 +413,7 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
 
     analyze_response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
     assert analyze_response.status_code == 200
-    assert analyze_response.json()["analysis"]["recommended_doc_type"] == "检测报告"
+    assert analyze_response.json()["analysis"]["detected_fields"]
 
     confirm_response = admin_client.post(
         f"/api/sdk/sessions/{session_id}/confirm-template",
@@ -450,13 +421,9 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
             "template_name": "检测报告",
             "template_code": "inspection_report",
             "description": "AI 生成模板",
-            "tenant_id": TENANT_ID,
-            "tenant_name": None,
-            "tenant_code": None,
-            "extraction_mode": "ocr_llm",
             "per_page_extraction": False,
             "fields": analysis_payload["detected_fields"],
-            "examples": analysis_payload["suggested_examples"],
+            "examples": [],
         },
     )
     assert confirm_response.status_code == 200
@@ -487,15 +454,6 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
     tmp_path,
 ):
     analysis_payload = {
-        "recommended_doc_type": "检测报告",
-        "recommended_doc_code": "inspection_report",
-        "confidence": 0.95,
-        "recommended_tenant": {
-            "suggest_name": "品质部",
-            "suggest_code": "quality",
-            "reason": "文档中出现品质管理部",
-            "match_existing_tenant_id": TENANT_ID,
-        },
         "detected_fields": [
             {
                 "field_key": "sample_name",
@@ -507,7 +465,6 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
                 "sample_value": "小型断路器",
             }
         ],
-        "suggested_examples": [],
     }
     profile_payload = {
         "name": "step-test",
@@ -540,6 +497,11 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
     create_response = admin_client.post(
         "/api/sdk/sessions",
         files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
+        data={
+            "template_name": "检测报告",
+            "template_code": "inspection_report",
+            "tenant_id": TENANT_ID,
+        },
     )
     session_id = create_response.json()["id"]
 
@@ -556,10 +518,6 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
             "template_name": "检测报告",
             "template_code": "inspection_report",
             "description": "AI 生成模板",
-            "tenant_id": TENANT_ID,
-            "tenant_name": None,
-            "tenant_code": None,
-            "extraction_mode": "ocr_llm",
             "per_page_extraction": False,
             "fields": analysis_payload["detected_fields"],
             "examples": [],
@@ -763,3 +721,76 @@ def test_delete_session_keeps_sample_document_file(admin_client, monkeypatch, tm
     assert response.status_code == 200
     assert list(tmp_path.glob("*.jpg")), "样例文档文件应保留"
     assert not list((tmp_path / "sdk_sessions").glob("*")), "Excel 模板文件应被清理"
+
+
+def test_create_session_requires_document_kind(admin_client, monkeypatch, tmp_path):
+    _patch_parse_env(monkeypatch, tmp_path)
+
+    response = admin_client.post(
+        "/api/sdk/sessions",
+        files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
+        data={"tenant_id": TENANT_ID},
+    )
+
+    assert response.status_code == 400
+    assert "文档类型" in response.json()["detail"]
+
+
+def test_create_session_rejects_other_tenant(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+
+    response = _create_session(
+        admin_client,
+        data={"tenant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
+    )
+
+    assert response.status_code == 403
+    mocks["create_document"].assert_not_awaited()
+
+
+def test_create_session_requires_tenant(admin_client, monkeypatch, tmp_path):
+    _patch_parse_env(monkeypatch, tmp_path)
+    test_app = FastAPI()
+    test_app.include_router(sdk_router, prefix="/api")
+    test_app.dependency_overrides[get_current_user] = _regular_tenant_missing_admin
+    try:
+        from fastapi.testclient import TestClient
+
+        with TestClient(test_app) as no_tenant_client:
+            response = no_tenant_client.post(
+                "/api/sdk/sessions",
+                files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
+                data={"template_name": "检测报告", "template_code": "inspection_report"},
+            )
+    finally:
+        test_app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "租户" in response.json()["detail"]
+
+
+async def _regular_tenant_missing_admin():
+    return CurrentUser(
+        user_id=USER_ID,
+        token="test-token",
+        tenant_id=None,
+        role="tenant_admin",
+    )
+
+
+def test_analyze_returns_only_field_candidates(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+
+    async def fake_analyze(session, parse_text, **kwargs):
+        return {"detected_fields": []}
+
+    monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
+
+    response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
+
+    assert response.status_code == 200
+    analysis = response.json()["analysis"]
+    assert analysis == {"detected_fields": []}

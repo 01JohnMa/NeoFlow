@@ -18,6 +18,8 @@ def _build_session(**overrides) -> SDKSession:
         "file_name": "scan.jpg",
         "file_path": "/tmp/scan.jpg",
         "tenant_id": "tenant-1",
+        "template_name": "检测报告",
+        "template_code": "inspection_report",
         "document_id": "doc-1",
         "parse_job_id": "job-1",
         "user_id": "11111111-1111-4111-8111-111111111111",
@@ -33,35 +35,28 @@ def _build_session(**overrides) -> SDKSession:
 async def test_analyze_uses_parse_markdown(monkeypatch):
     captured = {}
 
-    async def fake_tenants(active_only=True):
-        return [{"id": "tenant-1", "name": "品质部", "code": "quality"}]
-
-    async def fake_run_doc_analyzer(*, parse_text, file_name, tenants, model_profile=None):
+    async def fake_run_doc_analyzer(*, parse_text, file_name, instruction, model_profile=None):
         captured["parse_text"] = parse_text
         captured["file_name"] = file_name
+        captured["instruction"] = instruction
         captured["model_profile"] = model_profile
         return DocumentAnalysis(
-            recommended_doc_type="检测报告",
-            recommended_doc_code="inspection_report",
-            confidence=0.9,
-            recommended_tenant={"suggest_name": "品质部", "suggest_code": "quality"},
-            detected_fields=[],
+            detected_fields=[
+                {"field_key": "sample_name", "field_label": "样品名称", "field_type": "text"}
+            ],
         )
 
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.tenant_service.get_all_tenants",
-        fake_tenants,
-    )
     monkeypatch.setattr("sdk.agents.orchestrator.run_doc_analyzer", fake_run_doc_analyzer)
 
     analysis = await SDKOrchestrator().analyze_document(
-        _build_session(file_name="report.pdf"),
+        _build_session(file_name="report.pdf", instruction="关注样品名称与结论"),
         "# 解析结果\n样品名称：小型断路器",
     )
 
     assert captured["parse_text"].startswith("# 解析结果")
     assert captured["file_name"] == "report.pdf"
-    assert analysis.recommended_doc_type == "检测报告"
+    assert captured["instruction"] == "关注样品名称与结论"
+    assert [field.field_key for field in analysis.detected_fields] == ["sample_name"]
 
 
 @pytest.mark.asyncio
@@ -92,6 +87,7 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
     )
 
     session = _build_session(
+        parse_mode="vlm",
         excel_template_file_name="template.xlsx",
         excel_template_path="/tmp/template.xlsx",
         excel_placeholders=[
@@ -141,7 +137,7 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
 
     definition = normalize_definition(payload["definition"])
     assert definition["extraction_prompt"] == "抽取订单号 {ocr_text}"
-    assert definition["extraction_mode"] == "vlm"
+    assert definition["parse"]["model_version"] == "vlm"
     assert definition["per_page_extraction"] is True
     assert definition["output_mode"] == "both"
     assert definition["excel"] == {
@@ -239,33 +235,17 @@ async def test_commit_uses_fallback_prompt_when_missing(monkeypatch):
 async def test_analyze_document_passes_model_profile_to_agent(monkeypatch):
     captured = {}
 
-    async def fake_get_all_tenants(active_only=True):
-        assert active_only is True
-        return [{"id": "tenant-1", "name": "品质部"}]
-
-    async def fake_run_doc_analyzer(*, parse_text, file_name, tenants, model_profile):
+    async def fake_run_doc_analyzer(*, parse_text, file_name, instruction, model_profile):
         captured["parse_text"] = parse_text
         captured["file_name"] = file_name
-        captured["tenants"] = tenants
+        captured["instruction"] = instruction
         captured["model_profile"] = model_profile
         return DocumentAnalysis(
-            recommended_doc_type="检测报告",
-            recommended_doc_code="inspection_report",
-            confidence=0.95,
-            recommended_tenant={
-                "suggest_name": "品质部",
-                "suggest_code": "quality",
-                "reason": "匹配已有部门",
-                "match_existing_tenant_id": "tenant-1",
-            },
-            detected_fields=[],
-            suggested_examples=[],
+            detected_fields=[
+                {"field_key": "sample_name", "field_label": "样品名称", "field_type": "text"}
+            ],
         )
 
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.tenant_service.get_all_tenants",
-        fake_get_all_tenants,
-    )
     monkeypatch.setattr(
         "sdk.agents.orchestrator.run_doc_analyzer",
         fake_run_doc_analyzer,
@@ -286,10 +266,9 @@ async def test_analyze_document_passes_model_profile_to_agent(monkeypatch):
         model_profile=model_profile,
     )
 
-    assert result.recommended_doc_type == "检测报告"
+    assert [field.field_key for field in result.detected_fields] == ["sample_name"]
     assert captured["parse_text"] == "样品名称：小型断路器"
     assert captured["file_name"] == "scan.jpg"
-    assert captured["tenants"] == [{"id": "tenant-1", "name": "品质部"}]
     assert captured["model_profile"] is model_profile
 
 

@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils'
 
 interface AiTemplateWizardProps {
   tenantId: string
+  tenantName?: string
   initialSessionId?: string | null
   onSessionChange?: (sessionId: string | null) => void
   onCommitted: (configurationId: string) => void | Promise<void>
@@ -41,8 +42,6 @@ const steps = [
   { key: 'confirm', label: '确认配置' },
   { key: 'commit', label: '发布配置' },
 ]
-
-const formatJson = (value: Record<string, unknown>) => JSON.stringify(value ?? {}, null, 2)
 
 const parseAllowedValues = (value: string): string[] | null => {
   const values = value
@@ -69,6 +68,7 @@ const createEmptyExample = (): SDKSuggestedExample => ({
 
 export function AiTemplateWizard({
   tenantId,
+  tenantName,
   initialSessionId,
   onSessionChange,
   onCommitted,
@@ -83,8 +83,9 @@ export function AiTemplateWizard({
   const [invalidExampleIndexes, setInvalidExampleIndexes] = useState<number[]>([])
   const [templateName, setTemplateName] = useState('')
   const [templateCode, setTemplateCode] = useState('')
+  const [parseMode, setParseMode] = useState<'pipeline' | 'vlm'>('pipeline')
+  const [instruction, setInstruction] = useState('')
   const [description, setDescription] = useState('')
-  const [extractionMode, setExtractionMode] = useState<'ocr_llm' | 'vlm'>('ocr_llm')
   const [perPageExtraction, setPerPageExtraction] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [cleanerCode, setCleanerCode] = useState('')
@@ -106,8 +107,6 @@ export function AiTemplateWizard({
   const codeIsCurrent = codeRevision === configRevision
   const canCommit = Boolean(
     session
-      && templateName.trim()
-      && templateCode.trim()
       && fields.length > 0
       && !hasFieldErrors
       && !hasDuplicateFieldKeys
@@ -116,7 +115,6 @@ export function AiTemplateWizard({
 
   const validationMessage = (() => {
     if (!analysis) return null
-    if (!templateName.trim() || !templateCode.trim()) return '模板名称和 code 不能为空'
     if (fields.length === 0) return '至少需要 1 个识别字段'
     if (hasFieldErrors) return '字段键名和标签不能为空'
     if (hasDuplicateFieldKeys) return '字段键名不能重复'
@@ -141,10 +139,7 @@ export function AiTemplateWizard({
     setExamples([])
     setExampleOutputDrafts([])
     setInvalidExampleIndexes([])
-    setTemplateName('')
-    setTemplateCode('')
     setDescription('')
-    setExtractionMode('ocr_llm')
     setPerPageExtraction(false)
     setConfigRevision(0)
     resetGeneratedArtifacts()
@@ -164,9 +159,15 @@ export function AiTemplateWizard({
   }
 
   const handleCreateSession = () => {
-    if (!file) return
+    if (!file || !templateName.trim() || !templateCode.trim()) return
     void runAction('upload', async () => {
-      const created = await sdkApi.createSDKSession(file, excelTemplateFile)
+      const created = await sdkApi.createSDKSession(file, excelTemplateFile, {
+        tenantId,
+        templateName: templateName.trim(),
+        templateCode: templateCode.trim(),
+        parseMode,
+        instruction,
+      })
       setSession(created)
       onSessionChange?.(created.id)
       resetAnalysisState()
@@ -192,7 +193,12 @@ export function AiTemplateWizard({
     sdkApi
       .getSDKSession(initialSessionId)
       .then((restored) => {
-        if (!cancelled) setSession(restored)
+        if (cancelled) return
+        setSession(restored)
+        setTemplateName((value) => value || restored.template_name)
+        setTemplateCode((value) => value || restored.template_code)
+        setParseMode(restored.parse_mode)
+        setInstruction((value) => value || restored.instruction || '')
       })
       .catch(() => {
         if (!cancelled) setError('会话已失效，请重新上传样例')
@@ -219,13 +225,10 @@ export function AiTemplateWizard({
       const result = await sdkApi.analyzeSDKSession(session.id)
       setAnalysis(result)
       setFields(result.detected_fields)
-      setExamples(result.suggested_examples)
-      setExampleOutputDrafts(result.suggested_examples.map((example) => formatJson(example.example_output)))
+      setExamples([])
+      setExampleOutputDrafts([])
       setInvalidExampleIndexes([])
-      setTemplateName(result.recommended_doc_type)
-      setTemplateCode(result.recommended_doc_code)
-      setDescription(`由 AI 根据 ${session.file_name} 生成`)
-      setExtractionMode('ocr_llm')
+      setDescription(`由 AI 根据 ${session.file_name} 建议字段`)
       setPerPageExtraction(false)
       setConfigRevision((revision) => revision + 1)
       resetGeneratedArtifacts()
@@ -234,13 +237,9 @@ export function AiTemplateWizard({
   }
 
   const buildConfirmPayload = (): SDKConfirmTemplatePayload => ({
-    template_name: templateName.trim(),
-    template_code: templateCode.trim(),
+    template_name: (templateName || session?.template_name || '').trim(),
+    template_code: (templateCode || session?.template_code || '').trim(),
     description: description.trim() || null,
-    tenant_id: tenantId,
-    tenant_name: null,
-    tenant_code: null,
-    extraction_mode: extractionMode,
     per_page_extraction: perPageExtraction,
     fields: fields.map((field) => ({
       ...field,
@@ -300,16 +299,10 @@ export function AiTemplateWizard({
   }
 
   const updateTemplateField = (patch: {
-    templateName?: string
-    templateCode?: string
     description?: string
-    extractionMode?: 'ocr_llm' | 'vlm'
     perPageExtraction?: boolean
   }) => {
-    if (patch.templateName !== undefined) setTemplateName(patch.templateName)
-    if (patch.templateCode !== undefined) setTemplateCode(patch.templateCode)
     if (patch.description !== undefined) setDescription(patch.description)
-    if (patch.extractionMode !== undefined) setExtractionMode(patch.extractionMode)
     if (patch.perPageExtraction !== undefined) setPerPageExtraction(patch.perPageExtraction)
     markConfigChanged()
   }
@@ -438,8 +431,59 @@ export function AiTemplateWizard({
               待识别图片/文档
             </div>
             <p className="mb-3 text-xs leading-relaxed text-text-muted">
-              这里上传需要解析的图片或文档。固定 Excel 模式下，字段值仍然来自这个文件。
+              第一步先确定模板归属与身份：上传需要解析的图片或文档，AI 只负责建议字段。
             </p>
+
+            <div className="mb-3 rounded-lg border border-border-default bg-bg-card p-3">
+              <p className="text-xs text-text-muted">
+                所属租户：<span className="text-text-primary">{tenantName || tenantId}</span>
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div>
+                  <Label>文档类型名称</Label>
+                  <Input
+                    className="mt-1"
+                    value={templateName}
+                    placeholder="例如：检测报告"
+                    disabled={Boolean(session)}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>文档类型编码</Label>
+                  <Input
+                    className="mt-1"
+                    value={templateCode}
+                    placeholder="例如：inspection_report"
+                    disabled={Boolean(session)}
+                    onChange={(e) => setTemplateCode(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>解析模式</Label>
+                  <Select
+                    className="mt-1"
+                    value={parseMode}
+                    disabled={Boolean(session)}
+                    onChange={(e) => setParseMode(e.target.value as 'pipeline' | 'vlm')}
+                  >
+                    <option value="pipeline">快速解析</option>
+                    <option value="vlm">高精度解析</option>
+                  </Select>
+                </div>
+                <div>
+                  <Label>字段建议说明（可选）</Label>
+                  <Input
+                    className="mt-1"
+                    value={instruction}
+                    placeholder="例如：重点抽金额与日期"
+                    disabled={Boolean(session)}
+                    onChange={(e) => setInstruction(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
             <Input
               type="file"
               accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp"
@@ -475,7 +519,7 @@ export function AiTemplateWizard({
               className="mt-3"
               size="sm"
               onClick={handleCreateSession}
-              disabled={!file}
+              disabled={!file || !templateName.trim() || !templateCode.trim()}
               loading={loadingAction === 'upload'}
             >
               上传并解析
@@ -567,13 +611,9 @@ export function AiTemplateWizard({
 
           {analysis && (
             <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
-              <div className="mb-2 text-sm font-medium text-text-primary">AI 推荐</div>
+              <div className="mb-2 text-sm font-medium text-text-primary">AI 字段建议</div>
               <div className="space-y-2 text-xs text-text-secondary">
-                <p>置信度 {(analysis.confidence * 100).toFixed(1)}%</p>
-                <p>推荐部门：{analysis.recommended_tenant.suggest_name}</p>
-                {analysis.recommended_tenant.reason && (
-                  <p className="text-text-muted">{analysis.recommended_tenant.reason}</p>
-                )}
+                <p>已建议 {analysis.detected_fields.length} 个字段，可在右侧确认与调整</p>
               </div>
             </div>
           )}
@@ -589,33 +629,19 @@ export function AiTemplateWizard({
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>
-                    <Label>模板名称</Label>
-                    <Input
-                      className="mt-1"
-                      value={templateName}
-                      onChange={(e) => updateTemplateField({ templateName: e.target.value })}
-                    />
+                    <p className="text-xs text-text-muted">文档类型</p>
+                    <p className="mt-1 text-sm text-text-primary">
+                      {templateName || session?.template_name}
+                      <span className="ml-2 font-mono text-xs text-text-muted">
+                        {templateCode || session?.template_code}
+                      </span>
+                    </p>
                   </div>
                   <div>
-                    <Label>模板 code</Label>
-                    <Input
-                      className="mt-1"
-                      value={templateCode}
-                      onChange={(e) => updateTemplateField({ templateCode: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label>提取模式</Label>
-                    <Select
-                      className="mt-1"
-                      value={extractionMode}
-                      onChange={(e) => (
-                        updateTemplateField({ extractionMode: e.target.value as 'ocr_llm' | 'vlm' })
-                      )}
-                    >
-                      <option value="ocr_llm">OCR + LLM</option>
-                      <option value="vlm">VLM</option>
-                    </Select>
+                    <p className="text-xs text-text-muted">解析模式</p>
+                    <p className="mt-1 text-sm text-text-primary">
+                      {(session?.parse_mode ?? parseMode) === 'vlm' ? '高精度解析' : '快速解析'}
+                    </p>
                   </div>
                   <label className="flex items-end gap-2 pb-2 text-sm text-text-secondary">
                     <input

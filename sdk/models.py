@@ -17,13 +17,6 @@ class SDKSessionState(str, Enum):
     COMMITTED = "committed"
 
 
-class RecommendedTenant(BaseModel):
-    suggest_name: str
-    suggest_code: str
-    reason: str = ""
-    match_existing_tenant_id: Optional[str] = None
-
-
 class DetectedField(BaseModel):
     field_key: str
     field_label: str
@@ -47,22 +40,13 @@ class ExcelTemplatePlaceholder(BaseModel):
 
 
 class DocumentAnalysis(BaseModel):
-    recommended_doc_type: str
-    recommended_doc_code: str
-    confidence: float = Field(ge=0, le=1)
-    recommended_tenant: RecommendedTenant
-    detected_fields: List[DetectedField]
-    suggested_examples: List[SuggestedExample] = []
+    detected_fields: List[DetectedField] = Field(default_factory=list)
 
 
 class ConfirmTemplateRequest(BaseModel):
     template_name: str
     template_code: str
     description: Optional[str] = None
-    tenant_id: Optional[str] = None
-    tenant_name: Optional[str] = None
-    tenant_code: Optional[str] = None
-    extraction_mode: str = "ocr_llm"
     per_page_extraction: bool = False
     fields: List[DetectedField]
     examples: List[SuggestedExample] = []
@@ -115,6 +99,9 @@ class SDKSession(BaseModel):
     file_name: str
     file_path: str
     tenant_id: str
+    template_name: str
+    template_code: str
+    instruction: Optional[str] = None
     document_id: str
     parse_job_id: str
     parse_mode: str = "pipeline"
@@ -137,6 +124,9 @@ class SDKSessionResponse(BaseModel):
     id: str
     file_name: str
     tenant_id: str
+    template_name: str
+    template_code: str
+    instruction: Optional[str] = None
     document_id: str
     parse_job_id: str
     parse_mode: str

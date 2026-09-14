@@ -6,18 +6,32 @@ import type {
   SDKCommitResult,
 } from '@/types'
 
+export interface SDKCreateSessionOptions {
+  tenantId: string
+  templateName: string
+  templateCode: string
+  parseMode?: 'pipeline' | 'vlm'
+  instruction?: string | null
+}
+
 export async function createSDKSession(
   file: File,
-  excelTemplate?: File | null,
-  parseMode?: 'pipeline' | 'vlm',
+  excelTemplate: File | null | undefined,
+  options: SDKCreateSessionOptions,
 ): Promise<SDKSession> {
   const formData = new FormData()
   formData.append('file', file)
   if (excelTemplate) {
     formData.append('excel_template', excelTemplate)
   }
-  if (parseMode) {
-    formData.append('parse_mode', parseMode)
+  formData.append('tenant_id', options.tenantId)
+  formData.append('template_name', options.templateName)
+  formData.append('template_code', options.templateCode)
+  if (options.parseMode) {
+    formData.append('parse_mode', options.parseMode)
+  }
+  if (options.instruction?.trim()) {
+    formData.append('instruction', options.instruction.trim())
   }
   const { data } = await api.post<SDKSession>('/sdk/sessions', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },

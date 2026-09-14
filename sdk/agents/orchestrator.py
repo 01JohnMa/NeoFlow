@@ -3,7 +3,6 @@
 from typing import Any, Dict
 
 from services.configuration_service import configuration_service
-from services.tenant_service import tenant_service
 from sdk.agents.code_agent import generate_cleaner_code
 from sdk.agents.doc_analyzer_agent import analyze_document as run_doc_analyzer
 from sdk.agents.prompt_agent import build_fallback_prompt, generate_prompt as run_prompt_agent
@@ -48,7 +47,7 @@ def build_configuration_definition(
         "fields": fields,
         "examples": examples,
         "extraction_prompt": prompt,
-        "extraction_mode": confirmed.extraction_mode,
+        "parse": {"model_version": session.parse_mode},
         "per_page_extraction": confirmed.per_page_extraction,
         "cleaner_module": None,
         "output_mode": "both" if session.excel_template_path else "bitable",
@@ -70,11 +69,10 @@ class SDKOrchestrator:
         *,
         model_profile: SDKModelProfile | None = None,
     ) -> DocumentAnalysis:
-        tenants = await tenant_service.get_all_tenants(active_only=True)
         return await run_doc_analyzer(
             parse_text=parse_text,
             file_name=session.file_name,
-            tenants=tenants,
+            instruction=session.instruction,
             model_profile=model_profile,
         )
 
@@ -108,16 +106,9 @@ class SDKOrchestrator:
             raise ValueError("请先确认模板信息")
 
         confirmed = session.confirmed_template
-        tenant_id = confirmed.tenant_id
+        tenant_id = session.tenant_id
         if not tenant_id:
-            if not confirmed.tenant_name or not confirmed.tenant_code:
-                raise ValueError("新建部门需要 tenant_name 和 tenant_code")
-            tenant = await tenant_service.create_tenant({
-                "name": confirmed.tenant_name,
-                "code": confirmed.tenant_code,
-                "description": f"由 AI 模板向导创建：{confirmed.tenant_name}",
-            })
-            tenant_id = tenant["id"]
+            raise ValueError("会话缺少所属租户，请重新创建会话")
 
         prompt = session.prompt or build_fallback_prompt(confirmed)
         definition = build_configuration_definition(session, confirmed, prompt)

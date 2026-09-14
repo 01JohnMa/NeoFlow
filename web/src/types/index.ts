@@ -138,13 +138,6 @@ export type SDKSessionState =
   | 'code_generated'
   | 'committed'
 
-export interface SDKRecommendedTenant {
-  suggest_name: string
-  suggest_code: string
-  reason: string
-  match_existing_tenant_id: string | null
-}
-
 export interface SDKDetectedField {
   field_key: string
   field_label: string
@@ -168,22 +161,13 @@ export interface SDKSuggestedExample {
 }
 
 export interface SDKDocumentAnalysis {
-  recommended_doc_type: string
-  recommended_doc_code: string
-  confidence: number
-  recommended_tenant: SDKRecommendedTenant
   detected_fields: SDKDetectedField[]
-  suggested_examples: SDKSuggestedExample[]
 }
 
 export interface SDKConfirmTemplatePayload {
   template_name: string
   template_code: string
   description?: string | null
-  tenant_id?: string | null
-  tenant_name?: string | null
-  tenant_code?: string | null
-  extraction_mode: 'ocr_llm' | 'vlm'
   per_page_extraction: boolean
   fields: SDKDetectedField[]
   examples: SDKSuggestedExample[]
@@ -202,6 +186,9 @@ export interface SDKSession {
   id: string
   file_name: string
   tenant_id: string
+  template_name: string
+  template_code: string
+  instruction: string | null
   document_id: string
   parse_job_id: string
   parse_mode: 'pipeline' | 'vlm'

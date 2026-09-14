@@ -101,6 +101,9 @@ async def _rebuild_session(session_id: str, user: CurrentUser):
         file_name=document.get("original_file_name") or document.get("file_name") or "sample",
         file_path=document.get("file_path") or "",
         tenant_id=tenant_id,
+        template_name="",
+        template_code="",
+        instruction=None,
         document_id=str(document_ids[0]),
         parse_job_id=session_id,
         parse_mode=parse_mode,
@@ -136,6 +139,9 @@ def _response(session, job=None) -> SDKSessionResponse:
         id=session.id,
         file_name=session.file_name,
         tenant_id=session.tenant_id,
+        template_name=session.template_name,
+        template_code=session.template_code,
+        instruction=session.instruction,
         document_id=session.document_id,
         parse_job_id=session.parse_job_id,
         parse_mode=session.parse_mode,
@@ -270,13 +276,29 @@ async def _sync_parse_state(session, job=None):
 async def create_session(
     file: UploadFile = File(...),
     excel_template: UploadFile | None = File(default=None),
+    template_name: str | None = Form(default=None),
+    template_code: str | None = Form(default=None),
     parse_mode: str | None = Form(default=None),
+    instruction: str | None = Form(default=None),
+    tenant_id: str | None = Form(default=None),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """上传样例文档并启动 MinerU 解析（异步 Job，解析模式默认快速解析）。"""
+    """上传样例文档并启动 MinerU 解析。
+
+    所属租户、文档类型（配置名/编码）与解析模式由操作者在第一步选定，接口负责校验；
+    解析模式默认快速解析，可带一句可选说明引导字段建议。
+    """
     _require_admin(user)
-    if not user.tenant_id:
-        raise HTTPException(status_code=400, detail="当前用户未关联租户，无法创建解析会话")
+    resolved_tenant_id = (tenant_id or user.tenant_id or "").strip()
+    if not resolved_tenant_id:
+        raise HTTPException(status_code=400, detail="请先选择所属租户（部门）")
+    if not user.can_access_tenant(resolved_tenant_id):
+        raise AuthorizationError("无权在该租户下创建模板")
+
+    kind_name = (template_name or "").strip()
+    kind_code = (template_code or "").strip()
+    if not kind_name or not kind_code:
+        raise HTTPException(status_code=400, detail="请填写文档类型名称与编码")
 
     mode = normalize_parse_mode(parse_mode)
     document_id = str(uuid4())
@@ -304,7 +326,7 @@ async def create_session(
                 "file_extension": os.path.splitext(file.filename or "")[1],
                 "mime_type": file.content_type,
                 "status": "uploaded",
-                "tenant_id": user.tenant_id,
+                "tenant_id": resolved_tenant_id,
             }
         )
     except Exception:
@@ -315,7 +337,7 @@ async def create_session(
         raise
 
     job_id = await _create_parse_job(
-        tenant_id=user.tenant_id,
+        tenant_id=resolved_tenant_id,
         document_id=document_id,
         parse_mode=mode,
         created_by=user.user_id,
@@ -324,7 +346,10 @@ async def create_session(
         session_id=job_id,
         file_name=file.filename or Path(file_path).name,
         file_path=file_path,
-        tenant_id=user.tenant_id,
+        tenant_id=resolved_tenant_id,
+        template_name=kind_name,
+        template_code=kind_code,
+        instruction=(instruction or "").strip() or None,
         document_id=document_id,
         parse_job_id=job_id,
         parse_mode=mode,

@@ -248,6 +248,7 @@ export function AdminConfig() {
           <Card className="p-6">
             <AiTemplateWizard
               tenantId={selectedTenantId}
+              tenantName={tenants.find((tenant) => tenant.id === selectedTenantId)?.name}
               initialSessionId={draftingSessionId}
               onSessionChange={handleWizardSessionChange}
               onCommitted={handleWizardCommitted}
