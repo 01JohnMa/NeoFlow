@@ -323,134 +323,45 @@ class OCRWorkflow:
         configuration: Dict[str, Any],
         tenant_id: str,
     ) -> Dict[str, Any]:
-        """使用 Configuration 执行工作流（单文档）
+        """使用 Configuration 执行抽取：一律基于 ParseResult 的 markdown。
 
-        根据 DOC_PROCESS_MODE 自动选择 OCR+LLM 或 VLM 路径。
-
-        Args:
-            document_id: 文档ID
-            file_path: 文件路径
-            configuration: Configuration 抽取执行视图
-            tenant_id: 租户ID
+        解析模式（pipeline / vlm）由配置的 parse 段决定；
+        无 MinerU 可用或解析失败时按失败返回，不回退 OCR/VLM。
         """
         processing_start = datetime.now()
-        configuration_id = configuration.get("id")
 
         try:
+            parse_section = configuration.get("parse") or {}
             logger.info(
                 f"使用配置 [{configuration.get('name')}] 处理文档，"
-                f"模式: {configuration.get('extraction_mode', settings.DOC_PROCESS_MODE)}"
+                f"解析模式: {parse_section.get('model_version', 'pipeline')}"
             )
 
-            mode = configuration.get("extraction_mode", settings.DOC_PROCESS_MODE)
-            per_page = configuration.get("per_page_extraction", False)
+            from services.parse_service import ensure_parse_result
 
-            input_mode = configuration.get("extract_input") or "parse"
-            if input_mode == "parse":
-                from services.parse_service import ensure_parse_result
-
-                parse_data = await ensure_parse_result(
-                    document_id=document_id,
-                    file_path=file_path,
-                    tenant_id=tenant_id,
-                )
-                if parse_data and parse_data.get("markdown"):
-                    logger.info(
-                        f"使用 ParseResult 作为抽取输入: {document_id}"
-                    )
-                    return await self._extract_from_parse(
-                        document_id=document_id,
-                        configuration=configuration,
-                        parse_data=parse_data,
-                    )
-                logger.info(f"无可用 ParseResult，回退 raw 抽取路径: {document_id}")
-
-            if per_page:
-                # ── 逐页提取路径：每页独立提取，每页产生一个样品 ──────────
-                if mode == "vlm":
-                    from services.vlm_service import vlm_service
-                    logger.info(f"VLM逐页处理: {file_path}")
-                    vlm_pages = await vlm_service.extract_per_page(file_path, configuration)
-                    page_results = [vp["data"] for vp in vlm_pages]
-                    ocr_text = ""
-                    ocr_confidence = 0.0
-                else:
-                    logger.info(f"逐页OCR处理: {file_path}")
-                    raw_pages = await ocr_service.process_document_per_page(file_path)
-                    ocr_text = "\n".join(p["text"] for p in raw_pages)
-                    ocr_confidence = raw_pages[0]["confidence"] if raw_pages else 0.0
-                    page_results = []
-                    for page in raw_pages:
-                        extracted = parse_llm_json(
-                            await self._llm_invoke_with_retry(
-                                build_extraction_prompt(configuration, page["text"])
-                            )
-                        )
-                        page_results.append(extracted)
-                        logger.info(f"第{page['page']}页提取完成: {len(extracted)}个字段")
-
-                processing_time = self._elapsed(processing_start)
-                logger.info(f"逐页提取完成: {len(page_results)}个样品，耗时{processing_time:.2f}s")
-
-                extraction_results = [
-                    {"sample_index": i + 1, "data": data}
-                    for i, data in enumerate(page_results)
-                ]
-                # 用第一页数据作为主 extraction_data（向后兼容）
-                extraction_data = page_results[0] if page_results else {}
-                result = build_single_success(
-                    document_id=document_id,
-                    document_type=configuration.get("code", ""),
-                    extraction_data=extraction_data,
-                    ocr_text=ocr_text,
-                    ocr_confidence=ocr_confidence,
-                    processing_time=processing_time,
-                    template_id=configuration_id,
-                    template_name=configuration.get("name"),
-                )
-                # 多样品时附带完整列表供调用方使用
-                if len(extraction_results) > 1:
-                    result["extraction_results"] = extraction_results
-                return result
-            elif mode == "vlm":
-                # ── VLM 整体路径：直接从图片提取 ──────────────────────────
-                from services.vlm_service import vlm_service
-
-                extraction_data = await vlm_service.extract_from_image(file_path, configuration)
-                ocr_text = ""
-                ocr_confidence = 0.0
-            else:
-                # ── OCR+LLM 整体路径（默认）──────────────────────────────
-                logger.info(f"开始OCR处理: {file_path}")
-                ocr_result = await ocr_service.process_document(file_path)
-                ocr_text = ocr_result["text"]
-                ocr_confidence = ocr_result["confidence"]
-                logger.info(
-                    f"OCR完成，提取{ocr_result['total_lines']}行，置信度{ocr_confidence:.2f}"
-                )
-
-                prompt = build_extraction_prompt(configuration, ocr_text)
-                response_content = await self._llm_invoke_with_retry(prompt)
-                extraction_data = parse_llm_json(response_content)
-
-            processing_time = self._elapsed(processing_start)
-            logger.info(f"配置化提取完成: {len(extraction_data)}个字段，耗时{processing_time:.2f}s")
-
-            return build_single_success(
+            parse_data = await ensure_parse_result(
                 document_id=document_id,
-                document_type=configuration.get("code", ""),
-                extraction_data=extraction_data,
-                ocr_text=ocr_text,
-                ocr_confidence=ocr_confidence,
-                processing_time=processing_time,
-                template_id=configuration_id,
-                template_name=configuration.get("name"),
+                file_path=file_path,
+                tenant_id=tenant_id,
+                parse_section=parse_section,
+            )
+            if not parse_data or not parse_data.get("markdown"):
+                raise WorkflowError(
+                    WorkflowErrorType.EXTRACT_FAILED,
+                    "无法获得解析结果：请检查 MinerU 配置（MINERU_API_KEY）或文档是否可解析",
+                )
+
+            return await self._extract_from_parse(
+                document_id=document_id,
+                configuration=configuration,
+                parse_data=parse_data,
             )
 
         except Exception as e:
             logger.error(f"配置化处理失败: {e}")
             err_msg = WorkflowError.extract_message(e)
             return build_error(document_id, err_msg, self._elapsed(processing_start))
+
 
     async def _extract_from_parse(
         self,

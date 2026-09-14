@@ -255,6 +255,31 @@ class TestEnsureParseResult:
         assert mock_result.record_parse_result.await_args.kwargs["document_id"] == DOCUMENT_ID
 
     @pytest.mark.asyncio
+    async def test_uses_configured_parse_section(self):
+        from services.parse_service import ensure_parse_result
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+
+        with patch("services.parse_service.result_service") as mock_result, \
+             patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.parse_service.settings") as mock_settings:
+            mock_settings.MINERU_API_KEY = "test-key"
+            mock_result.get_document_parse_result = AsyncMock(return_value=None)
+            mock_result.record_parse_result = AsyncMock(return_value={"id": "r"})
+
+            await ensure_parse_result(
+                document_id=DOCUMENT_ID,
+                file_path="/tmp/demo.pdf",
+                tenant_id=TENANT_ID,
+                parse_section={"model_version": "vlm", "method": "ocr"},
+            )
+
+        params = adapter.parse.await_args.args[1]
+        assert params["model_version"] == "vlm"
+        assert params["method"] == "ocr"
+
+    @pytest.mark.asyncio
     async def test_returns_none_without_mineru_key(self):
         from services.parse_service import ensure_parse_result
 

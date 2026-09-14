@@ -39,6 +39,16 @@ export interface ExcelOutputConfig {
   placeholders: SDKExcelPlaceholder[]
 }
 
+export interface ConfigurationParseSection {
+  backend?: string
+  model_version?: 'pipeline' | 'vlm'
+  method?: string
+  effort?: string
+  language?: string
+  enable_formula?: boolean
+  enable_table?: boolean
+}
+
 export interface ConfigurationDefinition {
   fields: ConfigurationField[]
   examples: ConfigurationExample[]
@@ -51,6 +61,7 @@ export interface ConfigurationDefinition {
   auto_approve: boolean
   feishu: FeishuOutputConfig
   excel: ExcelOutputConfig
+  parse?: ConfigurationParseSection
 }
 
 export interface ConfigurationRevision {
