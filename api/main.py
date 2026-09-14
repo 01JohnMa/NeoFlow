@@ -12,7 +12,6 @@ import os
 
 from api.exceptions import AppException
 from config.settings import settings
-from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
 from api.routes import documents_router, health_router
 from api.routes.tenants import router as tenants_router
@@ -71,18 +70,6 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.dirname(settings.LOG_FILE), exist_ok=True)
     logger.info(f"✓ 上传目录: {settings.UPLOAD_FOLDER}")
     
-    # 初始化OCR服务
-    if settings.OCR_ENABLED and settings.OCR_INIT_ON_STARTUP:
-        try:
-            await ocr_service.initialize()
-            logger.info("✓ OCR服务初始化成功")
-        except Exception as e:
-            logger.opt(exception=e).warning("OCR服务初始化失败，可稍后重试")
-    elif settings.OCR_ENABLED:
-        logger.warning("⚠ OCR服务启用，但启动时初始化已跳过（OCR_INIT_ON_STARTUP=false）")
-    else:
-        logger.warning("⚠ OCR服务已禁用（OCR_ENABLED=false）")
-    
     # 初始化Supabase服务
     try:
         await supabase_service.initialize()
@@ -108,7 +95,6 @@ async def lifespan(app: FastAPI):
     
     # 关闭时清理
     logger.info("正在关闭服务...")
-    await ocr_service.close()
     logger.info("服务已关闭")
 
 

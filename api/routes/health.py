@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from datetime import datetime
 
 from config.settings import settings
-from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
 
 router = APIRouter()
@@ -19,27 +18,7 @@ async def health_check():
         "app": settings.APP_NAME,
         "timestamp": datetime.now().isoformat(),
         "services": {
-            "ocr": "ready" if ocr_service.ocr_engine else "not_initialized",
             "supabase_url": settings.SUPABASE_URL
-        }
-    }
-
-
-@router.get("/health/ocr")
-async def ocr_health():
-    """OCR服务健康检查"""
-    ocr_ready = ocr_service.ocr_engine is not None
-    models_exist = settings.validate_ocr_models()
-    
-    return {
-        "service": "ocr",
-        "status": "ready" if ocr_ready else "not_initialized",
-        "models_exist": models_exist,
-        "models": {
-            "det": settings.OCR_DET_MODEL_PATH,
-            "rec": settings.OCR_REC_MODEL_PATH,
-            "ori": settings.OCR_ORI_MODEL_PATH,
-            "doc": settings.OCR_DOC_MODEL_PATH
         }
     }
 

@@ -17,7 +17,7 @@ from services.supabase_service import supabase_service
 STAGE_PROGRESS: Dict[str, int] = {
     "queued": 0,
     "pending": 5,
-    "ocr": 30,
+    "parsing": 30,
     "llm": 70,
     "saving": 90,
     "completed": 100,

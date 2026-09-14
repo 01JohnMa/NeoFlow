@@ -1,23 +1,23 @@
-# NeoFlow - 智能 OCR-LLM 文档平台
+# NeoFlow - 智能文档处理平台
 
-基于 PaddleOCR + LangGraph + LLM 的智能文档识别系统，支持检测报告、快递单、抽样单等多类型文档的 OCR 识别与结构化提取。
+基于 MinerU 版面感知解析 + LLM 的文档处理 Pipeline：文档解析为结构化 markdown 后，按 Configuration 定义抽取字段、人工审核，并可输出到飞书/Excel。
 
 ## 技术栈
 
 | 层级 | 技术选型 |
 |------|----------|
-| **后端** | FastAPI + LangGraph + PaddleOCR + LLM (DeepSeek/GPT-4o/Claude) |
+| **后端** | FastAPI + LangGraph + LLM (DeepSeek/GPT-4o/Claude) |
 | **前端** | React + TypeScript + Vite + Tailwind CSS + shadcn/ui |
 | **数据库** | Supabase (PostgreSQL + Auth + PostgREST) |
-| **OCR模型** | PP-OCRv5 (PaddlePaddle) |
+| **解析引擎** | MinerU（pipeline / vlm 两种模式） |
 | **AI Agent** | LangGraph 工作流编排 |
 
 ## 核心功能
 
 - **文档上传** - 支持 PDF、图片批量上传
-- **OCR 识别** - PP-OCRv5 高精度文字识别
-- **智能提取** - LLM 结构化字段提取（检测报告、快递单、抽样单等）
-- **模板化管理** - 按模板定义字段、自动同步数据库列、飞书多维表格映射
+- **文档解析** - MinerU 版面感知解析（快速/高精度），产出 markdown + 块坐标
+- **智能提取** - LLM 基于解析结果结构化提取字段
+- **配置化管理** - Configuration/Revision 定义字段与输出，无需改表
 - **合并模式** - 多文件合并处理（如积分球+光分布 → 照明综合报告）
 - **人工审核** - 识别结果校验与修正
 - **数据存储** - Supabase 持久化存储
@@ -117,8 +117,7 @@ neoflow/
 │   │   │   ├── ParseViewer.tsx    # 解析结果查看
 │   │   │   ├── AdminConfig.tsx    # 管理配置入口
 │   │   │   ├── AdminFeishuTab.tsx # 飞书配置
-│   │   │   ├── AdminFieldsTab.tsx # 配置字段
-│   │   │   └── AdminExamplesTab.tsx # 示例管理
+│   │   │   └── AdminFieldsTab.tsx # 配置字段（含字段描述/示例）
 │   │   ├── hooks/             # 自定义 Hooks
 │   │   ├── services/          # API 服务
 │   │   ├── store/             # 状态管理
@@ -126,7 +125,7 @@ neoflow/
 │   └── vite.config.ts
 │
 ├── agents/                     # LangGraph 智能体
-│   ├── workflow.py            # OCR 处理工作流
+│   ├── workflow.py            # 配置化抽取工作流（消费 ParseResult）
 │   ├── json_cleaner.py        # JSON 清洗
 │   └── result_builder.py      # 结果构建
 │
@@ -136,7 +135,6 @@ neoflow/
 │
 ├── services/                   # 业务服务
 │   ├── base.py                # 基类（SupabaseClientMixin、prompt 构建）
-│   ├── ocr_service.py         # OCR 服务
 │   ├── supabase_service.py    # 数据库服务
 │   ├── configuration_service.py # Configuration/Revision 服务
 │   ├── result_service.py      # Result 存储
@@ -145,14 +143,7 @@ neoflow/
 │   ├── mineru_adapter.py      # MinerU 解析后端
 │   ├── parse_service.py       # Parse Job 处理
 │   ├── tenant_service.py       # 租户服务
-│   ├── feishu_service.py       # 飞书推送服务
-│   └── vlm_service.py         # 多模态 VLM 服务（可选）
-│
-├── model/                      # PaddleOCR 模型（需自行下载）
-│   ├── PP-OCRv5_server_det_infer/
-│   ├── PP-OCRv5_server_rec_infer/
-│   ├── PP-LCNet_x1_0_textline_ori_infer/
-│   └── PP-LCNet_x1_0_doc_ori_infer/
+│   └── feishu_service.py       # 飞书推送服务
 │
 ├── supabase/                   # Supabase 本地部署
 │   ├── docker-compose.yml     # Docker 编排

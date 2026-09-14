@@ -1,22 +1,19 @@
 # agents/workflow.py
-"""LangGraph OCR处理工作流 - 基于MVP代码 supervise_agentic.py 重构"""
+"""配置化抽取工作流：基于 ParseResult 的 markdown 执行 LLM 抽取。
+
+解析（MinerU）由 services.parse_service 负责；本模块只消费解析结果，
+不再包含 OCR/VLM 提取模式。
+"""
 
 from datetime import datetime
-from typing import TypedDict, Annotated, Any, Dict, Optional
+from typing import Any, Dict
 
 import httpx
-from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from config.settings import settings
-from services.base import build_extraction_prompt
-from services.configuration_service import configuration_service
-from services.ocr_service import ocr_service
 from .exceptions import WorkflowError, WorkflowErrorType
 from .json_cleaner import parse_llm_json
 from .result_builder import build_error, build_single_success
@@ -30,23 +27,8 @@ LLM_RETRYABLE_EXCEPTIONS = (
 )
 
 
-class WorkflowState(TypedDict):
-    """工作流状态定义"""
-    messages: Annotated[list, add_messages]
-    document_id: str
-    file_path: str
-    ocr_text: str
-    ocr_confidence: float
-    document_type: str
-    extraction_data: dict
-    step: str
-    error: Optional[str]
-    processing_start: Optional[datetime]
-    tenant_id: Optional[str]  # 租户ID，用于查询模板配置
-
-
-class OCRWorkflow:
-    """OCR处理工作流 - 基于MVP代码重构"""
+class DocumentWorkflow:
+    """配置化文档抽取工作流。"""
 
     def __init__(self):
         self.llm = ChatOpenAI(
@@ -56,35 +38,6 @@ class OCRWorkflow:
             temperature=settings.LLM_TEMPERATURE,
             model_kwargs={"response_format": {"type": "json_object"}},
         )
-        self.memory = MemorySaver()
-        self.workflow = self._build_workflow()
-        self._text_workflow = self._build_text_workflow()
-
-    def _build_workflow(self) -> StateGraph:
-        workflow = StateGraph(WorkflowState)
-
-        if settings.DOC_PROCESS_MODE == "vlm":
-            # VLM 模式：单节点，直接从图片提取
-            workflow.add_node("vlm_extract", self._vlm_node)
-            workflow.add_edge(START, "vlm_extract")
-            workflow.add_edge("vlm_extract", END)
-        else:
-            # ocr_llm 模式（默认）：OCR → 字段提取（无分类节点）
-            workflow.add_node("ocr_extract", self._ocr_node)
-            workflow.add_node("extract", self._extract_node)
-            workflow.add_edge(START, "ocr_extract")
-            workflow.add_edge("ocr_extract", "extract")
-            workflow.add_edge("extract", END)
-
-        return workflow.compile(checkpointer=self.memory)
-
-    def _build_text_workflow(self) -> StateGraph:
-        """预编译跳过OCR步骤的简化工作流（供 process_with_text 复用）"""
-        wf = StateGraph(WorkflowState)
-        wf.add_node("extract", self._extract_node)
-        wf.add_edge(START, "extract")
-        wf.add_edge("extract", END)
-        return wf.compile(checkpointer=self.memory)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -97,222 +50,8 @@ class OCRWorkflow:
         response = await self.llm.ainvoke(prompt)
         return response.content
 
-    # ============ LangGraph 节点 ============
-
-    async def _ocr_node(self, state: WorkflowState) -> Dict[str, Any]:
-        """OCR提取节点"""
-        file_path = state.get("file_path", "")
-        if not file_path:
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "文件路径为空")
-
-        try:
-            logger.info(f"开始OCR处理: {file_path}")
-            result = await ocr_service.process_document(file_path)
-            logger.info(f"OCR完成，提取{result['total_lines']}行，置信度{result['confidence']:.2f}")
-            return {
-                "ocr_text": result["text"],
-                "ocr_confidence": result["confidence"],
-                "step": "ocr_completed",
-                "messages": [AIMessage(content=f"OCR提取完成，共{result['total_lines']}行文本")],
-            }
-        except WorkflowError:
-            raise
-        except Exception as e:
-            logger.error(f"OCR处理失败: {e}")
-            raise WorkflowError(WorkflowErrorType.OCR_FAILED, str(e))
-
-    async def _extract_node(self, state: WorkflowState) -> Dict[str, Any]:
-        """字段提取节点 - 从 Configuration 获取字段构建 prompt（ocr_llm 模式）"""
-        doc_type = state.get("document_type", "")
-        ocr_text = state.get("ocr_text", "")
-        tenant_id = state.get("tenant_id")
-
-        logger.info(f"开始字段提取，文档类型: {doc_type}, 租户: {tenant_id}")
-
-        if not tenant_id:
-            logger.error(f"字段提取失败: 文档 {state.get('document_id')} 缺少租户ID，请确保用户已选择所属部门")
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少租户ID，用户未选择所属部门")
-
-        if not doc_type:
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少文档类型，无法获取配置")
-
-        try:
-            configuration = await configuration_service.resolve_extraction_configuration(
-                tenant_id, doc_type
-            )
-            if not configuration:
-                raise WorkflowError(
-                    WorkflowErrorType.TEMPLATE_NOT_FOUND,
-                    f"未找到文档类型 [{doc_type}] 的配置",
-                )
-
-            prompt = build_extraction_prompt(configuration, ocr_text)
-            logger.info(f"使用配置 [{configuration.get('name')}] 构建 prompt")
-
-            response_content = await self._llm_invoke_with_retry(prompt)
-            extraction_data = parse_llm_json(response_content)
-
-            logger.info(f"字段提取完成: {len(extraction_data)}个字段")
-            return {
-                "extraction_data": extraction_data,
-                "step": "completed",
-                "messages": [AIMessage(content=f"字段提取完成: {str(extraction_data)[:200]}...")],
-            }
-        except WorkflowError:
-            raise
-        except Exception as e:
-            logger.error(f"提取失败: {e}")
-            raise WorkflowError(WorkflowErrorType.EXTRACT_FAILED, str(e))
-
-    async def _vlm_node(self, state: WorkflowState) -> Dict[str, Any]:
-        """VLM 多模态提取节点（vlm 模式）
-
-        直接从图片提取字段，不经过 OCR 转文字。
-        文档类型由用户上传时手动选择（通过 template_id 关联），
-        从 state.document_type 取得（由调用方传入）。
-        """
-        from services.vlm_service import vlm_service
-
-        file_path = state.get("file_path", "")
-        doc_type = state.get("document_type", "")
-        tenant_id = state.get("tenant_id")
-
-        if not file_path:
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "文件路径为空")
-        if not tenant_id:
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少租户ID，用户未选择所属部门")
-        if not doc_type:
-            raise WorkflowError(WorkflowErrorType.VALIDATION_ERROR, "缺少文档类型，请上传时选择文档类型")
-
-        try:
-            configuration = await configuration_service.resolve_extraction_configuration(
-                tenant_id, doc_type
-            )
-            if not configuration:
-                raise WorkflowError(
-                    WorkflowErrorType.TEMPLATE_NOT_FOUND,
-                    f"未找到文档类型 [{doc_type}] 的配置",
-                )
-
-            logger.info(f"VLM 模式提取: {file_path}，配置: {configuration.get('name')}")
-            extraction_data = await vlm_service.extract_from_image(file_path, configuration)
-
-            logger.info(f"VLM 提取完成: {len(extraction_data)} 个字段")
-            return {
-                "extraction_data": extraction_data,
-                "ocr_text": "",       # VLM 模式无 OCR 文本
-                "ocr_confidence": 0.0,
-                "step": "completed",
-                "messages": [AIMessage(content=f"VLM提取完成: {str(extraction_data)[:200]}...")],
-            }
-        except WorkflowError:
-            raise
-        except Exception as e:
-            logger.error(f"VLM 提取失败: {e}")
-            raise WorkflowError(WorkflowErrorType.EXTRACT_FAILED, str(e))
-
-    # ============ 辅助方法 ============
-
     def _elapsed(self, start: datetime) -> float:
         return (datetime.now() - start).total_seconds()
-
-    # ============ 公共处理入口 ============
-
-    async def process(
-        self,
-        document_id: str,
-        file_path: str,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """执行工作流 - 主入口（自动分类模式）
-
-        Args:
-            document_id: 文档ID
-            file_path: 文件路径
-            tenant_id: 租户ID（可选，用于从数据库获取模板配置）
-        """
-        processing_start = datetime.now()
-
-        initial_state: WorkflowState = {
-            "messages": [],
-            "document_id": document_id,
-            "file_path": file_path,
-            "ocr_text": "",
-            "ocr_confidence": 0.0,
-            "document_type": "",
-            "extraction_data": {},
-            "step": "start",
-            "error": None,
-            "processing_start": processing_start,
-            "tenant_id": tenant_id,
-        }
-
-        config = {"configurable": {"thread_id": document_id}}
-
-        try:
-            final_state = await self.workflow.ainvoke(initial_state, config=config)
-            return build_single_success(
-                document_id=document_id,
-                document_type=final_state.get("document_type", ""),
-                extraction_data=final_state.get("extraction_data", {}),
-                ocr_text=final_state.get("ocr_text", ""),
-                ocr_confidence=final_state.get("ocr_confidence", 0.0),
-                processing_time=self._elapsed(processing_start),
-            )
-        except Exception as e:
-            logger.error(f"工作流执行失败: {e}")
-            err_msg = WorkflowError.extract_message(e)
-            return build_error(document_id, err_msg, self._elapsed(processing_start))
-
-    async def process_with_text(
-        self,
-        document_id: str,
-        ocr_text: str,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """使用已有OCR文本执行工作流（跳过OCR步骤，无分类节点）
-
-        用于已经完成OCR的场景，直接进行字段提取。
-        需要在 state 中预设 document_type（由调用方传入）。
-
-        Args:
-            document_id: 文档ID
-            ocr_text: OCR提取的文本
-            tenant_id: 租户ID（可选，用于从数据库获取模板配置）
-        """
-        processing_start = datetime.now()
-
-        initial_state: WorkflowState = {
-            "messages": [HumanMessage(content=ocr_text)],
-            "document_id": document_id,
-            "file_path": "",
-            "ocr_text": ocr_text,
-            "ocr_confidence": 1.0,
-            "document_type": "",
-            "extraction_data": {},
-            "step": "ocr_completed",
-            "error": None,
-            "processing_start": processing_start,
-            "tenant_id": tenant_id,
-        }
-
-        # 简化工作流（跳过OCR节点，无分类节点）
-        config = {"configurable": {"thread_id": f"{document_id}-text"}}
-
-        try:
-            final_state = await self._text_workflow.ainvoke(initial_state, config=config)
-            return build_single_success(
-                document_id=document_id,
-                document_type=final_state.get("document_type", ""),
-                extraction_data=final_state.get("extraction_data", {}),
-                ocr_text=ocr_text,
-                ocr_confidence=1.0,
-                processing_time=self._elapsed(processing_start),
-            )
-        except Exception as e:
-            logger.error(f"工作流执行失败: {e}")
-            err_msg = WorkflowError.extract_message(e)
-            return build_error(document_id, err_msg, self._elapsed(processing_start))
 
     # ============ 配置化提取方法 ============
 
@@ -362,7 +101,6 @@ class OCRWorkflow:
             err_msg = WorkflowError.extract_message(e)
             return build_error(document_id, err_msg, self._elapsed(processing_start))
 
-
     async def _extract_from_parse(
         self,
         document_id: str,
@@ -405,7 +143,7 @@ class OCRWorkflow:
         """使用指定 Prompt 模板提取字段（底层方法）
 
         Args:
-            prompt_template: Prompt 模板（已包含字段定义和示例）
+            prompt_template: Prompt 模板（已包含字段定义）
 
         Returns:
             提取的字段字典
@@ -419,4 +157,4 @@ class OCRWorkflow:
 
 
 # 单例工作流
-ocr_workflow = OCRWorkflow()
+document_workflow = DocumentWorkflow()

@@ -111,7 +111,7 @@ class TestHandleParseJob:
         assert stored_kwargs["config_revision_id"] == REVISION_ID
         assert stored_kwargs["parse_data"]["markdown"] == "hello"
         assert [call.args[1] for call in mock_update.await_args_list] == [
-            "ocr", "saving", "completed",
+            "parsing", "saving", "completed",
         ]
 
     @pytest.mark.asyncio

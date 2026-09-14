@@ -1,21 +1,20 @@
 # api/routes/documents/process.py
 """文档路由 - 处理相关端点"""
 
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime
 import asyncio
 from pydantic import BaseModel
 from loguru import logger
-import uuid
 import os
 
 from config.settings import settings
 from services.configuration_service import configuration_service
 from services.supabase_service import supabase_service
-from agents.workflow import ocr_workflow
-from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, AppException
+from agents.workflow import document_workflow
+from api.exceptions import DocumentNotFoundError, FileNotFoundError, ProcessingError, ValidationError, AppException
 from api.dependencies.auth import get_current_user, get_crm_current_user, CurrentUser
 from api.jobs import create_job, update_job, get_job
 from api.routes.documents.query import _check_document_access
@@ -118,18 +117,14 @@ async def process_document(
                 raise ProcessingError(f"配置不存在或不可用: {template_id}")
 
         if sync:
-            # 同步处理
-            if configuration:
-                # 使用 Configuration 处理
-                result = await ocr_workflow.process_with_configuration(
-                    document_id=document_id,
-                    file_path=file_path,
-                    configuration=configuration,
-                    tenant_id=tenant_id
-                )
-            else:
-                # 原有流程（质量管理中心分类）
-                result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
+            if not configuration:
+                raise ValidationError("请先选择配置后再处理文档")
+            result = await document_workflow.process_with_configuration(
+                document_id=document_id,
+                file_path=file_path,
+                configuration=configuration,
+                tenant_id=tenant_id
+            )
             
             # 保存结果到 Result 存储
             if result["success"] and result.get("extraction_data"):
@@ -155,6 +150,8 @@ async def process_document(
             return result
         else:
             # 异步处理
+            if not configuration:
+                raise ValidationError("请先选择配置后再处理文档")
             job_id = await create_job(
                 job_type="template" if template_id else "single",
                 created_by=user.user_id,
@@ -176,7 +173,7 @@ async def process_document(
                 "use_template": template_id is not None
             }
         
-    except (DocumentNotFoundError, FileNotFoundError):
+    except AppException:
         raise
     except Exception as e:
         logger.error(f"处理失败: {e}")
@@ -197,7 +194,7 @@ async def process_document_task(
     try:
         async with _DOC_PROCESS_SEMAPHORE:
             if job_id:
-                await update_job(job_id, "ocr")
+                await update_job(job_id, "parsing")
             await supabase_service.update_document_status(document_id, "processing")
 
             # Job 固定的 Revision 优先；否则按文档关联的 Configuration 取当前发布版本
@@ -209,20 +206,19 @@ async def process_document_task(
             if configuration is None and template_id:
                 configuration = await configuration_service.get_extraction_configuration(template_id)
 
+            if not configuration:
+                raise ValidationError("请先选择配置后再处理文档")
+
             logger.info(
-                f"开始后台处理: {document_id}, "
-                f"配置: {(configuration or {}).get('name') or '无(自动分类)'}"
+                f"开始后台处理: {document_id}, 配置: {configuration.get('name')}"
             )
 
-            if configuration:
-                result = await ocr_workflow.process_with_configuration(
-                    document_id=document_id,
-                    file_path=file_path,
-                    configuration=configuration,
-                    tenant_id=tenant_id
-                )
-            else:
-                result = await ocr_workflow.process(document_id, file_path, tenant_id=tenant_id)
+            result = await document_workflow.process_with_configuration(
+                document_id=document_id,
+                file_path=file_path,
+                configuration=configuration,
+                tenant_id=tenant_id
+            )
 
             if result["success"] and result.get("extraction_data"):
                 auto_approve = bool((configuration or {}).get("auto_approve", False))
@@ -260,31 +256,6 @@ async def process_document_task(
             await update_job(job_id, "failed", error=str(e))
         await _handle_processing_exception(document_id, e)
 
-
-@router.post("/process-text")
-async def process_text_directly(
-    text: str = Form(...),
-    document_id: Optional[str] = Form(None)
-):
-    """
-    直接处理OCR文本（跳过OCR步骤）
-    
-    用于已经有OCR结果的场景
-    """
-    try:
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="文本不能为空")
-        
-        doc_id = document_id or str(uuid.uuid4())
-        
-        result = await ocr_workflow.process_with_text(doc_id, text)
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise ProcessingError(f"处理失败: {str(e)}")
 
 
 # ============ 配置化处理端点 ============
@@ -347,7 +318,7 @@ async def process_document_with_template(
 
         if request.sync:
             # 同步处理
-            result = await ocr_workflow.process_with_configuration(
+            result = await document_workflow.process_with_configuration(
                 document_id=document_id,
                 file_path=file_path,
                 configuration=configuration,
@@ -369,6 +340,8 @@ async def process_document_with_template(
             return result
         else:
             # 异步处理
+            if not configuration:
+                raise ValidationError("请先选择配置后再处理文档")
             job_id = await create_job(
                 job_type="template",
                 created_by=user.user_id,
@@ -406,7 +379,7 @@ async def process_document_with_template_task(
     try:
         async with _DOC_PROCESS_SEMAPHORE:
             if job_id:
-                await update_job(job_id, "ocr")
+                await update_job(job_id, "parsing")
             await supabase_service.update_document_status(document_id, "processing")
 
             configuration = await configuration_service.get_extraction_configuration(template_id)
@@ -414,7 +387,7 @@ async def process_document_with_template_task(
                 raise ProcessingError(f"配置不存在或不可用: {template_id}")
             logger.info(f"开始配置化后台处理: {document_id}, 配置: {configuration.get('name')}")
 
-            result = await ocr_workflow.process_with_configuration(
+            result = await document_workflow.process_with_configuration(
                 document_id=document_id,
                 file_path=file_path,
                 configuration=configuration,

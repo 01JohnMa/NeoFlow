@@ -178,7 +178,7 @@ async def handle_parse_job(
         documents.append((document_id, document))
 
     params = build_parse_params(configuration, revision)
-    await update_job(job_id, "ocr")
+    await update_job(job_id, "parsing")
 
     adapter = get_parser_adapter(params)
     last_result = None

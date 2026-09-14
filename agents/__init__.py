@@ -3,8 +3,8 @@
 不会连带拉起重依赖（langchain/langgraph）。"""
 
 __all__ = [
-    "ocr_workflow",
-    "OCRWorkflow",
+    "document_workflow",
+    "DocumentWorkflow",
     "WorkflowError",
     "WorkflowErrorType",
     "parse_llm_json",
@@ -13,8 +13,8 @@ __all__ = [
 ]
 
 _LAZY_EXPORTS = {
-    "ocr_workflow": (".workflow", "ocr_workflow"),
-    "OCRWorkflow": (".workflow", "OCRWorkflow"),
+    "document_workflow": (".workflow", "document_workflow"),
+    "DocumentWorkflow": (".workflow", "DocumentWorkflow"),
     "WorkflowError": (".exceptions", "WorkflowError"),
     "WorkflowErrorType": (".exceptions", "WorkflowErrorType"),
     "parse_llm_json": (".json_cleaner", "parse_llm_json"),

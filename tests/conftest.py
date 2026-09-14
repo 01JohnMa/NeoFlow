@@ -12,22 +12,6 @@ os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("VLM_API_KEY", "test-key")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
-os.environ.setdefault("OCR_INIT_ON_STARTUP", "false")
-
-if "paddleocr" in sys.modules:
-    paddleocr_available = True
-else:
-    paddleocr_available = importlib.util.find_spec("paddleocr") is not None
-
-if not paddleocr_available:
-    paddleocr_stub = types.ModuleType("paddleocr")
-    paddleocr_stub.__spec__ = importlib.machinery.ModuleSpec("paddleocr", loader=None)
-
-    class PaddleOCR:
-        pass
-
-    paddleocr_stub.PaddleOCR = PaddleOCR
-    sys.modules["paddleocr"] = paddleocr_stub
 
 
 USER_ID = "11111111-1111-4111-8111-111111111111"
@@ -48,10 +32,10 @@ MOCK_DOCUMENT = {
 
 @pytest.fixture(autouse=True)
 def stub_agents_workflow(monkeypatch):
-    """路由/worker 单测会 mock OCR workflow，不需要导入真实 LangChain/LangGraph。"""
+    """路由/worker 单测会 mock 工作流，不需要导入真实 LangChain/LangGraph。"""
     fake_workflow = types.ModuleType("agents.workflow")
-    fake_workflow.ocr_workflow = object()
-    fake_workflow.OCRWorkflow = object
+    fake_workflow.document_workflow = object()
+    fake_workflow.DocumentWorkflow = object
     monkeypatch.setitem(sys.modules, "agents.workflow", fake_workflow)
 
 

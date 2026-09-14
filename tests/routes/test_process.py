@@ -17,7 +17,7 @@ def _patch_supabase_in_helpers():
 
 
 def _patch_workflow():
-    return patch("api.routes.documents.process.ocr_workflow")
+    return patch("api.routes.documents.process.document_workflow")
 
 
 def _mock_configuration(**overrides):

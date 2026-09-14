@@ -47,8 +47,7 @@ def build_field_table(fields: List[Dict[str, Any]]) -> str:
     """
     将字段列表构建为 Markdown 表格字符串。
 
-    供 build_extraction_prompt 和
-    vlm_service.build_vlm_prompt 共同使用，保持两条路径的 prompt 风格一致。
+    供 build_extraction_prompt 使用。
     """
     field_lines = []
     for i, field in enumerate(fields, 1):

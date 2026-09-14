@@ -30,14 +30,6 @@ openai-agents==0.22.2
 mcp==1.11.0
 sse-starlette==3.0.3
 
-# ============ OCR ============
-# PaddlePaddle (CPU版本)
-paddlepaddle==3.0.0
-# 如需GPU版本，使用：
-# paddlepaddle-gpu==2.6.2
-
-paddleocr==2.7.3
-
 # ============ 图像处理 ============
 opencv-python-headless==4.9.0.80
 Pillow==10.2.0

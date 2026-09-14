@@ -17,20 +17,9 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       UPLOAD_FOLDER: /app/uploads
       LOG_FILE: /app/logs/app.log
-      OCR_DET_MODEL_PATH: /app/model/PP-OCRv5_server_det_infer
-      OCR_REC_MODEL_PATH: /app/model/PP-OCRv5_server_rec_infer
-      OCR_ORI_MODEL_PATH: /app/model/PP-LCNet_x1_0_textline_ori_infer
-      OCR_DOC_MODEL_PATH: /app/model/PP-LCNet_x1_0_doc_ori_infer
-      OCR_ENABLED: "true"
-      OCR_INIT_ON_STARTUP: "false"
-      OCR_IR_OPTIM: "false"
-      OCR_USE_MKLDNN: "false"
-      FLAGS_enable_ir_optim: "false"
-      FLAGS_disable_ir_pass: "self_attention_fuse_pass"
     volumes:
       - ../uploads:/app/uploads
       - ../logs:/app/logs
-      - ../model:/app/model
     depends_on:
       - rest
     expose:
@@ -54,21 +43,10 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       UPLOAD_FOLDER: /app/uploads
       LOG_FILE: /app/logs/worker.log
-      OCR_DET_MODEL_PATH: /app/model/PP-OCRv5_server_det_infer
-      OCR_REC_MODEL_PATH: /app/model/PP-OCRv5_server_rec_infer
-      OCR_ORI_MODEL_PATH: /app/model/PP-LCNet_x1_0_textline_ori_infer
-      OCR_DOC_MODEL_PATH: /app/model/PP-LCNet_x1_0_doc_ori_infer
-      OCR_ENABLED: "true"
-      OCR_INIT_ON_STARTUP: "true"
-      OCR_IR_OPTIM: "false"
-      OCR_USE_MKLDNN: "false"
-      FLAGS_enable_ir_optim: "false"
-      FLAGS_disable_ir_pass: "self_attention_fuse_pass"
     command: ["python", "-m", "workers.document_worker"]
     volumes:
       - ../uploads:/app/uploads
       - ../logs:/app/logs
-      - ../model:/app/model
     depends_on:
       - rest
     restart: unless-stopped

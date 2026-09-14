@@ -51,16 +51,6 @@ class Settings(BaseSettings):
     SDK_BASE_URL: str = ""
     SDK_TEMPERATURE: float = 0.2
 
-    # ============ OCR模型路径 ============
-    OCR_DET_MODEL_PATH: str = "./model/PP-OCRv5_server_det_infer"
-    OCR_REC_MODEL_PATH: str = "./model/PP-OCRv5_server_rec_infer"
-    OCR_ORI_MODEL_PATH: str = "./model/PP-LCNet_x1_0_textline_ori_infer"
-    OCR_DOC_MODEL_PATH: str = "./model/PP-LCNet_x1_0_doc_ori_infer"
-    OCR_ENABLED: bool = True
-    OCR_INIT_ON_STARTUP: bool = True
-    OCR_IR_OPTIM: bool = False
-    OCR_USE_MKLDNN: bool = False
-
     # ============ 文件存储 ============
     UPLOAD_FOLDER: str = "./uploads"
     MAX_FILE_SIZE: int = 20971520  # 20MB
@@ -82,17 +72,6 @@ class Settings(BaseSettings):
     FEISHU_BITABLE_APP_TOKEN: str = ""  # 已废弃，保留供参考
     FEISHU_BITABLE_TABLE_ID: str = ""   # 已废弃，保留供参考
     FEISHU_PUSH_ENABLED: bool = False
-
-    # ============ 文档处理模式 ============
-    # "ocr_llm" : PaddleOCR + LLM（印刷体快、成本低）
-    # "vlm"     : 多模态 VLM 直接看图提取（手写/复杂版式更准）
-    DOC_PROCESS_MODE: str = "ocr_llm"
-
-    # VLM 配置（DOC_PROCESS_MODE="vlm" 时生效）
-    VLM_MODEL_ID: str = "qwen3.7-plus"
-    VLM_API_KEY: str = ""
-    VLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    VLM_TEMPERATURE: float = 0.1
 
     # ============ 文档处理并发控制 ============
     DOC_PROCESS_MAX_CONCURRENCY: int = 2
@@ -117,17 +96,6 @@ class Settings(BaseSettings):
     @property
     def allowed_hosts_list(self) -> List[str]:
         return [host.strip() for host in self.ALLOWED_HOSTS.split(",")]
-
-    def validate_ocr_models(self) -> bool:
-        """验证OCR模型路径是否存在"""
-        paths = [
-            self.OCR_DET_MODEL_PATH,
-            self.OCR_REC_MODEL_PATH,
-            self.OCR_ORI_MODEL_PATH,
-            self.OCR_DOC_MODEL_PATH,
-        ]
-        return all(os.path.exists(p) for p in paths)
-
 
 # 单例实例
 settings = Settings()

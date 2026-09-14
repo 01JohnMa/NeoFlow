@@ -13,7 +13,6 @@ from loguru import logger
 from api.jobs import claim_next_job, update_job
 from config.settings import settings
 from services.job_runner import job_runner
-from services.ocr_service import ocr_service
 from services.supabase_service import supabase_service
 
 
@@ -53,12 +52,6 @@ async def run_forever(worker_id: Optional[str] = None) -> None:
         await supabase_service.initialize()
     except Exception as exc:
         logger.opt(exception=exc).warning("Supabase 初始化失败，worker 将在任务执行时继续尝试")
-
-    if settings.OCR_ENABLED:
-        try:
-            await ocr_service.initialize()
-        except Exception as exc:
-            logger.opt(exception=exc).warning("OCR 初始化失败，worker 将在任务执行时继续尝试")
 
     while True:
         did_work = await poll_once(effective_worker_id)
