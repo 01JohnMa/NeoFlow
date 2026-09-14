@@ -138,7 +138,7 @@ export function ConfigurationDetail({
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'fields', label: `识别字段 (${fieldsCount})` },
-    { key: 'output', label: '飞书与输出配置' },
+    { key: 'output', label: '解析与输出配置' },
     { key: 'examples', label: `Few-shot 示例 (${examplesCount})` },
     { key: 'revisions', label: `修订历史 (${revisions.length})` },
   ]

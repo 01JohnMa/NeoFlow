@@ -41,12 +41,14 @@ async def ensure_parse_result(
     file_path: str,
     tenant_id: Optional[str],
     job_id: Optional[str] = None,
+    parse_section: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """返回文档最新 ParseResult 的 data；缺失时按需自动解析一次。
 
     - 已有 ParseResult：直接返回其 data
     - 无 ParseResult 且配置了 MINERU_API_KEY：调用 ParserAdapter 解析并落 Result
-    - 无 key 或解析失败：返回 None（调用方回退 raw 抽取路径）
+      （解析参数取自配置的 parse 段，缺省用 PARSE_DEFAULTS）
+    - 无 key 或解析失败：返回 None（调用方按失败处理）
     """
     existing = await result_service.get_document_parse_result(
         document_id,
@@ -56,19 +58,19 @@ async def ensure_parse_result(
         return existing["data"]
 
     if not settings.MINERU_API_KEY:
-        logger.info(
-            f"无 ParseResult 且未配置 MINERU_API_KEY，保留 raw 抽取路径: {document_id}"
+        logger.warning(
+            f"无 ParseResult 且未配置 MINERU_API_KEY，无法解析: {document_id}"
         )
         return None
 
-    params = build_parse_params()
+    params = build_parse_params(
+        configuration={"draft_definition": {"parse": parse_section or {}}}
+    )
     try:
         adapter = get_parser_adapter(params)
         result = await adapter.parse(file_path, params)
     except Exception as exc:
-        logger.warning(
-            f"自动解析失败，回退 raw 抽取路径: document_id={document_id}, error={exc}"
-        )
+        logger.warning(f"自动解析失败: document_id={document_id}, error={exc}")
         return None
 
     parse_data = result.to_dict()

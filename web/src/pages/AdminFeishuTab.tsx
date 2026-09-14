@@ -20,8 +20,8 @@ export function FeishuConfigTab({
   const [autoApprove, setAutoApprove] = useState(definition?.auto_approve ?? false)
   const [pushAttachment, setPushAttachment] = useState(definition?.push_attachment ?? true)
   const [perPageExtraction, setPerPageExtraction] = useState(definition?.per_page_extraction ?? false)
-  const [extractionMode, setExtractionMode] = useState<'ocr_llm' | 'vlm'>(
-    definition?.extraction_mode ?? 'ocr_llm',
+  const [parseMode, setParseMode] = useState<'pipeline' | 'vlm'>(
+    definition?.parse?.model_version === 'vlm' ? 'vlm' : 'pipeline',
   )
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -32,7 +32,7 @@ export function FeishuConfigTab({
     setAutoApprove(definition?.auto_approve ?? false)
     setPushAttachment(definition?.push_attachment ?? true)
     setPerPageExtraction(definition?.per_page_extraction ?? false)
-    setExtractionMode(definition?.extraction_mode ?? 'ocr_llm')
+    setParseMode(definition?.parse?.model_version === 'vlm' ? 'vlm' : 'pipeline')
   }, [definition])
 
   const handleSave = async () => {
@@ -45,7 +45,7 @@ export function FeishuConfigTab({
           auto_approve: autoApprove,
           push_attachment: pushAttachment,
           per_page_extraction: perPageExtraction,
-          extraction_mode: extractionMode,
+          parse: { ...(definition?.parse ?? {}), model_version: parseMode },
         },
       })
       onUpdated(updated)
@@ -61,35 +61,36 @@ export function FeishuConfigTab({
   return (
     <div className="space-y-6 max-w-xl">
       <div className="space-y-4">
-        {/* ── 处理模式选择 ── */}
+        {/* ── 解析模式选择 ── */}
         <div>
-          <Label>文档处理模式</Label>
+          <Label>解析模式</Label>
           <div className="mt-2 grid grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => setExtractionMode('ocr_llm')}
+              onClick={() => setParseMode('pipeline')}
               className={`rounded-lg border p-4 text-left transition-all ${
-                extractionMode === 'ocr_llm'
+                parseMode === 'pipeline'
                   ? 'border-primary-400 bg-primary-400/10 ring-1 ring-primary-400'
                   : 'border-border-default bg-bg-secondary hover:border-border-hover'
               }`}
             >
-              <p className="text-sm font-medium text-text-primary">OCR + LLM</p>
-              <p className="mt-1 text-xs text-text-muted">印刷体文档，速度快、成本低</p>
+              <p className="text-sm font-medium text-text-primary">快速解析</p>
+              <p className="mt-1 text-xs text-text-muted">标准印刷体，速度快、成本低</p>
             </button>
             <button
               type="button"
-              onClick={() => setExtractionMode('vlm')}
+              onClick={() => setParseMode('vlm')}
               className={`rounded-lg border p-4 text-left transition-all ${
-                extractionMode === 'vlm'
+                parseMode === 'vlm'
                   ? 'border-primary-400 bg-primary-400/10 ring-1 ring-primary-400'
                   : 'border-border-default bg-bg-secondary hover:border-border-hover'
               }`}
             >
-              <p className="text-sm font-medium text-text-primary">多模态 VLM</p>
-              <p className="mt-1 text-xs text-text-muted">手写/复杂版式，识别更准</p>
+              <p className="text-sm font-medium text-text-primary">高精度解析</p>
+              <p className="mt-1 text-xs text-text-muted">复杂版式/手写，识别更准、稍慢</p>
             </button>
           </div>
+          <p className="mt-2 text-xs text-text-muted">解析由 MinerU 执行，提取基于解析结果</p>
         </div>
 
         {/* ── 飞书配置 ── */}
