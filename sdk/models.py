@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 
 
 class SDKSessionState(str, Enum):
-    OCR_COMPLETED = "ocr_completed"
+    PARSING = "parsing"
+    PARSED = "parsed"
+    PARSE_FAILED = "parse_failed"
     ANALYZED = "analyzed"
     TEMPLATE_CONFIRMED = "template_confirmed"
     PROMPT_GENERATED = "prompt_generated"
@@ -84,12 +86,14 @@ class SDKSession(BaseModel):
     id: str
     file_name: str
     file_path: str
+    tenant_id: str
+    document_id: str
+    parse_job_id: str
+    parse_mode: str = "pipeline"
+    parse_error: Optional[str] = None
     excel_template_file_name: Optional[str] = None
     excel_template_path: Optional[str] = None
     excel_placeholders: List[ExcelTemplatePlaceholder] = Field(default_factory=list)
-    ocr_text: str
-    ocr_confidence: float
-    page_count: int
     user_id: str
     state: SDKSessionState
     created_at: float
@@ -104,14 +108,21 @@ class SDKSession(BaseModel):
 class SDKSessionResponse(BaseModel):
     id: str
     file_name: str
+    tenant_id: str
+    document_id: str
+    parse_job_id: str
+    parse_mode: str
+    parse_error: Optional[str] = None
+    parse_progress: Optional[int] = None
     state: SDKSessionState
     excel_template_file_name: Optional[str] = None
     excel_placeholders: List[ExcelTemplatePlaceholder] = Field(default_factory=list)
-    ocr_text: str
-    ocr_confidence: float
-    page_count: int
     analysis: Optional[DocumentAnalysis] = None
     confirmed_template: Optional[ConfirmTemplateRequest] = None
     prompt: Optional[str] = None
     cleaner_code: Optional[str] = None
     commit_result: Optional[CommitResult] = None
+
+
+class ParseRetryRequest(BaseModel):
+    parse_mode: Optional[str] = None

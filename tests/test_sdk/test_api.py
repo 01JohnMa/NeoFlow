@@ -1,29 +1,18 @@
 from pathlib import Path
 from io import BytesIO
-import importlib.machinery
 import importlib.util
-import sys
-import types
 
 import pytest
 from openpyxl import Workbook
 from fastapi import FastAPI
+from unittest.mock import AsyncMock
 
 from api.dependencies.auth import CurrentUser, get_current_user
 
-if "paddleocr" not in sys.modules:
-    paddleocr_stub = types.ModuleType("paddleocr")
-    paddleocr_stub.__spec__ = importlib.machinery.ModuleSpec("paddleocr", loader=None)
-
-    class PaddleOCR:
-        pass
-
-    paddleocr_stub.PaddleOCR = PaddleOCR
-    sys.modules["paddleocr"] = paddleocr_stub
-
-
 USER_ID = "11111111-1111-4111-8111-111111111111"
 TENANT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+PARSE_MARKDOWN = "# 解析结果\n样品名称：小型断路器\n检验结论：合格"
 
 
 def _load_sdk_route_module():
@@ -107,51 +96,217 @@ def _excel_template_bytes() -> bytes:
     return output.getvalue()
 
 
-def test_create_session_uploads_file_and_runs_ocr(admin_client, monkeypatch, tmp_path):
-    async def fake_process_document(file_path: str):
-        assert Path(file_path).exists()
-        return {
-            "text": "样品名称：小型断路器\n检验结论：合格",
-            "confidence": 0.93,
-            "lines": [],
-            "total_lines": 2,
-        }
+def _parse_result_row(markdown: str = PARSE_MARKDOWN, model_version: str = "pipeline"):
+    return {
+        "id": "result-1",
+        "data": {
+            "markdown": markdown,
+            "engine": {"name": "mineru", "model_version": model_version},
+        },
+    }
 
-    monkeypatch.setattr(sdk_route.ocr_service, "process_document", fake_process_document)
+
+def _patch_parse_env(monkeypatch, tmp_path) -> dict:
+    """把创建会话所需的解析依赖全部替换掉，返回可断言的 mock 集合。"""
+    mocks = {
+        "create_document": AsyncMock(return_value={"id": "doc"}),
+        "create_job": AsyncMock(return_value="job-1"),
+        "ensure_parse_revision": AsyncMock(return_value={"id": "revision-1"}),
+        "get_document_parse_result": AsyncMock(return_value=None),
+        "get_job": AsyncMock(return_value={"status": "processing", "progress": 30}),
+    }
     monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
+    monkeypatch.setattr(sdk_route.supabase_service, "create_document", mocks["create_document"])
+    monkeypatch.setattr(sdk_route, "create_job", mocks["create_job"])
+    monkeypatch.setattr(sdk_route, "ensure_parse_revision", mocks["ensure_parse_revision"])
+    monkeypatch.setattr(
+        sdk_route.result_service,
+        "get_document_parse_result",
+        mocks["get_document_parse_result"],
+    )
+    monkeypatch.setattr(sdk_route, "get_job", mocks["get_job"])
+    return mocks
 
-    response = admin_client.post(
+
+def _create_session(admin_client, files=None, data=None):
+    return admin_client.post(
         "/api/sdk/sessions",
-        files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
+        files=files or {"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
+        data=data or {},
     )
 
+
+def test_create_session_starts_parse_job(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+
+    response = _create_session(admin_client)
+
     assert response.status_code == 201
-    data = response.json()
-    assert data["file_name"] == "report.pdf"
-    assert data["state"] == "ocr_completed"
-    assert data["ocr_text"] == "样品名称：小型断路器\n检验结论：合格"
-    assert data["ocr_confidence"] == 0.93
+    payload = response.json()
+    assert payload["file_name"] == "report.pdf"
+    assert payload["state"] == "parsing"
+    assert payload["parse_mode"] == "pipeline"
+    assert payload["parse_job_id"] == "job-1"
+    assert payload["document_id"]
+    assert payload["parse_progress"] == 0
+
+    document_payload = mocks["create_document"].await_args.args[0]
+    assert document_payload["tenant_id"] == TENANT_ID
+    assert document_payload["user_id"] == USER_ID
+    assert Path(document_payload["file_path"]).exists()
+
+    job_kwargs = mocks["create_job"].await_args.kwargs
+    assert job_kwargs["configuration_revision_id"] == "revision-1"
+    assert job_kwargs["related_document_ids"] == [payload["document_id"]]
+    mocks["ensure_parse_revision"].assert_awaited_once()
 
 
-def test_create_session_accepts_empty_excel_template_and_returns_slots(
+def test_create_session_accepts_parse_mode(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+
+    response = _create_session(admin_client, data={"parse_mode": "vlm"})
+
+    assert response.status_code == 201
+    assert response.json()["parse_mode"] == "vlm"
+    assert mocks["ensure_parse_revision"].await_args.args[1] == "vlm"
+
+
+def test_create_session_reuses_existing_parse_result(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+
+    response = _create_session(admin_client)
+
+    assert response.status_code == 201
+    assert response.json()["state"] == "parsed"
+    mocks["create_job"].assert_not_awaited()
+
+
+def test_get_session_syncs_completed_parse(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+
+    response = admin_client.get(f"/api/sdk/sessions/{session_id}")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "parsed"
+
+
+def test_get_session_marks_parse_failed(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+
+    mocks["get_job"].return_value = {"status": "failed", "error": "MinerU 超时"}
+
+    response = admin_client.get(f"/api/sdk/sessions/{session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"] == "parse_failed"
+    assert payload["parse_error"] == "MinerU 超时"
+
+
+def test_retry_parse_creates_new_job(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+    mocks["get_job"].return_value = {"status": "failed", "error": "解析失败"}
+    admin_client.get(f"/api/sdk/sessions/{session_id}")
+
+    mocks["create_job"].return_value = "job-2"
+    mocks["get_job"].return_value = {"status": "queued", "progress": 0}
+
+    response = admin_client.post(
+        f"/api/sdk/sessions/{session_id}/parse",
+        json={"parse_mode": "vlm"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"] == "parsing"
+    assert payload["parse_job_id"] == "job-2"
+    assert payload["parse_mode"] == "vlm"
+    assert mocks["create_job"].await_count == 2
+    assert mocks["ensure_parse_revision"].await_args.args[1] == "vlm"
+
+
+def test_retry_parse_reuses_matching_result(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+
+    response = admin_client.post(f"/api/sdk/sessions/{session_id}/parse", json={})
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "parsed"
+    assert mocks["create_job"].await_count == 1
+
+
+def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+
+    captured = {}
+
+    async def fake_analyze(session, parse_text):
+        captured["parse_text"] = parse_text
+        return {
+            "recommended_doc_type": "检测报告",
+            "recommended_doc_code": "inspection_report",
+            "confidence": 0.95,
+            "recommended_tenant": {
+                "suggest_name": "品质部",
+                "suggest_code": "quality",
+                "reason": "文档中出现品质管理部",
+                "match_existing_tenant_id": TENANT_ID,
+            },
+            "detected_fields": [
+                {
+                    "field_key": "sample_name",
+                    "field_label": "样品名称",
+                    "field_type": "text",
+                    "extraction_hint": "位于样品名称标签后",
+                    "review_enforced": False,
+                    "review_allowed_values": None,
+                    "sample_value": "小型断路器",
+                }
+            ],
+            "suggested_examples": [],
+        }
+
+    monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
+
+    response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
+
+    assert response.status_code == 200
+    assert response.json()["analysis"]["recommended_doc_type"] == "检测报告"
+    assert captured["parse_text"] == PARSE_MARKDOWN
+
+
+def test_analyze_rejects_while_parsing(admin_client, monkeypatch, tmp_path):
+    _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+
+    response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
+
+    assert response.status_code == 409
+
+
+def test_create_session_accepts_excel_template_and_returns_slots(
     admin_client,
     monkeypatch,
     tmp_path,
 ):
-    async def fake_process_document(file_path: str):
-        assert Path(file_path).exists()
-        return {
-            "text": "订单号：NOZS0311046\n数量：12",
-            "confidence": 0.93,
-            "lines": [],
-            "total_lines": 2,
-        }
+    _patch_parse_env(monkeypatch, tmp_path)
 
-    monkeypatch.setattr(sdk_route.ocr_service, "process_document", fake_process_document)
-    monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
-
-    response = admin_client.post(
-        "/api/sdk/sessions",
+    response = _create_session(
+        admin_client,
         files={
             "file": ("scan.jpg", b"image bytes", "image/jpeg"),
             "excel_template": (
@@ -176,13 +331,9 @@ def test_create_session_accepts_empty_excel_template_and_returns_slots(
 
 
 def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_path):
-    async def fake_process_document(file_path: str):
-        return {
-            "text": "订单号：NOZS0311046\n数量：12",
-            "confidence": 0.93,
-            "lines": [],
-            "total_lines": 2,
-        }
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
 
     analysis_payload = {
         "recommended_doc_type": "出货单",
@@ -208,15 +359,13 @@ def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_
         "suggested_examples": [],
     }
 
-    async def fake_analyze(session):
+    async def fake_analyze(session, parse_text):
         return analysis_payload
 
-    monkeypatch.setattr(sdk_route.ocr_service, "process_document", fake_process_document)
-    monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
     monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
 
-    create_response = admin_client.post(
-        "/api/sdk/sessions",
+    create_response = _create_session(
+        admin_client,
         files={
             "file": ("scan.jpg", b"image bytes", "image/jpeg"),
             "excel_template": (
@@ -238,13 +387,9 @@ def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_
 
 
 def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, tmp_path):
-    async def fake_process_document(file_path: str):
-        return {
-            "text": "样品名称：小型断路器\n检验结论：合格",
-            "confidence": 0.93,
-            "lines": [],
-            "total_lines": 2,
-        }
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
 
     analysis_payload = {
         "recommended_doc_type": "检测报告",
@@ -275,7 +420,7 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         ],
     }
 
-    async def fake_analyze(session):
+    async def fake_analyze(session, parse_text):
         return analysis_payload
 
     async def fake_generate_prompt(session):
@@ -295,16 +440,11 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
             "example_count": 1,
         }
 
-    monkeypatch.setattr(sdk_route.ocr_service, "process_document", fake_process_document)
-    monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
     monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
     monkeypatch.setattr(sdk_route.orchestrator, "generate_prompt", fake_generate_prompt)
     monkeypatch.setattr(sdk_route.orchestrator, "commit", fake_commit)
 
-    create_response = admin_client.post(
-        "/api/sdk/sessions",
-        files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
-    )
+    create_response = _create_session(admin_client)
     session_id = create_response.json()["id"]
 
     analyze_response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
@@ -358,21 +498,9 @@ def test_sdk_routes_require_admin(client):
 
 
 def test_sdk_session_owner_is_enforced(admin_client, monkeypatch, tmp_path):
-    async def fake_process_document(file_path: str):
-        return {
-            "text": "样品名称：小型断路器",
-            "confidence": 0.93,
-            "lines": [],
-            "total_lines": 1,
-        }
+    _patch_parse_env(monkeypatch, tmp_path)
 
-    monkeypatch.setattr(sdk_route.ocr_service, "process_document", fake_process_document)
-    monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
-
-    create_response = admin_client.post(
-        "/api/sdk/sessions",
-        files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
-    )
+    create_response = _create_session(admin_client)
     session_id = create_response.json()["id"]
 
     test_app = FastAPI()

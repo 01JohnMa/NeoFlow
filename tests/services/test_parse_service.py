@@ -297,3 +297,76 @@ class TestEnsureParseResult:
 
         assert result is None
         mock_adapter.assert_not_called()
+
+
+class TestEnsureParseRevision:
+    @pytest.mark.asyncio
+    async def test_creates_and_publishes_system_configuration(self):
+        from services.parse_service import ensure_parse_revision
+
+        with patch("services.configuration_service.configuration_service") as mock_config:
+            mock_config.list_configurations = AsyncMock(return_value=[])
+            mock_config.create_configuration = AsyncMock(return_value={"id": "config-1"})
+            mock_config.publish_configuration = AsyncMock(
+                return_value={"revision": {"id": "rev-1", "revision_number": 1}}
+            )
+
+            revision = await ensure_parse_revision(TENANT_ID, "vlm", created_by="user-1")
+
+        assert revision["id"] == "rev-1"
+        created = mock_config.create_configuration.await_args.args[0]
+        assert created["type"] == "parse"
+        assert created["definition"]["parse"]["model_version"] == "vlm"
+        mock_config.publish_configuration.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_current_revision_when_mode_matches(self):
+        from services.parse_service import ensure_parse_revision
+
+        current = {
+            "id": "rev-1",
+            "definition": {"parse": {"model_version": "pipeline"}},
+        }
+        with patch("services.configuration_service.configuration_service") as mock_config:
+            mock_config.list_configurations = AsyncMock(
+                return_value=[{"id": "config-1", "code": "__system_parse__"}]
+            )
+            mock_config.get_configuration_detail = AsyncMock(
+                return_value={"current_revision": current}
+            )
+            mock_config.update_configuration = AsyncMock()
+            mock_config.publish_configuration = AsyncMock()
+
+            revision = await ensure_parse_revision(TENANT_ID, "pipeline")
+
+        assert revision == current
+        mock_config.update_configuration.assert_not_awaited()
+        mock_config.publish_configuration.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_publishes_new_revision_on_mode_change(self):
+        from services.parse_service import ensure_parse_revision
+
+        with patch("services.configuration_service.configuration_service") as mock_config:
+            mock_config.list_configurations = AsyncMock(
+                return_value=[{"id": "config-1", "code": "__system_parse__"}]
+            )
+            mock_config.get_configuration_detail = AsyncMock(
+                return_value={
+                    "current_revision": {
+                        "id": "rev-1",
+                        "definition": {"parse": {"model_version": "pipeline"}},
+                    }
+                }
+            )
+            mock_config.update_configuration = AsyncMock(return_value={"id": "config-1"})
+            mock_config.publish_configuration = AsyncMock(
+                return_value={"revision": {"id": "rev-2", "revision_number": 2}}
+            )
+
+            revision = await ensure_parse_revision(TENANT_ID, "vlm")
+
+        assert revision["id"] == "rev-2"
+        updated_definition = mock_config.update_configuration.await_args.args[1]
+        assert updated_definition["definition"]["parse"]["model_version"] == "vlm"
+        mock_config.publish_configuration.assert_awaited_once()
