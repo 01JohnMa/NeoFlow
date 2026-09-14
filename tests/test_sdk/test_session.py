@@ -9,13 +9,13 @@ def test_session_store_expires_old_sessions(monkeypatch):
     session = store.create(
         file_name="report.pdf",
         file_path="/tmp/report.pdf",
-        ocr_text="样品名称：小型断路器",
-        ocr_confidence=0.91,
-        page_count=1,
+        tenant_id="tenant-1",
+        document_id="doc-1",
+        parse_job_id="job-1",
         user_id="user-1",
     )
 
-    assert store.get(session.id).state == SDKSessionState.OCR_COMPLETED
+    assert store.get(session.id).state == SDKSessionState.PARSING
 
     now["value"] = 1011.0
 
@@ -27,9 +27,9 @@ def test_session_store_delete_removes_session():
     session = store.create(
         file_name="report.pdf",
         file_path="/tmp/report.pdf",
-        ocr_text="样品名称：小型断路器",
-        ocr_confidence=0.91,
-        page_count=1,
+        tenant_id="tenant-1",
+        document_id="doc-1",
+        parse_job_id="job-1",
         user_id="user-1",
     )
 

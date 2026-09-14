@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Check,
   ChevronDown,
@@ -6,6 +6,7 @@ import {
   Code2,
   FileText,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
   Upload,
@@ -33,7 +34,7 @@ interface AiTemplateWizardProps {
 }
 
 const steps = [
-  { key: 'upload', label: '上传 OCR' },
+  { key: 'upload', label: '上传样例' },
   { key: 'analyze', label: 'AI 分析' },
   { key: 'confirm', label: '确认配置' },
   { key: 'commit', label: '发布配置' },
@@ -163,6 +164,28 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
       resetAnalysisState()
     })
   }
+
+  const handleRetryParse = () => {
+    if (!session) return
+    void runAction('retry-parse', async () => {
+      const updated = await sdkApi.retrySDKParse(session.id)
+      setSession(updated)
+    })
+  }
+
+  const sessionId = session?.id
+  const sessionState = session?.state
+
+  useEffect(() => {
+    if (!sessionId || sessionState !== 'parsing') return
+    const timer = window.setInterval(() => {
+      sdkApi
+        .getSDKSession(sessionId)
+        .then((updated) => setSession(updated))
+        .catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [sessionId, sessionState])
 
   const handleAnalyze = () => {
     if (!session) return
@@ -435,12 +458,49 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
             <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium text-text-primary">
                 <FileText className="h-4 w-4 text-primary-400" />
-                OCR 摘要
+                解析状态
               </div>
               <p className="text-xs text-text-muted">{session.file_name}</p>
               <p className="mt-1 text-xs text-text-muted">
-                置信度 {(session.ocr_confidence * 100).toFixed(1)}%
+                解析模式：{session.parse_mode === 'vlm' ? '高精度解析' : '快速解析'}
               </p>
+
+              {session.state === 'parsing' && (
+                <div className="mt-3">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-bg-card">
+                    <div
+                      className="h-full rounded-full bg-primary-500 transition-all"
+                      style={{ width: `${session.parse_progress ?? 5}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-text-muted">
+                    MinerU 解析中，页面会自动刷新进度
+                  </p>
+                </div>
+              )}
+
+              {session.state === 'parsed' && (
+                <p className="mt-3 text-xs text-success-500">解析完成，可以开始 AI 分析</p>
+              )}
+
+              {session.state === 'parse_failed' && (
+                <div className="mt-3">
+                  <p className="text-xs text-error-500">
+                    {session.parse_error || '解析失败'}
+                  </p>
+                  <Button
+                    className="mt-2"
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleRetryParse}
+                    loading={loadingAction === 'retry-parse'}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    重试解析
+                  </Button>
+                </div>
+              )}
+
               {session.excel_template_file_name && (
                 <div className="mt-3 rounded-lg border border-border-default bg-bg-card p-3">
                   <p className="text-xs font-medium text-text-primary">
@@ -463,12 +523,12 @@ export function AiTemplateWizard({ tenantId, onCommitted }: AiTemplateWizardProp
                   )}
                 </div>
               )}
-              <Textarea className="mt-3 min-h-[160px]" value={session.ocr_text} readOnly />
               <Button
                 className="mt-3"
                 size="sm"
                 variant="secondary"
                 onClick={handleAnalyze}
+                disabled={session.state !== 'parsed'}
                 loading={loadingAction === 'analyze'}
               >
                 <Sparkles className="h-4 w-4" />

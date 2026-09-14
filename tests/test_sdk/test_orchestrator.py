@@ -4,10 +4,62 @@ from services.configuration_service import normalize_definition
 from sdk.agents.orchestrator import SDKOrchestrator
 from sdk.models import (
     ConfirmTemplateRequest,
+    DocumentAnalysis,
     ExcelTemplatePlaceholder,
     SDKSession,
     SDKSessionState,
 )
+
+
+def _build_session(**overrides) -> SDKSession:
+    payload = {
+        "id": "session-1",
+        "file_name": "scan.jpg",
+        "file_path": "/tmp/scan.jpg",
+        "tenant_id": "tenant-1",
+        "document_id": "doc-1",
+        "parse_job_id": "job-1",
+        "user_id": "11111111-1111-4111-8111-111111111111",
+        "state": SDKSessionState.PARSED,
+        "created_at": 1000,
+        "updated_at": 1000,
+    }
+    payload.update(overrides)
+    return SDKSession(**payload)
+
+
+@pytest.mark.asyncio
+async def test_analyze_uses_parse_markdown(monkeypatch):
+    captured = {}
+
+    async def fake_tenants(active_only=True):
+        return [{"id": "tenant-1", "name": "品质部", "code": "quality"}]
+
+    async def fake_run_doc_analyzer(*, parse_text, file_name, tenants):
+        captured["parse_text"] = parse_text
+        captured["file_name"] = file_name
+        return DocumentAnalysis(
+            recommended_doc_type="检测报告",
+            recommended_doc_code="inspection_report",
+            confidence=0.9,
+            recommended_tenant={"suggest_name": "品质部", "suggest_code": "quality"},
+            detected_fields=[],
+        )
+
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.tenant_service.get_all_tenants",
+        fake_tenants,
+    )
+    monkeypatch.setattr("sdk.agents.orchestrator.run_doc_analyzer", fake_run_doc_analyzer)
+
+    analysis = await SDKOrchestrator().analyze_document(
+        _build_session(file_name="report.pdf"),
+        "# 解析结果\n样品名称：小型断路器",
+    )
+
+    assert captured["parse_text"].startswith("# 解析结果")
+    assert captured["file_name"] == "report.pdf"
+    assert analysis.recommended_doc_type == "检测报告"
 
 
 @pytest.mark.asyncio
@@ -37,10 +89,7 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
         fake_publish_configuration,
     )
 
-    session = SDKSession(
-        id="session-1",
-        file_name="scan.jpg",
-        file_path="/tmp/scan.jpg",
+    session = _build_session(
         excel_template_file_name="template.xlsx",
         excel_template_path="/tmp/template.xlsx",
         excel_placeholders=[
@@ -51,13 +100,7 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
                 raw_value="{{order_no}}",
             )
         ],
-        ocr_text="订单号：NOZS0311046",
-        ocr_confidence=0.93,
-        page_count=1,
-        user_id="11111111-1111-4111-8111-111111111111",
         state=SDKSessionState.TEMPLATE_CONFIRMED,
-        created_at=1000,
-        updated_at=1000,
         confirmed_template=ConfirmTemplateRequest(
             template_name="出货单",
             template_code="shipment_report",
@@ -164,17 +207,10 @@ async def test_commit_uses_fallback_prompt_when_missing(monkeypatch):
         fake_publish_configuration,
     )
 
-    session = SDKSession(
+    session = _build_session(
         id="session-2",
-        file_name="scan.jpg",
-        file_path="/tmp/scan.jpg",
-        ocr_text="文本",
-        ocr_confidence=0.9,
-        page_count=1,
         user_id="user-1",
         state=SDKSessionState.TEMPLATE_CONFIRMED,
-        created_at=1000,
-        updated_at=1000,
         confirmed_template=ConfirmTemplateRequest(
             template_name="检测报告",
             template_code="inspection_report",

@@ -62,10 +62,10 @@ def build_configuration_definition(
 
 
 class SDKOrchestrator:
-    async def analyze_document(self, session: SDKSession) -> DocumentAnalysis:
+    async def analyze_document(self, session: SDKSession, parse_text: str) -> DocumentAnalysis:
         tenants = await tenant_service.get_all_tenants(active_only=True)
         return await run_doc_analyzer(
-            ocr_text=session.ocr_text,
+            parse_text=parse_text,
             file_name=session.file_name,
             tenants=tenants,
         )

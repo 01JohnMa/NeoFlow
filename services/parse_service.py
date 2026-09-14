@@ -17,6 +17,15 @@ from services.parser_adapter import get_parser_adapter
 from services.result_service import result_service
 
 
+SYSTEM_PARSE_CONFIG_CODE = "__system_parse__"
+SUPPORTED_PARSE_MODES = ("pipeline", "vlm")
+
+
+def normalize_parse_mode(mode: Optional[str]) -> str:
+    """解析模式只支持 pipeline / vlm，非法值回退快速解析。"""
+    return mode if mode in SUPPORTED_PARSE_MODES else "pipeline"
+
+
 def build_parse_params(
     configuration: Optional[Dict[str, Any]] = None,
     revision: Optional[Dict[str, Any]] = None,
@@ -33,6 +42,63 @@ def build_parse_params(
     if isinstance(section, dict):
         params.update(section)
     return params
+
+
+async def ensure_parse_revision(
+    tenant_id: str,
+    parse_mode: Optional[str] = None,
+    created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """确保租户存在匹配解析模式的系统解析 Configuration Revision。
+
+    草拟会话的 Parse Job 必须固定一个 Revision。这里按需自动创建
+    「系统解析」配置，并按所选模式发布新 Revision（快速/高精度）。
+    """
+    from services.configuration_service import configuration_service
+
+    mode = normalize_parse_mode(parse_mode)
+    configurations = await configuration_service.list_configurations(
+        tenant_id=tenant_id,
+        type="parse",
+    )
+    configuration = next(
+        (item for item in configurations if item.get("code") == SYSTEM_PARSE_CONFIG_CODE),
+        None,
+    )
+
+    if not configuration:
+        configuration = await configuration_service.create_configuration(
+            {
+                "tenant_id": tenant_id,
+                "name": "系统解析",
+                "code": SYSTEM_PARSE_CONFIG_CODE,
+                "description": "配置草拟使用的系统解析配置（自动创建）",
+                "type": "parse",
+                "definition": {"parse": {**PARSE_DEFAULTS, "model_version": mode}},
+            },
+            created_by=created_by,
+        )
+        published = await configuration_service.publish_configuration(
+            configuration["id"],
+            created_by=created_by,
+        )
+        return published.get("revision") or {}
+
+    detail = await configuration_service.get_configuration_detail(configuration["id"])
+    current = (detail or {}).get("current_revision") or {}
+    current_mode = ((current.get("definition") or {}).get("parse") or {}).get("model_version")
+    if current.get("id") and current_mode == mode:
+        return current
+
+    await configuration_service.update_configuration(
+        configuration["id"],
+        {"definition": {"parse": {**PARSE_DEFAULTS, "model_version": mode}}},
+    )
+    published = await configuration_service.publish_configuration(
+        configuration["id"],
+        created_by=created_by,
+    )
+    return published.get("revision") or {}
 
 
 async def ensure_parse_result(

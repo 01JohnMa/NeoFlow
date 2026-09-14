@@ -129,7 +129,9 @@ export interface ConfigurationExamplePayload {
 // ============ AI Template SDK types ============
 
 export type SDKSessionState =
-  | 'ocr_completed'
+  | 'parsing'
+  | 'parsed'
+  | 'parse_failed'
   | 'analyzed'
   | 'template_confirmed'
   | 'prompt_generated'
@@ -199,12 +201,15 @@ export interface SDKCommitResult {
 export interface SDKSession {
   id: string
   file_name: string
+  tenant_id: string
+  document_id: string
+  parse_job_id: string
+  parse_mode: 'pipeline' | 'vlm'
+  parse_error: string | null
+  parse_progress: number | null
   state: SDKSessionState
   excel_template_file_name: string | null
   excel_placeholders: SDKExcelPlaceholder[]
-  ocr_text: string
-  ocr_confidence: number
-  page_count: number
   analysis: SDKDocumentAnalysis | null
   confirmed_template: SDKConfirmTemplatePayload | null
   prompt: string | null

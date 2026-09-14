@@ -9,14 +9,33 @@ import type {
 export async function createSDKSession(
   file: File,
   excelTemplate?: File | null,
+  parseMode?: 'pipeline' | 'vlm',
 ): Promise<SDKSession> {
   const formData = new FormData()
   formData.append('file', file)
   if (excelTemplate) {
     formData.append('excel_template', excelTemplate)
   }
+  if (parseMode) {
+    formData.append('parse_mode', parseMode)
+  }
   const { data } = await api.post<SDKSession>('/sdk/sessions', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export async function getSDKSession(sessionId: string): Promise<SDKSession> {
+  const { data } = await api.get<SDKSession>(`/sdk/sessions/${sessionId}`)
+  return data
+}
+
+export async function retrySDKParse(
+  sessionId: string,
+  parseMode?: 'pipeline' | 'vlm',
+): Promise<SDKSession> {
+  const { data } = await api.post<SDKSession>(`/sdk/sessions/${sessionId}/parse`, {
+    parse_mode: parseMode ?? null,
   })
   return data
 }
