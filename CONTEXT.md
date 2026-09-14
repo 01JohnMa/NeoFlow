@@ -1,0 +1,97 @@
+# NeoFlow Document Processing
+
+NeoFlow turns one or more source documents into reviewable, structured records and optional external outputs. The domain model keeps document processing generic while allowing project-specific Configurations and policies to vary behind stable Interfaces.
+
+## Tenancy and projects
+
+**Tenant**:
+The ownership and data-isolation boundary for one organization using NeoFlow. A Tenant owns one or more Projects.
+_Avoid_: account, customer workspace
+
+**Project**:
+A workspace within one Tenant that owns Configurations, Processing Jobs, and Extraction Results.
+_Avoid_: application, global workspace
+
+## Documents and extraction
+
+**Document**:
+A source file tracked through ingestion, extraction, review, and completion. A document may participate in a Composite Extraction with other documents.
+_Avoid_: upload, file record
+
+**Document Kind**:
+The stable semantic kind of a source document used to select an extraction policy. It is not a database table name or an external output name.
+_Avoid_: raw `document_type` string, result table
+
+**Document Ingestion**:
+The act of accepting source documents, associating them with a Project and Configuration, and creating a Processing Job.
+_Avoid_: upload flow
+
+**Extraction**:
+The derivation of field values from one source document under a Configuration's Field Schema and extraction policy.
+_Avoid_: OCR result, LLM response
+
+**Extraction Result**:
+The structured, provenance-aware values produced for one logical sample by Extraction or Composite Extraction.
+_Avoid_: raw JSON, business table row
+
+## Configurations and fields
+
+**Configuration**:
+A project-owned, reusable definition of one document-processing operation. Its Configuration Type selects the allowed parameters, including the relevant Field Schema and processing policies.
+_Avoid_: Template, department-specific application
+
+**Configuration Type**:
+The operation family defined by a Configuration, such as Parse, Extract, Classify, Split, or Composite Extraction. Each type has its own parameter contract while sharing ownership and revision rules.
+_Avoid_: application type, route type
+
+**Configuration Revision**:
+An immutable historical form of a Configuration. Every Processing Job runs exactly one Configuration Revision.
+_Avoid_: mutable configuration snapshot, current template
+
+**Processing Job**:
+An execution request that applies one Configuration Revision to a defined set of input Documents.
+_Avoid_: background task, batch record
+
+**Field Schema**:
+The set of fields recognized by an Extract or Composite Extraction Configuration, including each field's key, label, type, requiredness, validation rules, provenance, and output mapping.
+_Avoid_: dynamic database column, ad hoc field mapping
+
+**Field Value**:
+A value for one Field Schema entry, together with its source/provenance and validation state when available.
+_Avoid_: untyped dictionary entry
+
+## Composite processing
+
+**Composite Extraction**:
+An extraction request containing multiple source documents or page-level samples whose results are aligned into one or more logical samples.
+_Avoid_: generic merge mode, paired batch
+
+**Merge Strategy**:
+A deterministic policy that defines sample alignment, cardinality, conflict precedence, and missing-value behavior for Composite Extraction.
+_Avoid_: `{**a, **b}`, merge helper
+
+**Logical Sample**:
+The unit of structured output representing one sample after Extraction or Composite Extraction. A single source document may produce one or many Logical Samples.
+_Avoid_: synthetic document, extra document
+
+**Provenance**:
+The source document, page, or extraction attempt that explains where a Field Value came from.
+_Avoid_: debug metadata
+
+## Review and outputs
+
+**Review**:
+The human validation step that can correct Field Values and approve or reject an Extraction Result before an output is emitted.
+_Avoid_: manual patch, status toggle
+
+**Output Policy**:
+The Configuration-owned rules that decide which approved values and source artifacts are emitted, including naming and attachment behavior.
+_Avoid_: push logic
+
+**Output Adapter**:
+An Adapter that translates an approved Logical Sample into an external sink such as Feishu or a fixed Excel document.
+_Avoid_: provider-specific route
+
+**Business Adapter**:
+An Adapter that supplies tenant- or business-specific Configuration parameters without changing the generic processing flow.
+_Avoid_: copied business route, special-case branch
