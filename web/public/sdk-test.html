@@ -1,0 +1,1356 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeoFlow SDK Test</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1220;
+        --panel: #111c2f;
+        --panel-2: #172849;
+        --line: #29415f;
+        --text: #e8eef8;
+        --muted: #9fb0c7;
+        --green: #31d67b;
+        --cyan: #49c8ff;
+        --yellow: #f6c65b;
+        --red: #ff6673;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 24px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(11, 18, 32, 0.94);
+        backdrop-filter: blur(10px);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+        gap: 18px;
+        width: min(1480px, calc(100vw - 32px));
+        margin: 18px auto 32px;
+      }
+
+      section {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .section-head {
+        padding: 16px 18px 0;
+      }
+
+      h2 {
+        margin: 0 0 4px;
+        font-size: 16px;
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .body {
+        display: grid;
+        gap: 14px;
+        padding: 16px 18px 18px;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #0d1728;
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+        outline: none;
+      }
+
+      input,
+      select {
+        height: 40px;
+        padding: 0 11px;
+      }
+
+      input[type="file"] {
+        height: auto;
+        padding: 10px;
+      }
+
+      textarea {
+        min-height: 92px;
+        padding: 10px 11px;
+        resize: vertical;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+
+      input:focus,
+      textarea:focus,
+      select:focus {
+        border-color: var(--cyan);
+        box-shadow: 0 0 0 2px rgba(73, 200, 255, 0.15);
+      }
+
+      button {
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: rgba(49, 214, 123, 0.55);
+        background: #0b7f45;
+      }
+
+      button.warn {
+        border-color: rgba(246, 198, 91, 0.55);
+        color: #fff0c6;
+      }
+
+      button.danger {
+        border-color: rgba(255, 102, 115, 0.55);
+        color: #ffd7dc;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .badge.ok {
+        border-color: rgba(49, 214, 123, 0.42);
+        color: var(--green);
+      }
+
+      .badge.err {
+        border-color: rgba(255, 102, 115, 0.5);
+        color: var(--red);
+      }
+
+      .note {
+        border: 1px solid rgba(246, 198, 91, 0.35);
+        border-radius: 6px;
+        padding: 10px 12px;
+        color: #f9dda0;
+        background: rgba(246, 198, 91, 0.08);
+        font-size: 13px;
+      }
+
+      .profile-panel {
+        display: grid;
+        gap: 12px;
+        border: 1px solid rgba(73, 200, 255, 0.28);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(73, 200, 255, 0.06);
+      }
+
+      .profile-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .profile-head h2 {
+        margin: 0;
+      }
+
+      .profile-head p,
+      .field-note {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .profile-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .output-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 18px;
+      }
+
+      .codebox {
+        min-height: 220px;
+        max-height: 520px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin: 0;
+        padding: 14px;
+        background: #07101e;
+        color: #d8e7fb;
+        font:
+          13px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+          monospace;
+      }
+
+      .logline {
+        display: grid;
+        gap: 2px;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(41, 65, 95, 0.65);
+      }
+
+      .logline:last-child {
+        border-bottom: 0;
+      }
+
+      .logtime {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .logok {
+        color: var(--green);
+      }
+
+      .logerr {
+        color: var(--red);
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: #0d1728;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        min-height: 24px;
+        margin-top: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 16px;
+      }
+
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .checkbox input {
+        width: 18px;
+        height: 18px;
+      }
+
+      @media (max-width: 980px) {
+        header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        main,
+        .output-grid,
+        .summary {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 560px) {
+        main {
+          width: min(100vw - 20px, 1480px);
+        }
+
+        .grid-2,
+        .actions,
+        .profile-actions {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>NeoFlow SDK Test</h1>
+        <p>临时调试页，仅调用当前站点的 SDK API。</p>
+      </div>
+      <div class="toolbar">
+        <span id="statusBadge" class="badge">idle</span>
+        <button id="clearLogBtn" type="button">清空日志</button>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <div class="section-head">
+          <h2>请求配置</h2>
+          <p>测试服可直接使用默认 `/api`。</p>
+        </div>
+        <div class="body">
+          <div class="note">
+            页面不会保存 token。可读取当前浏览器登录态，或粘贴真实 Bearer Token。
+          </div>
+
+          <div class="grid-2">
+            <label>
+              API Base
+              <input id="apiBase" value="/api" autocomplete="off" />
+            </label>
+            <label>
+              Session ID
+              <input id="sessionId" autocomplete="off" placeholder="创建后自动填充" />
+            </label>
+          </div>
+
+          <label>
+            Bearer Token
+            <input
+              id="token"
+              type="password"
+              autocomplete="off"
+              placeholder="粘贴 Supabase access_token"
+            />
+          </label>
+
+          <button id="loadSessionTokenBtn" class="warn" type="button">读取当前登录态 Token</button>
+
+          <div class="profile-panel">
+            <div class="profile-head">
+              <div>
+                <h2>模型 Profile</h2>
+                <p>仅用于本页 AI 请求；不写入 SDK session。</p>
+              </div>
+              <span id="profileBadge" class="badge">default</span>
+            </div>
+
+            <div class="grid-2">
+              <label>
+                当前 Profile
+                <select id="profileSelect"></select>
+              </label>
+              <label>
+                套用 Preset
+                <select id="profilePreset">
+                  <option value="">不套用</option>
+                  <option value="deepseek">DeepSeek JSON</option>
+                  <option value="step">Step 3.7 Flash</option>
+                  <option value="kimi">Kimi / Moonshot</option>
+                  <option value="custom">空白自定义</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Profile 名称
+              <input id="profileName" autocomplete="off" placeholder="例如 Step 测试" />
+            </label>
+
+            <div class="grid-2">
+              <label>
+                Model ID
+                <input id="profileModel" autocomplete="off" placeholder="step-3.7-flash" />
+              </label>
+              <label>
+                Temperature
+                <input
+                  id="profileTemperature"
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  placeholder="0.2"
+                />
+              </label>
+            </div>
+
+            <label>
+              Base URL
+              <input
+                id="profileBaseUrl"
+                autocomplete="off"
+                placeholder="https://api.stepfun.ai/v1"
+              />
+            </label>
+
+            <label>
+              API Key
+              <input
+                id="profileApiKey"
+                type="password"
+                autocomplete="off"
+                placeholder="只随 analyze/prompt/code 请求发送"
+              />
+              <span class="field-note">API Key 只保留在当前输入框，不写入 localStorage。</span>
+            </label>
+
+            <label class="checkbox">
+              <input id="enableProfileOverride" type="checkbox" />
+              在 AI 请求中使用当前 Profile
+            </label>
+
+            <div class="profile-actions">
+              <button id="saveProfileBtn" class="primary" type="button">保存 Profile</button>
+              <button id="duplicateProfileBtn" type="button">复制为新 Profile</button>
+              <button id="deleteProfileBtn" class="warn" type="button">删除 Profile</button>
+            </div>
+          </div>
+
+          <label>
+            待 OCR 图片/文档
+            <input id="documentFile" type="file" />
+          </label>
+
+          <label>
+            Excel 填报模板（可选）
+            <input id="excelFile" type="file" accept=".xlsx,.xls" />
+          </label>
+
+          <div class="actions">
+            <button id="createBtn" class="primary" type="button">1. 上传并 OCR</button>
+            <button id="analyzeBtn" type="button">2. AI 分析</button>
+            <button id="confirmBtn" type="button">3. 确认配置</button>
+            <button id="promptBtn" type="button">4. 生成 Prompt</button>
+            <button id="codeBtn" type="button">5. 生成 Code</button>
+            <button id="reloadBtn" type="button">读取 Session</button>
+          </div>
+
+          <label class="checkbox">
+            <input id="allowCommit" type="checkbox" />
+            允许写入模板配置
+          </label>
+
+          <div class="actions">
+            <button id="commitBtn" class="danger" type="button">6. Commit</button>
+            <button id="deleteBtn" class="danger" type="button">删除 Session</button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>运行结果</h2>
+          <p>用于确认 DeepSeek/OpenAI Agents SDK 结构化输出链路是否正常。</p>
+        </div>
+        <div class="body">
+          <div class="summary">
+            <div class="metric">
+              <span>状态</span>
+              <strong id="mState">-</strong>
+            </div>
+            <div class="metric">
+              <span>OCR 字符</span>
+              <strong id="mOcr">-</strong>
+            </div>
+            <div class="metric">
+              <span>字段数</span>
+              <strong id="mFields">-</strong>
+            </div>
+            <div class="metric">
+              <span>模板</span>
+              <strong id="mTemplate">-</strong>
+            </div>
+          </div>
+
+          <div class="output-grid">
+            <div class="stack">
+              <h2>响应 JSON</h2>
+              <pre id="responseBox" class="codebox">等待请求...</pre>
+            </div>
+            <div class="stack">
+              <h2>日志</h2>
+              <div id="logBox" class="codebox"></div>
+            </div>
+          </div>
+
+          <div class="stack">
+            <h2>确认模板 Payload</h2>
+            <textarea id="confirmPayload" style="min-height: 220px"></textarea>
+          </div>
+
+          <div class="output-grid">
+            <div class="stack">
+              <h2>Prompt</h2>
+              <pre id="promptBox" class="codebox"></pre>
+            </div>
+            <div class="stack">
+              <h2>Cleaner Code</h2>
+              <pre id="codeBox" class="codebox"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const state = {
+        session: null,
+        analysis: null,
+        profiles: [],
+      };
+      const TOKEN_READY_TEXT = "Token 已在内存中，未写入页面";
+      const PROFILE_STORAGE_KEY = "neoflow-sdk-test-model-profiles";
+      const PROFILE_PRESETS = {
+        deepseek: {
+          name: "DeepSeek JSON",
+          model: "deepseek-chat",
+          base_url: "https://api.deepseek.com",
+          api_key: "",
+          temperature: 0.2,
+        },
+        step: {
+          name: "Step 3.7 Flash",
+          model: "step-3.7-flash",
+          base_url: "https://api.stepfun.ai/v1",
+          api_key: "",
+          temperature: 0.2,
+        },
+        kimi: {
+          name: "Kimi / Moonshot",
+          model: "kimi-k2-0711-preview",
+          base_url: "https://api.moonshot.ai/v1",
+          api_key: "",
+          temperature: 0.6,
+        },
+        custom: {
+          name: "Custom Provider",
+          model: "",
+          base_url: "",
+          api_key: "",
+          temperature: 0.2,
+        },
+      };
+      let bearerToken = "";
+
+      function setBusy(isBusy, label = "idle") {
+        const badge = $("statusBadge");
+        badge.textContent = label;
+        badge.className = isBusy ? "badge" : "badge ok";
+        document.querySelectorAll("button").forEach((button) => {
+          if (button.id !== "clearLogBtn") {
+            button.disabled = isBusy;
+          }
+        });
+      }
+
+      function setError(label) {
+        const badge = $("statusBadge");
+        badge.textContent = label;
+        badge.className = "badge err";
+        document.querySelectorAll("button").forEach((button) => {
+          button.disabled = false;
+        });
+      }
+
+      function log(message, type = "info") {
+        const line = document.createElement("div");
+        line.className = "logline";
+        const time = document.createElement("span");
+        time.className = "logtime";
+        time.textContent = new Date().toLocaleTimeString();
+        const body = document.createElement("span");
+        body.className = type === "error" ? "logerr" : type === "ok" ? "logok" : "";
+        body.textContent = message;
+        line.append(time, body);
+        $("logBox").prepend(line);
+      }
+
+      function showJson(value) {
+        $("responseBox").textContent = JSON.stringify(value, null, 2);
+      }
+
+      function getApiBase() {
+        return $("apiBase").value.replace(/\/+$/, "") || "/api";
+      }
+
+      function getSessionId() {
+        const sessionId = $("sessionId").value.trim();
+        if (!sessionId) {
+          throw new Error("缺少 Session ID");
+        }
+        return sessionId;
+      }
+
+      function authHeaders() {
+        captureTokenInput(false);
+        const token = bearerToken.trim();
+        if (!token) {
+          throw new Error("缺少 Bearer Token");
+        }
+        return { Authorization: `Bearer ${token}` };
+      }
+
+      function cloneProfile(profile) {
+        const rawTemperature = profile?.temperature;
+        const temperature =
+          rawTemperature === "" || rawTemperature == null ? null : Number(rawTemperature);
+        return {
+          name: String(profile?.name || "").trim(),
+          model: String(profile?.model || "").trim(),
+          base_url: String(profile?.base_url || "").trim(),
+          api_key: String(profile?.api_key || "").trim(),
+          temperature: Number.isFinite(temperature) ? temperature : null,
+        };
+      }
+
+      function profileForStorage(profile) {
+        const value = cloneProfile(profile);
+        value.api_key = "";
+        return value;
+      }
+
+      function readProfileForm() {
+        return cloneProfile({
+          name: $("profileName").value,
+          model: $("profileModel").value,
+          base_url: $("profileBaseUrl").value,
+          api_key: $("profileApiKey").value,
+          temperature: $("profileTemperature").value,
+        });
+      }
+
+      function writeProfileForm(profile) {
+        const value = cloneProfile(profile || {});
+        $("profileName").value = value.name || "";
+        $("profileModel").value = value.model || "";
+        $("profileBaseUrl").value = value.base_url || "";
+        $("profileApiKey").value = value.api_key || "";
+        $("profileTemperature").value = value.temperature == null ? "" : String(value.temperature);
+        updateProfileBadge();
+      }
+
+      function loadProfiles() {
+        try {
+          const storedRaw = localStorage.getItem(PROFILE_STORAGE_KEY) || "[]";
+          const stored = JSON.parse(storedRaw);
+          state.profiles = Array.isArray(stored) ? stored.map(profileForStorage) : [];
+          if (JSON.stringify(stored) !== JSON.stringify(state.profiles)) {
+            saveProfiles();
+          }
+        } catch {
+          state.profiles = [];
+        }
+        if (state.profiles.length === 0) {
+          state.profiles = [
+            cloneProfile(PROFILE_PRESETS.deepseek),
+            cloneProfile(PROFILE_PRESETS.step),
+            cloneProfile(PROFILE_PRESETS.kimi),
+          ];
+        }
+        renderProfileSelect();
+        writeProfileForm(state.profiles[0] || PROFILE_PRESETS.custom);
+      }
+
+      function saveProfiles() {
+        state.profiles = state.profiles.map(profileForStorage);
+        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(state.profiles));
+      }
+
+      function renderProfileSelect(selectedName = "") {
+        const select = $("profileSelect");
+        const current = selectedName || select.value;
+        select.textContent = "";
+        state.profiles.forEach((profile, index) => {
+          const option = document.createElement("option");
+          option.value = String(index);
+          option.textContent = profile.name || `Profile ${index + 1}`;
+          select.append(option);
+        });
+        if (state.profiles.length === 0) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "未保存 Profile";
+          select.append(option);
+        }
+        if (current && Number.isInteger(Number(current)) && state.profiles[Number(current)]) {
+          select.value = current;
+        }
+      }
+
+      function upsertCurrentProfile({ duplicate = false } = {}) {
+        validateTemperatureInput();
+        const profile = readProfileForm();
+        if (!profile.name) {
+          throw new Error("请填写 Profile 名称");
+        }
+        const selectedIndex = Number($("profileSelect").value);
+        const savedProfile = profileForStorage(profile);
+        if (!duplicate && Number.isInteger(selectedIndex) && state.profiles[selectedIndex]) {
+          state.profiles[selectedIndex] = savedProfile;
+          saveProfiles();
+          renderProfileSelect(String(selectedIndex));
+          $("profileSelect").value = String(selectedIndex);
+          updateProfileBadge();
+          return profile;
+        }
+        state.profiles.push(savedProfile);
+        saveProfiles();
+        renderProfileSelect(String(state.profiles.length - 1));
+        $("profileSelect").value = String(state.profiles.length - 1);
+        updateProfileBadge();
+        return profile;
+      }
+
+      function getModelProfilePayload() {
+        if (!$("enableProfileOverride").checked) {
+          return {};
+        }
+        validateTemperatureInput();
+        const profile = readProfileForm();
+        const hasOverride = ["model", "base_url", "api_key"].some((key) => profile[key]);
+        if (!hasOverride && profile.temperature == null) {
+          return {};
+        }
+        if (!profile.model || !profile.base_url || !profile.api_key) {
+          throw new Error("模型 Profile 需要填写 Model ID、Base URL 和 API Key");
+        }
+        return {
+          model_profile: {
+            name: profile.name || "临时 Profile",
+            model: profile.model,
+            base_url: profile.base_url,
+            api_key: profile.api_key,
+            temperature: profile.temperature,
+          },
+        };
+      }
+
+      function validateTemperatureInput() {
+        const raw = $("profileTemperature").value.trim();
+        const value = Number(raw);
+        if (raw && (!Number.isFinite(value) || value < 0 || value > 2)) {
+          throw new Error("Temperature 必须是 0 到 2 之间的数字");
+        }
+      }
+
+      function profileRequestOptions() {
+        return {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getModelProfilePayload()),
+        };
+      }
+
+      function updateProfileBadge() {
+        const profile = readProfileForm();
+        const badge = $("profileBadge");
+        if (!$("enableProfileOverride").checked) {
+          badge.textContent = "default";
+          badge.className = "badge";
+          return;
+        }
+        badge.textContent = profile.model || "profile";
+        badge.className = profile.model ? "badge ok" : "badge err";
+      }
+
+      async function request(path, options = {}) {
+        const url = `${getApiBase()}${path}`;
+        const headers = {
+          ...authHeaders(),
+          ...(options.headers || {}),
+        };
+        const response = await fetch(url, { ...options, headers });
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+        if (!response.ok) {
+          const detail = typeof payload === "string" ? payload : JSON.stringify(payload);
+          const error = new Error(`${response.status} ${response.statusText}: ${detail}`);
+          error.status = response.status;
+          error.path = path;
+          error.payload = payload;
+          throw error;
+        }
+        return payload;
+      }
+
+      function isSessionMiss(error) {
+        return error?.status === 404 && String(error?.path || "").includes("/sdk/sessions/");
+      }
+
+      function delay(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function normalizeToken(raw) {
+        return String(raw || "").trim().replace(/^Bearer\s+/i, "");
+      }
+
+      function decodeBase64UrlJson(value) {
+        const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+        const binary = atob(padded);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        return JSON.parse(new TextDecoder().decode(bytes));
+      }
+
+      function readJwtClaims(token) {
+        const parts = normalizeToken(token).split(".");
+        if (parts.length !== 3 || !parts[1]) {
+          return null;
+        }
+        try {
+          return decodeBase64UrlJson(parts[1]);
+        } catch {
+          return null;
+        }
+      }
+
+      function getTokenStatus(token) {
+        const claims = readJwtClaims(token);
+        const now = Math.floor(Date.now() / 1000);
+        if (!claims) {
+          return { usable: false, reason: "Token 格式无效" };
+        }
+        if (typeof claims.exp !== "number") {
+          return { usable: false, reason: "Token 缺少过期时间" };
+        }
+        if (claims.exp <= now) {
+          return { usable: false, reason: "Token 已过期" };
+        }
+        return {
+          usable: true,
+          exp: claims.exp,
+          iat: typeof claims.iat === "number" ? claims.iat : 0,
+        };
+      }
+
+      function markTokenReady(message) {
+        $("token").value = TOKEN_READY_TEXT;
+        if (message) {
+          log(message, "ok");
+        }
+      }
+
+      function captureTokenInput(shouldLog = true) {
+        const raw = $("token").value.trim();
+        if (!raw || raw === TOKEN_READY_TEXT) {
+          if (!bearerToken) {
+            return false;
+          }
+          const status = getTokenStatus(bearerToken);
+          if (!status.usable) {
+            bearerToken = "";
+            $("token").value = "";
+            log(status.reason || "Token 不可用，请重新登录或重新粘贴", "error");
+            return false;
+          }
+          return true;
+        }
+        const token = normalizeToken(raw);
+        const status = getTokenStatus(token);
+        if (!status.usable) {
+          bearerToken = "";
+          log(status.reason || "Token 不可用", "error");
+          return false;
+        }
+        bearerToken = token;
+        markTokenReady(shouldLog ? "已接收 Bearer Token" : "");
+        return true;
+      }
+
+      function findAccessToken(value, depth = 0) {
+        if (!value || depth > 4) {
+          return "";
+        }
+        if (typeof value === "string") {
+          return value.split(".").length === 3 ? value : "";
+        }
+        if (typeof value !== "object") {
+          return "";
+        }
+        if (typeof value.access_token === "string") {
+          return normalizeToken(value.access_token);
+        }
+        if (typeof value.currentSession?.access_token === "string") {
+          return normalizeToken(value.currentSession.access_token);
+        }
+        if (typeof value.session?.access_token === "string") {
+          return normalizeToken(value.session.access_token);
+        }
+        for (const item of Object.values(value)) {
+          const token = findAccessToken(item, depth + 1);
+          if (token) {
+            return token;
+          }
+        }
+        return "";
+      }
+
+      function tokenStoragePriority(key) {
+        if (/^sb-[^-]+-auth-token$/.test(key)) {
+          return 0;
+        }
+        if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+          return 1;
+        }
+        if (key.startsWith("sb-")) {
+          return 2;
+        }
+        if (key.includes("auth-token")) {
+          return 3;
+        }
+        return 4;
+      }
+
+      function readTokenFromStorage(shouldLog = true) {
+        const candidates = [];
+        for (let index = 0; index < localStorage.length; index += 1) {
+          const key = localStorage.key(index) || "";
+          if (!key.startsWith("sb-") && !key.includes("auth-token")) {
+            continue;
+          }
+          try {
+            const rawValue = localStorage.getItem(key) || "";
+            let token = "";
+            try {
+              token = findAccessToken(JSON.parse(rawValue));
+            } catch {
+              token = normalizeToken(rawValue);
+            }
+            const status = token ? getTokenStatus(token) : { usable: false };
+            if (status.usable) {
+              candidates.push({
+                key,
+                token,
+                exp: status.exp || 0,
+                iat: status.iat || 0,
+                priority: tokenStoragePriority(key),
+              });
+            }
+          } catch {
+            continue;
+          }
+        }
+        candidates.sort((left, right) => {
+          if (left.priority !== right.priority) {
+            return left.priority - right.priority;
+          }
+          if (left.iat !== right.iat) {
+            return right.iat - left.iat;
+          }
+          return right.exp - left.exp;
+        });
+        const selected = candidates[0];
+        if (selected) {
+          bearerToken = selected.token;
+          markTokenReady(shouldLog ? `已读取当前登录态 Token（${selected.key}）` : "");
+          return true;
+        }
+        if (shouldLog) {
+          log("未找到可用登录态 Token，请从主应用重新登录后刷新，或手动粘贴 Bearer Token", "error");
+        }
+        return false;
+      }
+
+      async function requestSession(path, options = {}, attempts = 6) {
+        let lastError;
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          try {
+            return await request(path, options);
+          } catch (error) {
+            lastError = error;
+            if (!isSessionMiss(error) || attempt === attempts) {
+              throw error;
+            }
+            log(`Session 命中其他 worker，重试 ${attempt}/${attempts}`);
+            await delay(250 * attempt);
+          }
+        }
+        throw lastError;
+      }
+
+      function refreshSummary() {
+        const session = state.session || {};
+        const analysis = state.analysis || session.analysis || {};
+        $("mState").textContent = session.state || "-";
+        $("mOcr").textContent = session.ocr_text ? String(session.ocr_text.length) : "-";
+        $("mFields").textContent = Array.isArray(analysis.detected_fields)
+          ? String(analysis.detected_fields.length)
+          : "-";
+        $("mTemplate").textContent =
+          analysis.recommended_doc_type || session.confirmed_template?.template_name || "-";
+      }
+
+      function buildConfirmPayload() {
+        const analysis = state.analysis || state.session?.analysis;
+        if (!analysis) {
+          throw new Error("请先完成 AI 分析");
+        }
+        const tenant = analysis.recommended_tenant || {};
+        return {
+          template_name: analysis.recommended_doc_type || "SDK测试模板",
+          template_code: analysis.recommended_doc_code || "sdk_test_template",
+          description: "由 sdk-test.html 临时确认",
+          tenant_id: tenant.match_existing_tenant_id || null,
+          tenant_name: tenant.suggest_name || null,
+          tenant_code: tenant.suggest_code || null,
+          extraction_mode: "ocr_llm",
+          per_page_extraction: false,
+          fields: analysis.detected_fields || [],
+          examples: analysis.suggested_examples || [],
+        };
+      }
+
+      function updateConfirmPayload() {
+        try {
+          $("confirmPayload").value = JSON.stringify(buildConfirmPayload(), null, 2);
+        } catch {
+          if (!$("confirmPayload").value) {
+            $("confirmPayload").value = "";
+          }
+        }
+      }
+
+      async function run(label, fn) {
+        setBusy(true, label);
+        log(`${label} 开始`);
+        try {
+          const result = await fn();
+          showJson(result);
+          refreshSummary();
+          log(`${label} 成功`, "ok");
+          setBusy(false, "ok");
+          return result;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log(`${label} 失败：${message}`, "error");
+          setError("error");
+          throw error;
+        }
+      }
+
+      $("token").addEventListener("paste", (event) => {
+        event.preventDefault();
+        const text = event.clipboardData?.getData("text")?.trim() || "";
+        if (!text) {
+          return;
+        }
+        bearerToken = normalizeToken(text);
+        markTokenReady("已接收 Bearer Token");
+      });
+
+      $("token").addEventListener("keydown", (event) => {
+        if (event.key === "Backspace" || event.key === "Delete") {
+          bearerToken = "";
+          $("token").value = "";
+          log("已清空 Bearer Token");
+        }
+      });
+
+      $("token").addEventListener("change", () => {
+        captureTokenInput();
+      });
+
+      $("loadSessionTokenBtn").addEventListener("click", () => {
+        readTokenFromStorage();
+      });
+
+      $("profileSelect").addEventListener("change", () => {
+        const selected = state.profiles[Number($("profileSelect").value)];
+        writeProfileForm(selected || PROFILE_PRESETS.custom);
+        $("profilePreset").value = "";
+      });
+
+      $("profilePreset").addEventListener("change", () => {
+        const preset = PROFILE_PRESETS[$("profilePreset").value];
+        if (preset) {
+          writeProfileForm(preset);
+        }
+      });
+
+      ["profileName", "profileModel", "profileBaseUrl", "profileApiKey", "profileTemperature"].forEach(
+        (id) => {
+          $(id).addEventListener("input", updateProfileBadge);
+        },
+      );
+
+      $("enableProfileOverride").addEventListener("change", updateProfileBadge);
+
+      $("saveProfileBtn").addEventListener("click", () => {
+        try {
+          const profile = upsertCurrentProfile();
+          log(`已保存 Profile：${profile.name}`, "ok");
+        } catch (error) {
+          log(error instanceof Error ? error.message : String(error), "error");
+        }
+      });
+
+      $("duplicateProfileBtn").addEventListener("click", () => {
+        try {
+          const base = readProfileForm();
+          $("profileName").value = `${base.name || "Profile"} Copy`;
+          const profile = upsertCurrentProfile({ duplicate: true });
+          log(`已复制 Profile：${profile.name}`, "ok");
+        } catch (error) {
+          log(error instanceof Error ? error.message : String(error), "error");
+        }
+      });
+
+      $("deleteProfileBtn").addEventListener("click", () => {
+        const selectedIndex = Number($("profileSelect").value);
+        if (!Number.isInteger(selectedIndex) || !state.profiles[selectedIndex]) {
+          log("没有可删除的 Profile", "error");
+          return;
+        }
+        const [removed] = state.profiles.splice(selectedIndex, 1);
+        saveProfiles();
+        renderProfileSelect();
+        writeProfileForm(state.profiles[0] || PROFILE_PRESETS.custom);
+        log(`已删除 Profile：${removed.name || "未命名"}`, "ok");
+      });
+
+      $("createBtn").addEventListener("click", () => {
+        run("上传并 OCR", async () => {
+          const documentFile = $("documentFile").files[0];
+          if (!documentFile) {
+            throw new Error("请选择待 OCR 文件");
+          }
+          const form = new FormData();
+          form.append("file", documentFile);
+          const excelFile = $("excelFile").files[0];
+          if (excelFile) {
+            form.append("excel_template", excelFile);
+          }
+          const session = await request("/sdk/sessions", {
+            method: "POST",
+            body: form,
+          });
+          state.session = session;
+          state.analysis = session.analysis || null;
+          $("sessionId").value = session.id || "";
+          updateConfirmPayload();
+          return session;
+        });
+      });
+
+      $("analyzeBtn").addEventListener("click", () => {
+        run("AI 分析", async () => {
+          const result = await requestSession(
+            `/sdk/sessions/${getSessionId()}/analyze`,
+            profileRequestOptions(),
+          );
+          state.analysis = result.analysis;
+          if (state.session) {
+            state.session.analysis = result.analysis;
+            state.session.state = "analyzed";
+          }
+          updateConfirmPayload();
+          return result;
+        });
+      });
+
+      $("confirmBtn").addEventListener("click", () => {
+        run("确认配置", async () => {
+          const payload = JSON.parse($("confirmPayload").value || "{}");
+          const session = await requestSession(`/sdk/sessions/${getSessionId()}/confirm-template`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          state.session = session;
+          state.analysis = session.analysis || state.analysis;
+          return session;
+        });
+      });
+
+      $("promptBtn").addEventListener("click", () => {
+        run("生成 Prompt", async () => {
+          const result = await requestSession(
+            `/sdk/sessions/${getSessionId()}/prompt`,
+            profileRequestOptions(),
+          );
+          $("promptBox").textContent = result.prompt || "";
+          if (state.session) {
+            state.session.prompt = result.prompt;
+            state.session.state = "prompt_generated";
+          }
+          return result;
+        });
+      });
+
+      $("codeBtn").addEventListener("click", () => {
+        run("生成 Code", async () => {
+          const result = await requestSession(
+            `/sdk/sessions/${getSessionId()}/code`,
+            profileRequestOptions(),
+          );
+          $("codeBox").textContent = result.code || "";
+          if (state.session) {
+            state.session.cleaner_code = result.code;
+            state.session.state = "code_generated";
+          }
+          return result;
+        });
+      });
+
+      $("reloadBtn").addEventListener("click", () => {
+        run("读取 Session", async () => {
+          const session = await requestSession(`/sdk/sessions/${getSessionId()}`);
+          state.session = session;
+          state.analysis = session.analysis || null;
+          $("promptBox").textContent = session.prompt || "";
+          $("codeBox").textContent = session.cleaner_code || "";
+          updateConfirmPayload();
+          return session;
+        });
+      });
+
+      $("commitBtn").addEventListener("click", () => {
+        run("Commit", async () => {
+          if (!$("allowCommit").checked) {
+            throw new Error("请先勾选允许写入模板配置");
+          }
+          if (!state.session?.confirmed_template) {
+            throw new Error("请先完成确认配置");
+          }
+          if (!state.session?.prompt && !$("promptBox").textContent.trim()) {
+            throw new Error("请先生成 Prompt，避免后端使用 fallback prompt 写入");
+          }
+          const ok = window.confirm("Commit 会写入模板配置。确认只在测试环境执行？");
+          if (!ok) {
+            throw new Error("已取消 Commit");
+          }
+          const result = await requestSession(`/sdk/sessions/${getSessionId()}/commit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt: $("promptBox").textContent || null,
+              cleaner_code: $("codeBox").textContent || null,
+            }),
+          });
+          $("allowCommit").checked = false;
+          return result;
+        });
+      });
+
+      $("deleteBtn").addEventListener("click", () => {
+        run("删除 Session", async () => {
+          const result = await requestSession(`/sdk/sessions/${getSessionId()}`, {
+            method: "DELETE",
+          });
+          state.session = null;
+          state.analysis = null;
+          $("sessionId").value = "";
+          refreshSummary();
+          updateConfirmPayload();
+          return result;
+        });
+      });
+
+      $("clearLogBtn").addEventListener("click", () => {
+        $("logBox").textContent = "";
+      });
+
+      window.addEventListener("beforeunload", () => {
+        bearerToken = "";
+      });
+
+      loadProfiles();
+      refreshSummary();
+      readTokenFromStorage(false);
+      log("页面已加载");
+    </script>
+  </body>
+</html>

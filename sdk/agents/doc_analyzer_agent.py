@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List
 
-from sdk.models import DocumentAnalysis
+from sdk.models import DocumentAnalysis, SDKModelProfile
 from sdk.openai_agents_runtime import run_structured_agent
 
 
@@ -16,6 +16,7 @@ async def analyze_document(
     parse_text: str,
     file_name: str,
     tenants: List[Dict[str, Any]],
+    model_profile: SDKModelProfile | None = None,
 ) -> DocumentAnalysis:
     prompt = (
         f"文件名: {file_name}\n\n"
@@ -27,6 +28,7 @@ async def analyze_document(
         instructions=DOC_ANALYZER_INSTRUCTIONS,
         prompt=prompt,
         output_type=DocumentAnalysis,
+        model_profile=model_profile,
     )
     if isinstance(result, DocumentAnalysis):
         return result

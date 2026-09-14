@@ -24,6 +24,7 @@ from sdk.models import (
     DocumentAnalysis,
     ExcelTemplatePlaceholder,
     ParseRetryRequest,
+    SDKModelProfileRequest,
     SDKSessionResponse,
     SDKSessionState,
 )
@@ -279,6 +280,7 @@ async def retry_parse(
 @router.post("/sessions/{session_id}/analyze")
 async def analyze_session(
     session_id: str,
+    request: SDKModelProfileRequest | None = Body(default=None),
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
@@ -297,7 +299,11 @@ async def analyze_session(
     if not markdown:
         raise HTTPException(status_code=409, detail="解析结果为空，请重试解析")
 
-    analysis = await orchestrator.analyze_document(session, markdown)
+    analysis = await orchestrator.analyze_document(
+        session,
+        markdown,
+        model_profile=request.model_profile if request else None,
+    )
     if not isinstance(analysis, DocumentAnalysis):
         analysis = DocumentAnalysis.model_validate(analysis)
     _merge_excel_placeholder_fields(analysis, session.excel_placeholders)
@@ -324,11 +330,15 @@ async def confirm_template(
 @router.post("/sessions/{session_id}/prompt")
 async def generate_prompt(
     session_id: str,
+    request: SDKModelProfileRequest | None = Body(default=None),
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
     session = _get_session_or_404(session_id, user)
-    prompt = await orchestrator.generate_prompt(session)
+    prompt = await orchestrator.generate_prompt(
+        session,
+        model_profile=request.model_profile if request else None,
+    )
     session.prompt = prompt
     session.state = SDKSessionState.PROMPT_GENERATED
     session_store.save(session)
@@ -338,11 +348,15 @@ async def generate_prompt(
 @router.post("/sessions/{session_id}/code")
 async def generate_code(
     session_id: str,
+    request: SDKModelProfileRequest | None = Body(default=None),
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
     session = _get_session_or_404(session_id, user)
-    cleaner_code = await orchestrator.generate_code(session)
+    cleaner_code = await orchestrator.generate_code(
+        session,
+        model_profile=request.model_profile if request else None,
+    )
     session.cleaner_code = cleaner_code
     session.state = SDKSessionState.CODE_GENERATED
     session_store.save(session)

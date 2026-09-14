@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SDKSessionState(str, Enum):
@@ -71,6 +71,34 @@ class ConfirmTemplateRequest(BaseModel):
 class CommitSessionRequest(BaseModel):
     prompt: Optional[str] = None
     cleaner_code: Optional[str] = None
+
+
+class SDKModelProfile(BaseModel):
+    name: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+
+    @field_validator("name", "model", "base_url", "api_key", mode="before")
+    @classmethod
+    def _empty_string_to_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def _require_complete_provider_override(self):
+        provider_fields = (self.model, self.base_url, self.api_key)
+        provided = [value for value in provider_fields if value]
+        if provided and len(provided) != len(provider_fields):
+            raise ValueError("model、base_url、api_key 必须同时提供或同时省略")
+        return self
+
+
+class SDKModelProfileRequest(BaseModel):
+    model_profile: Optional[SDKModelProfile] = None
 
 
 class CommitResult(BaseModel):

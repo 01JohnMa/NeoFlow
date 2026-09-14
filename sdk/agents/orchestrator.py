@@ -11,6 +11,7 @@ from sdk.models import (
     CommitResult,
     ConfirmTemplateRequest,
     DocumentAnalysis,
+    SDKModelProfile,
     SDKSession,
     SDKSessionState,
 )
@@ -62,26 +63,45 @@ def build_configuration_definition(
 
 
 class SDKOrchestrator:
-    async def analyze_document(self, session: SDKSession, parse_text: str) -> DocumentAnalysis:
+    async def analyze_document(
+        self,
+        session: SDKSession,
+        parse_text: str,
+        *,
+        model_profile: SDKModelProfile | None = None,
+    ) -> DocumentAnalysis:
         tenants = await tenant_service.get_all_tenants(active_only=True)
         return await run_doc_analyzer(
             parse_text=parse_text,
             file_name=session.file_name,
             tenants=tenants,
+            model_profile=model_profile,
         )
 
-    async def generate_prompt(self, session: SDKSession) -> str:
+    async def generate_prompt(
+        self,
+        session: SDKSession,
+        *,
+        model_profile: SDKModelProfile | None = None,
+    ) -> str:
         if not session.confirmed_template:
             raise ValueError("请先确认模板信息")
         try:
-            return await run_prompt_agent(session.confirmed_template)
+            return await run_prompt_agent(session.confirmed_template, model_profile=model_profile)
         except Exception:
+            if model_profile:
+                raise
             return build_fallback_prompt(session.confirmed_template)
 
-    async def generate_code(self, session: SDKSession) -> str:
+    async def generate_code(
+        self,
+        session: SDKSession,
+        *,
+        model_profile: SDKModelProfile | None = None,
+    ) -> str:
         if not session.confirmed_template:
             raise ValueError("请先确认模板信息")
-        return await generate_cleaner_code(session.confirmed_template)
+        return await generate_cleaner_code(session.confirmed_template, model_profile=model_profile)
 
     async def commit(self, session: SDKSession) -> CommitResult:
         if not session.confirmed_template:

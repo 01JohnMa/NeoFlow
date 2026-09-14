@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from sdk.models import ConfirmTemplateRequest, SuggestedExample
+from sdk.models import ConfirmTemplateRequest, SDKModelProfile, SuggestedExample
 from sdk.openai_agents_runtime import run_structured_agent
 
 
@@ -45,7 +45,11 @@ OCR文本：
 {{ocr_text}}"""
 
 
-async def generate_prompt(confirmed: ConfirmTemplateRequest) -> str:
+async def generate_prompt(
+    confirmed: ConfirmTemplateRequest,
+    *,
+    model_profile: SDKModelProfile | None = None,
+) -> str:
     prompt = (
         f"模板名称: {confirmed.template_name}\n"
         f"模板 code: {confirmed.template_code}\n"
@@ -57,8 +61,9 @@ async def generate_prompt(confirmed: ConfirmTemplateRequest) -> str:
         instructions=PROMPT_AGENT_INSTRUCTIONS,
         prompt=prompt,
         output_type=PromptOutput,
+        model_profile=model_profile,
     )
     output = result if isinstance(result, PromptOutput) else PromptOutput.model_validate(result)
     if "{ocr_text}" not in output.prompt:
-        return build_fallback_prompt(confirmed)
+        raise ValueError("生成的 prompt 缺少 {ocr_text} 占位符")
     return output.prompt

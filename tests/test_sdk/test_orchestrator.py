@@ -6,6 +6,7 @@ from sdk.models import (
     ConfirmTemplateRequest,
     DocumentAnalysis,
     ExcelTemplatePlaceholder,
+    SDKModelProfile,
     SDKSession,
     SDKSessionState,
 )
@@ -35,9 +36,10 @@ async def test_analyze_uses_parse_markdown(monkeypatch):
     async def fake_tenants(active_only=True):
         return [{"id": "tenant-1", "name": "品质部", "code": "quality"}]
 
-    async def fake_run_doc_analyzer(*, parse_text, file_name, tenants):
+    async def fake_run_doc_analyzer(*, parse_text, file_name, tenants, model_profile=None):
         captured["parse_text"] = parse_text
         captured["file_name"] = file_name
+        captured["model_profile"] = model_profile
         return DocumentAnalysis(
             recommended_doc_type="检测报告",
             recommended_doc_code="inspection_report",
@@ -231,3 +233,219 @@ async def test_commit_uses_fallback_prompt_when_missing(monkeypatch):
         "placeholders": [],
     }
     assert result.revision_id == "rev-2"
+
+
+@pytest.mark.asyncio
+async def test_analyze_document_passes_model_profile_to_agent(monkeypatch):
+    captured = {}
+
+    async def fake_get_all_tenants(active_only=True):
+        assert active_only is True
+        return [{"id": "tenant-1", "name": "品质部"}]
+
+    async def fake_run_doc_analyzer(*, parse_text, file_name, tenants, model_profile):
+        captured["parse_text"] = parse_text
+        captured["file_name"] = file_name
+        captured["tenants"] = tenants
+        captured["model_profile"] = model_profile
+        return DocumentAnalysis(
+            recommended_doc_type="检测报告",
+            recommended_doc_code="inspection_report",
+            confidence=0.95,
+            recommended_tenant={
+                "suggest_name": "品质部",
+                "suggest_code": "quality",
+                "reason": "匹配已有部门",
+                "match_existing_tenant_id": "tenant-1",
+            },
+            detected_fields=[],
+            suggested_examples=[],
+        )
+
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.tenant_service.get_all_tenants",
+        fake_get_all_tenants,
+    )
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.run_doc_analyzer",
+        fake_run_doc_analyzer,
+    )
+
+    session = _build_session(user_id="user-1")
+    model_profile = SDKModelProfile(
+        name="step",
+        model="step-3.7-flash",
+        base_url="https://api.stepfun.ai/v1",
+        api_key="secret",
+        temperature=0.4,
+    )
+
+    result = await SDKOrchestrator().analyze_document(
+        session,
+        "样品名称：小型断路器",
+        model_profile=model_profile,
+    )
+
+    assert result.recommended_doc_type == "检测报告"
+    assert captured["parse_text"] == "样品名称：小型断路器"
+    assert captured["file_name"] == "scan.jpg"
+    assert captured["tenants"] == [{"id": "tenant-1", "name": "品质部"}]
+    assert captured["model_profile"] is model_profile
+
+
+@pytest.mark.asyncio
+async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
+    captured = {}
+
+    async def fake_run_prompt_agent(confirmed, *, model_profile):
+        captured["confirmed"] = confirmed
+        captured["model_profile"] = model_profile
+        return "请提取字段：sample_name\n{ocr_text}"
+
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.run_prompt_agent",
+        fake_run_prompt_agent,
+    )
+
+    session = _build_session(
+        user_id="user-1",
+        state=SDKSessionState.TEMPLATE_CONFIRMED,
+        confirmed_template=ConfirmTemplateRequest(
+            template_name="检测报告",
+            template_code="inspection_report",
+            tenant_id="tenant-1",
+            fields=[],
+        ),
+    )
+    model_profile = SDKModelProfile(
+        name="step",
+        model="step-3.7-flash",
+        base_url="https://api.stepfun.ai/v1",
+        api_key="secret",
+        temperature=0.4,
+    )
+
+    result = await SDKOrchestrator().generate_prompt(
+        session,
+        model_profile=model_profile,
+    )
+
+    assert result == "请提取字段：sample_name\n{ocr_text}"
+    assert captured["confirmed"] is session.confirmed_template
+    assert captured["model_profile"] is model_profile
+
+
+@pytest.mark.asyncio
+async def test_generate_code_passes_model_profile_to_agent(monkeypatch):
+    captured = {}
+
+    async def fake_generate_cleaner_code(confirmed, *, model_profile):
+        captured["confirmed"] = confirmed
+        captured["model_profile"] = model_profile
+        return "def clean_sample_name(value: str) -> str:\n    return value.strip()"
+
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.generate_cleaner_code",
+        fake_generate_cleaner_code,
+    )
+
+    session = _build_session(
+        user_id="user-1",
+        state=SDKSessionState.TEMPLATE_CONFIRMED,
+        confirmed_template=ConfirmTemplateRequest(
+            template_name="检测报告",
+            template_code="inspection_report",
+            tenant_id="tenant-1",
+            fields=[],
+        ),
+    )
+    model_profile = SDKModelProfile(
+        name="step",
+        model="step-3.7-flash",
+        base_url="https://api.stepfun.ai/v1",
+        api_key="secret",
+        temperature=0.4,
+    )
+
+    result = await SDKOrchestrator().generate_code(
+        session,
+        model_profile=model_profile,
+    )
+
+    assert result == "def clean_sample_name(value: str) -> str:\n    return value.strip()"
+    assert captured["confirmed"] is session.confirmed_template
+    assert captured["model_profile"] is model_profile
+
+
+@pytest.mark.asyncio
+async def test_generate_prompt_does_not_fallback_when_model_profile_is_used(monkeypatch):
+    async def fake_run_prompt_agent(confirmed, *, model_profile):
+        raise RuntimeError("provider rejected api key")
+
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.run_prompt_agent",
+        fake_run_prompt_agent,
+    )
+
+    session = _build_session(
+        user_id="user-1",
+        state=SDKSessionState.TEMPLATE_CONFIRMED,
+        confirmed_template=ConfirmTemplateRequest(
+            template_name="检测报告",
+            template_code="inspection_report",
+            tenant_id="tenant-1",
+            fields=[
+                {
+                    "field_key": "sample_name",
+                    "field_label": "样品名称",
+                    "field_type": "text",
+                    "extraction_hint": "从样品名称标签后提取",
+                }
+            ],
+        ),
+    )
+    model_profile = SDKModelProfile(
+        name="step",
+        model="step-3.7-flash",
+        base_url="https://api.stepfun.ai/v1",
+        api_key="secret",
+        temperature=0.4,
+    )
+
+    with pytest.raises(RuntimeError, match="provider rejected api key"):
+        await SDKOrchestrator().generate_prompt(session, model_profile=model_profile)
+
+
+@pytest.mark.asyncio
+async def test_generate_prompt_keeps_fallback_without_model_profile(monkeypatch):
+    async def fake_run_prompt_agent(confirmed, *, model_profile):
+        assert model_profile is None
+        raise RuntimeError("default provider unavailable")
+
+    monkeypatch.setattr(
+        "sdk.agents.orchestrator.run_prompt_agent",
+        fake_run_prompt_agent,
+    )
+
+    session = _build_session(
+        user_id="user-1",
+        state=SDKSessionState.TEMPLATE_CONFIRMED,
+        confirmed_template=ConfirmTemplateRequest(
+            template_name="检测报告",
+            template_code="inspection_report",
+            tenant_id="tenant-1",
+            fields=[
+                {
+                    "field_key": "sample_name",
+                    "field_label": "样品名称",
+                    "field_type": "text",
+                    "extraction_hint": "从样品名称标签后提取",
+                }
+            ],
+        ),
+    )
+
+    result = await SDKOrchestrator().generate_prompt(session)
+
+    assert "OCR文本" in result
+    assert "{ocr_text}" in result

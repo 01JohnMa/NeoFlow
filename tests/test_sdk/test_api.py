@@ -254,7 +254,7 @@ def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
 
     captured = {}
 
-    async def fake_analyze(session, parse_text):
+    async def fake_analyze(session, parse_text, **kwargs):
         captured["parse_text"] = parse_text
         return {
             "recommended_doc_type": "检测报告",
@@ -359,7 +359,7 @@ def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_
         "suggested_examples": [],
     }
 
-    async def fake_analyze(session, parse_text):
+    async def fake_analyze(session, parse_text, **kwargs):
         return analysis_payload
 
     monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
@@ -420,10 +420,10 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         ],
     }
 
-    async def fake_analyze(session, parse_text):
+    async def fake_analyze(session, parse_text, **kwargs):
         return analysis_payload
 
-    async def fake_generate_prompt(session):
+    async def fake_generate_prompt(session, **kwargs):
         return "请提取字段：sample_name\n{ocr_text}"
 
     commit_session_payload = {}
@@ -486,6 +486,111 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         "prompt": "管理员最终确认的 prompt\n{ocr_text}",
         "cleaner_code": "def clean_sample_name(value: str) -> str:\n    return value.strip()",
     }
+
+
+def test_llm_routes_pass_request_model_profile_without_returning_key(
+    admin_client,
+    monkeypatch,
+    tmp_path,
+):
+    analysis_payload = {
+        "recommended_doc_type": "检测报告",
+        "recommended_doc_code": "inspection_report",
+        "confidence": 0.95,
+        "recommended_tenant": {
+            "suggest_name": "品质部",
+            "suggest_code": "quality",
+            "reason": "文档中出现品质管理部",
+            "match_existing_tenant_id": TENANT_ID,
+        },
+        "detected_fields": [
+            {
+                "field_key": "sample_name",
+                "field_label": "样品名称",
+                "field_type": "text",
+                "extraction_hint": "位于样品名称标签后",
+                "review_enforced": False,
+                "review_allowed_values": None,
+                "sample_value": "小型断路器",
+            }
+        ],
+        "suggested_examples": [],
+    }
+    profile_payload = {
+        "name": "step-test",
+        "model": "step-3.7-flash",
+        "base_url": "https://api.stepfun.ai/v1",
+        "api_key": "profile-secret-key",
+        "temperature": 0.4,
+    }
+    captured_profiles = {}
+
+    async def fake_analyze(session, parse_text, *, model_profile):
+        captured_profiles["analyze"] = model_profile
+        return analysis_payload
+
+    async def fake_generate_prompt(session, *, model_profile):
+        captured_profiles["prompt"] = model_profile
+        return "请提取字段：sample_name\n{ocr_text}"
+
+    async def fake_generate_code(session, *, model_profile):
+        captured_profiles["code"] = model_profile
+        return "def clean_sample_name(value: str) -> str:\n    return value.strip()"
+
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row()
+    monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
+    monkeypatch.setattr(sdk_route.orchestrator, "generate_prompt", fake_generate_prompt)
+    monkeypatch.setattr(sdk_route.orchestrator, "generate_code", fake_generate_code)
+
+    create_response = admin_client.post(
+        "/api/sdk/sessions",
+        files={"file": ("report.pdf", b"%PDF-1.4 sample", "application/pdf")},
+    )
+    session_id = create_response.json()["id"]
+
+    analyze_response = admin_client.post(
+        f"/api/sdk/sessions/{session_id}/analyze",
+        json={"model_profile": profile_payload},
+    )
+    assert analyze_response.status_code == 200
+    assert "profile-secret-key" not in analyze_response.text
+
+    confirm_response = admin_client.post(
+        f"/api/sdk/sessions/{session_id}/confirm-template",
+        json={
+            "template_name": "检测报告",
+            "template_code": "inspection_report",
+            "description": "AI 生成模板",
+            "tenant_id": TENANT_ID,
+            "tenant_name": None,
+            "tenant_code": None,
+            "extraction_mode": "ocr_llm",
+            "per_page_extraction": False,
+            "fields": analysis_payload["detected_fields"],
+            "examples": [],
+        },
+    )
+    assert confirm_response.status_code == 200
+
+    prompt_response = admin_client.post(
+        f"/api/sdk/sessions/{session_id}/prompt",
+        json={"model_profile": profile_payload},
+    )
+    code_response = admin_client.post(
+        f"/api/sdk/sessions/{session_id}/code",
+        json={"model_profile": profile_payload},
+    )
+
+    assert prompt_response.status_code == 200
+    assert code_response.status_code == 200
+    assert "profile-secret-key" not in prompt_response.text
+    assert "profile-secret-key" not in code_response.text
+    assert [
+        captured_profiles[name].model_dump()
+        for name in ("analyze", "prompt", "code")
+    ] == [profile_payload, profile_payload, profile_payload]
 
 
 def test_sdk_routes_require_admin(client):
