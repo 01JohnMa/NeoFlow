@@ -5,8 +5,8 @@
 # ============================================================
 
 # ============ Web框架 ============
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
 python-multipart==0.0.32
 
 # ============ 数据验证 ============
@@ -27,13 +27,11 @@ langchain-openai==1.6.2
 langchain-core==1.6.3
 langgraph==1.2.11
 openai-agents==0.22.2
-mcp==1.11.0
-sse-starlette==3.0.3
+mcp>=1.19.0,<3
+sse-starlette>=3.0.3,<4
 
 # ============ 图像处理 ============
-opencv-python-headless==4.9.0.80
-Pillow==10.2.0
-pdf2image==1.17.0
+Pillow==11.3.0
 
 # ============ 异步与HTTP ============
 aiofiles==23.2.1
