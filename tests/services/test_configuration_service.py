@@ -391,6 +391,21 @@ class TestDefinitionHelpers:
         )
         assert "examples" not in definition
 
+    def test_normalize_definition_drops_legacy_cleaner_module(self):
+        definition = normalize_definition({"cleaner_module": "legacy.cleaner"})
+        assert "cleaner_module" not in definition
+
+    def test_merge_definition_ignores_legacy_dead_keys(self):
+        merged = merge_definition(
+            {},
+            {
+                "cleaner_module": "legacy.cleaner",
+                "examples": [{"example_input": "输入", "example_output": {"a": 1}}],
+            },
+        )
+        assert "cleaner_module" not in merged
+        assert "examples" not in merged
+
 
 class TestExtractionConfig:
     def test_build_extraction_config_maps_definition_and_defaults(self):
@@ -434,6 +449,7 @@ class TestExtractionConfig:
         assert config["auto_approve"] is True
         assert config["feishu"] == {"bitable_token": "app-token", "table_id": "tbl-1"}
         assert config["excel"]["path"] == "/uploads/template.xlsx"
+        assert "cleaner_module" not in config
 
     def test_build_extraction_config_empty_uses_defaults(self):
         config = build_extraction_config({"id": "c-1", "draft_definition": {}})
@@ -441,6 +457,7 @@ class TestExtractionConfig:
         assert "examples" not in config
         assert config["extraction_mode"] == "ocr_llm"
         assert config["output_mode"] == "bitable"
+        assert "cleaner_module" not in config
         assert config["push_attachment"] is True
 
     @pytest.mark.asyncio

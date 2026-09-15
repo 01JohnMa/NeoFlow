@@ -3,7 +3,6 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Code2,
   FileText,
   Plus,
   RefreshCw,
@@ -79,10 +78,8 @@ export function AiTemplateWizard({
   const [description, setDescription] = useState('')
   const [perPageExtraction, setPerPageExtraction] = useState(false)
   const [prompt, setPrompt] = useState('')
-  const [cleanerCode, setCleanerCode] = useState('')
   const [configRevision, setConfigRevision] = useState(0)
   const [promptRevision, setPromptRevision] = useState<number | null>(null)
-  const [codeRevision, setCodeRevision] = useState<number | null>(null)
   const [commitResult, setCommitResult] = useState<SDKCommitResult | null>(null)
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +91,6 @@ export function AiTemplateWizard({
   )
   const hasDuplicateFieldKeys = fieldKeys.length !== new Set(fieldKeys).size
   const promptIsCurrent = promptRevision === configRevision
-  const codeIsCurrent = codeRevision === configRevision
   const canCommit = Boolean(
     session
       && fields.length > 0
@@ -116,9 +112,7 @@ export function AiTemplateWizard({
 
   const resetGeneratedArtifacts = () => {
     setPrompt('')
-    setCleanerCode('')
     setPromptRevision(null)
-    setCodeRevision(null)
   }
 
   const resetAnalysisState = () => {
@@ -247,16 +241,6 @@ export function AiTemplateWizard({
     })
   }
 
-  const handleGenerateCode = () => {
-    if (!session || !canCommit) return
-    void runAction('code', async () => {
-      await confirmCurrentTemplate()
-      const generated = await sdkApi.generateSDKCode(session.id)
-      setCleanerCode(generated)
-      setCodeRevision(configRevision)
-    })
-  }
-
   const handleCommit = () => {
     if (!session || !canCommit) return
     void runAction('commit', async () => {
@@ -267,10 +251,7 @@ export function AiTemplateWizard({
         setPrompt(finalPrompt)
         setPromptRevision(configRevision)
       }
-      const result = await sdkApi.commitSDKSession(session.id, {
-        prompt: finalPrompt,
-        cleaner_code: codeIsCurrent ? cleanerCode || null : null,
-      })
+      const result = await sdkApi.commitSDKSession(session.id, { prompt: finalPrompt })
       setCommitResult(result)
       await onCommitted(result.configuration_id)
     })
@@ -703,16 +684,6 @@ export function AiTemplateWizard({
                 </Button>
                 <Button
                   size="sm"
-                  variant="secondary"
-                  onClick={handleGenerateCode}
-                  disabled={!canCommit}
-                  loading={loadingAction === 'code'}
-                >
-                  <Code2 className="h-4 w-4" />
-                  生成清洗代码
-                </Button>
-                <Button
-                  size="sm"
                   onClick={handleCommit}
                   disabled={!canCommit}
                   loading={loadingAction === 'commit'}
@@ -740,24 +711,6 @@ export function AiTemplateWizard({
                 </div>
               )}
 
-              {cleanerCode && (
-                <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="text-sm font-medium text-text-primary">清洗代码预览</div>
-                    {!codeIsCurrent && (
-                      <span className="text-xs text-warning-400">配置已更新</span>
-                    )}
-                  </div>
-                  <Textarea
-                    className="min-h-[220px] font-mono text-xs"
-                    value={cleanerCode}
-                    onChange={(e) => {
-                      setCleanerCode(e.target.value)
-                      setCodeRevision(configRevision)
-                    }}
-                  />
-                </div>
-              )}
             </>
           )}
 

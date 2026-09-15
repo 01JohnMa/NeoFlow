@@ -51,7 +51,6 @@ DEFAULT_DEFINITION: Dict[str, Any] = {
     "extraction_prompt": None,
     "extraction_mode": "ocr_llm",
     "per_page_extraction": False,
-    "cleaner_module": None,
     "output_mode": "bitable",
     "push_attachment": True,
     "auto_approve": False,
@@ -93,7 +92,7 @@ def normalize_definition(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]
     """
     base = deepcopy(DEFAULT_DEFINITION)
     for key, value in (definition or {}).items():
-        if key == "examples":
+        if key in {"examples", "cleaner_module"}:
             continue
         if key == "fields":
             base["fields"] = [normalize_field(item) for item in (value or [])]
@@ -118,6 +117,9 @@ def merge_definition(
     """
     merged = normalize_definition(base)
     for key, value in (patch or {}).items():
+        if key in {"examples", "cleaner_module"}:
+            # 历史死键：补丁携带时也忽略，避免重新注入 definition
+            continue
         if key in SECTION_KEYS and isinstance(value, dict):
             section = dict(merged.get(key) or {})
             section.update(value)
@@ -157,7 +159,6 @@ def build_extraction_config(
         "extraction_mode": definition["extraction_mode"],
         "per_page_extraction": definition["per_page_extraction"],
         "parse": definition["parse"],
-        "cleaner_module": definition["cleaner_module"],
         "output_mode": definition["output_mode"],
         "push_attachment": definition["push_attachment"],
         "auto_approve": definition["auto_approve"],

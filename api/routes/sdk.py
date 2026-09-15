@@ -43,7 +43,11 @@ def _require_admin(user: CurrentUser) -> None:
 
 async def _rebuild_session(session_id: str, user: CurrentUser):
     """内存缺失（例如服务重启）时，从解析 Job + 文档 + Parse Result 重建会话。"""
-    job = await get_job(session_id)
+    try:
+        job = await get_job(session_id)
+    except Exception:
+        # 非法 id（如非 UUID）等查询失败按“会话不存在”处理
+        return None
     if not job:
         return None
     document_ids = job.get("document_ids") or []
@@ -153,7 +157,6 @@ def _response(session, job=None) -> SDKSessionResponse:
         analysis=session.analysis,
         confirmed_template=session.confirmed_template,
         prompt=session.prompt,
-        cleaner_code=session.cleaner_code,
         commit_result=session.commit_result,
     )
 
@@ -481,24 +484,6 @@ async def generate_prompt(
     return {"success": True, "prompt": prompt}
 
 
-@router.post("/sessions/{session_id}/code")
-async def generate_code(
-    session_id: str,
-    request: SDKModelProfileRequest | None = Body(default=None),
-    user: CurrentUser = Depends(get_current_user),
-):
-    _require_admin(user)
-    session = await _load_session_or_404(session_id, user)
-    cleaner_code = await orchestrator.generate_code(
-        session,
-        model_profile=request.model_profile if request else None,
-    )
-    session.cleaner_code = cleaner_code
-    session.state = SDKSessionState.CODE_GENERATED
-    session_store.save(session)
-    return {"success": True, "code": cleaner_code}
-
-
 @router.post("/sessions/{session_id}/commit")
 async def commit_session(
     session_id: str,
@@ -510,8 +495,6 @@ async def commit_session(
     if request:
         if request.prompt is not None:
             session.prompt = request.prompt
-        if request.cleaner_code is not None:
-            session.cleaner_code = request.cleaner_code
     result = await orchestrator.commit(session)
     session.commit_result = result
     session.state = SDKSessionState.COMMITTED

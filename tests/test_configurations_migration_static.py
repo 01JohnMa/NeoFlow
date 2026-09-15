@@ -104,7 +104,6 @@ def test_definition_mapping_covers_legacy_template_columns():
         "extraction_prompt_template",
         "extraction_mode",
         "per_page_extraction",
-        "cleaner_module",
         "output_mode",
         "push_attachment",
         "auto_approve",
@@ -119,6 +118,8 @@ def test_definition_mapping_covers_legacy_template_columns():
 
     for key in DEFAULT_DEFINITION:
         assert f"'{key}'" in text, f"迁移 definition 缺少键: {key}"
+
+    assert "'cleaner_module'" not in text, "迁移 definition 不应再写入清洗模块字段"
 
 
 def test_migration_does_not_drop_or_rename_legacy_tables():

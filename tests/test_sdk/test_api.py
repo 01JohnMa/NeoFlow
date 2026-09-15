@@ -394,7 +394,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
 
     async def fake_commit(session):
         commit_session_payload["prompt"] = session.prompt
-        commit_session_payload["cleaner_code"] = session.cleaner_code
         return {
             "tenant_id": TENANT_ID,
             "configuration_id": "config-1",
@@ -434,7 +433,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         f"/api/sdk/sessions/{session_id}/commit",
         json={
             "prompt": "管理员最终确认的 prompt\n{ocr_text}",
-            "cleaner_code": "def clean_sample_name(value: str) -> str:\n    return value.strip()",
         },
     )
     assert commit_response.status_code == 200
@@ -442,7 +440,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
     assert commit_response.json()["commit_result"]["revision_id"] == "revision-1"
     assert commit_session_payload == {
         "prompt": "管理员最终确认的 prompt\n{ocr_text}",
-        "cleaner_code": "def clean_sample_name(value: str) -> str:\n    return value.strip()",
     }
 
 
@@ -481,16 +478,11 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
         captured_profiles["prompt"] = model_profile
         return "请提取字段：sample_name\n{ocr_text}"
 
-    async def fake_generate_code(session, *, model_profile):
-        captured_profiles["code"] = model_profile
-        return "def clean_sample_name(value: str) -> str:\n    return value.strip()"
-
     mocks = _patch_parse_env(monkeypatch, tmp_path)
     mocks["get_job"].return_value = {"status": "completed", "progress": 100}
     mocks["get_document_parse_result"].return_value = _parse_result_row()
     monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
     monkeypatch.setattr(sdk_route.orchestrator, "generate_prompt", fake_generate_prompt)
-    monkeypatch.setattr(sdk_route.orchestrator, "generate_code", fake_generate_code)
 
     create_response = admin_client.post(
         "/api/sdk/sessions",
@@ -526,19 +518,19 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
         f"/api/sdk/sessions/{session_id}/prompt",
         json={"model_profile": profile_payload},
     )
-    code_response = admin_client.post(
-        f"/api/sdk/sessions/{session_id}/code",
-        json={"model_profile": profile_payload},
-    )
 
     assert prompt_response.status_code == 200
-    assert code_response.status_code == 200
     assert "profile-secret-key" not in prompt_response.text
-    assert "profile-secret-key" not in code_response.text
     assert [
         captured_profiles[name].model_dump()
-        for name in ("analyze", "prompt", "code")
-    ] == [profile_payload, profile_payload, profile_payload]
+        for name in ("analyze", "prompt")
+    ] == [profile_payload, profile_payload]
+
+
+def test_cleaner_code_endpoint_removed(admin_client):
+    response = admin_client.post("/api/sdk/sessions/missing/code")
+
+    assert response.status_code == 404
 
 
 def test_sdk_routes_require_admin(client):
@@ -791,3 +783,11 @@ def test_analyze_returns_only_field_candidates(admin_client, monkeypatch, tmp_pa
     assert response.status_code == 200
     analysis = response.json()["analysis"]
     assert analysis == {"detected_fields": []}
+
+def test_get_session_with_unknown_id_returns_404(admin_client, monkeypatch, tmp_path):
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    mocks["get_job"].side_effect = Exception("invalid input syntax for type uuid")
+
+    response = admin_client.get("/api/sdk/sessions/not-a-uuid")
+
+    assert response.status_code == 404

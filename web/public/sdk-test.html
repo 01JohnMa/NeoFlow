@@ -478,7 +478,7 @@
                 id="profileApiKey"
                 type="password"
                 autocomplete="off"
-                placeholder="只随 analyze/prompt/code 请求发送"
+                placeholder="只随 analyze/prompt 请求发送"
               />
               <span class="field-note">API Key 只保留在当前输入框，不写入 localStorage。</span>
             </label>
@@ -510,7 +510,6 @@
             <button id="analyzeBtn" type="button">2. AI 分析</button>
             <button id="confirmBtn" type="button">3. 确认配置</button>
             <button id="promptBtn" type="button">4. 生成 Prompt</button>
-            <button id="codeBtn" type="button">5. 生成 Code</button>
             <button id="reloadBtn" type="button">读取 Session</button>
           </div>
 
@@ -520,7 +519,7 @@
           </label>
 
           <div class="actions">
-            <button id="commitBtn" class="danger" type="button">6. Commit</button>
+            <button id="commitBtn" class="danger" type="button">5. Commit</button>
             <button id="deleteBtn" class="danger" type="button">删除 Session</button>
           </div>
         </div>
@@ -567,15 +566,9 @@
             <textarea id="confirmPayload" style="min-height: 220px"></textarea>
           </div>
 
-          <div class="output-grid">
-            <div class="stack">
-              <h2>Prompt</h2>
-              <pre id="promptBox" class="codebox"></pre>
-            </div>
-            <div class="stack">
-              <h2>Cleaner Code</h2>
-              <pre id="codeBox" class="codebox"></pre>
-            </div>
+          <div class="stack">
+            <h2>Prompt</h2>
+            <pre id="promptBox" class="codebox"></pre>
           </div>
         </div>
       </section>
@@ -1270,28 +1263,12 @@
         });
       });
 
-      $("codeBtn").addEventListener("click", () => {
-        run("生成 Code", async () => {
-          const result = await requestSession(
-            `/sdk/sessions/${getSessionId()}/code`,
-            profileRequestOptions(),
-          );
-          $("codeBox").textContent = result.code || "";
-          if (state.session) {
-            state.session.cleaner_code = result.code;
-            state.session.state = "code_generated";
-          }
-          return result;
-        });
-      });
-
       $("reloadBtn").addEventListener("click", () => {
         run("读取 Session", async () => {
           const session = await requestSession(`/sdk/sessions/${getSessionId()}`);
           state.session = session;
           state.analysis = session.analysis || null;
           $("promptBox").textContent = session.prompt || "";
-          $("codeBox").textContent = session.cleaner_code || "";
           updateConfirmPayload();
           return session;
         });
@@ -1317,7 +1294,6 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               prompt: $("promptBox").textContent || null,
-              cleaner_code: $("codeBox").textContent || null,
             }),
           });
           $("allowCommit").checked = false;

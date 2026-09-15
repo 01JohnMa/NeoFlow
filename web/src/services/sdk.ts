@@ -79,16 +79,8 @@ export async function generateSDKPrompt(sessionId: string): Promise<string> {
   return data.prompt
 }
 
-export async function generateSDKCode(sessionId: string): Promise<string> {
-  const { data } = await api.post<{ success: boolean; code: string }>(
-    `/sdk/sessions/${sessionId}/code`,
-  )
-  return data.code
-}
-
 export interface SDKCommitPayload {
   prompt?: string | null
-  cleaner_code?: string | null
 }
 
 export async function commitSDKSession(

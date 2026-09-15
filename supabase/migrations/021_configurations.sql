@@ -264,7 +264,6 @@ AS $$
         'extraction_prompt', t.extraction_prompt_template,
         'extraction_mode', t.extraction_mode,
         'per_page_extraction', t.per_page_extraction,
-        'cleaner_module', t.cleaner_module,
         'output_mode', t.output_mode,
         'push_attachment', t.push_attachment,
         'auto_approve', t.auto_approve,

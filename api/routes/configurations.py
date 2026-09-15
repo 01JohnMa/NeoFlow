@@ -61,7 +61,6 @@ class ConfigurationDefinitionModel(BaseModel):
     extraction_prompt: Optional[str] = None
     extraction_mode: ExtractionMode = "ocr_llm"
     per_page_extraction: bool = False
-    cleaner_module: Optional[str] = None
     output_mode: OutputMode = "bitable"
     push_attachment: bool = True
     auto_approve: bool = False

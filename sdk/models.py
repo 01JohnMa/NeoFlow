@@ -13,7 +13,6 @@ class SDKSessionState(str, Enum):
     ANALYZED = "analyzed"
     TEMPLATE_CONFIRMED = "template_confirmed"
     PROMPT_GENERATED = "prompt_generated"
-    CODE_GENERATED = "code_generated"
     COMMITTED = "committed"
 
 
@@ -48,7 +47,6 @@ class ConfirmTemplateRequest(BaseModel):
 
 class CommitSessionRequest(BaseModel):
     prompt: Optional[str] = None
-    cleaner_code: Optional[str] = None
 
 
 class SDKModelProfile(BaseModel):
@@ -109,7 +107,6 @@ class SDKSession(BaseModel):
     analysis: Optional[DocumentAnalysis] = None
     confirmed_template: Optional[ConfirmTemplateRequest] = None
     prompt: Optional[str] = None
-    cleaner_code: Optional[str] = None
     commit_result: Optional[CommitResult] = None
 
 
@@ -131,7 +128,6 @@ class SDKSessionResponse(BaseModel):
     analysis: Optional[DocumentAnalysis] = None
     confirmed_template: Optional[ConfirmTemplateRequest] = None
     prompt: Optional[str] = None
-    cleaner_code: Optional[str] = None
     commit_result: Optional[CommitResult] = None
 
 

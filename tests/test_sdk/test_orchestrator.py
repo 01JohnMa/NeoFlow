@@ -306,48 +306,6 @@ async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_generate_code_passes_model_profile_to_agent(monkeypatch):
-    captured = {}
-
-    async def fake_generate_cleaner_code(confirmed, *, model_profile):
-        captured["confirmed"] = confirmed
-        captured["model_profile"] = model_profile
-        return "def clean_sample_name(value: str) -> str:\n    return value.strip()"
-
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.generate_cleaner_code",
-        fake_generate_cleaner_code,
-    )
-
-    session = _build_session(
-        user_id="user-1",
-        state=SDKSessionState.TEMPLATE_CONFIRMED,
-        confirmed_template=ConfirmTemplateRequest(
-            template_name="检测报告",
-            template_code="inspection_report",
-            tenant_id="tenant-1",
-            fields=[],
-        ),
-    )
-    model_profile = SDKModelProfile(
-        name="step",
-        model="step-3.7-flash",
-        base_url="https://api.stepfun.ai/v1",
-        api_key="secret",
-        temperature=0.4,
-    )
-
-    result = await SDKOrchestrator().generate_code(
-        session,
-        model_profile=model_profile,
-    )
-
-    assert result == "def clean_sample_name(value: str) -> str:\n    return value.strip()"
-    assert captured["confirmed"] is session.confirmed_template
-    assert captured["model_profile"] is model_profile
-
-
-@pytest.mark.asyncio
 async def test_generate_prompt_does_not_fallback_when_model_profile_is_used(monkeypatch):
     async def fake_run_prompt_agent(confirmed, *, model_profile):
         raise RuntimeError("provider rejected api key")

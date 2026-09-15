@@ -46,7 +46,6 @@ export interface ConfigurationDefinition {
   extraction_prompt: string | null
   extraction_mode: ExtractionMode
   per_page_extraction: boolean
-  cleaner_module: string | null
   output_mode: OutputMode
   push_attachment: boolean
   auto_approve: boolean
@@ -119,7 +118,6 @@ export type SDKSessionState =
   | 'analyzed'
   | 'template_confirmed'
   | 'prompt_generated'
-  | 'code_generated'
   | 'committed'
 
 export interface SDKDetectedField {
@@ -177,7 +175,6 @@ export interface SDKSession {
   analysis: SDKDocumentAnalysis | null
   confirmed_template: SDKConfirmTemplatePayload | null
   prompt: string | null
-  cleaner_code: string | null
   commit_result: SDKCommitResult | null
 }
 

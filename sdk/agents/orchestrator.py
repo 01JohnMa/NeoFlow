@@ -3,7 +3,6 @@
 from typing import Any, Dict
 
 from services.configuration_service import configuration_service
-from sdk.agents.code_agent import generate_cleaner_code
 from sdk.agents.doc_analyzer_agent import analyze_document as run_doc_analyzer
 from sdk.agents.prompt_agent import build_fallback_prompt, generate_prompt as run_prompt_agent
 from sdk.models import (
@@ -39,7 +38,6 @@ def build_configuration_definition(
         "extraction_prompt": prompt,
         "parse": {"model_version": session.parse_mode},
         "per_page_extraction": confirmed.per_page_extraction,
-        "cleaner_module": None,
         "output_mode": "both" if session.excel_template_path else "bitable",
         "excel": {
             "file_name": session.excel_template_file_name,
@@ -80,16 +78,6 @@ class SDKOrchestrator:
             if model_profile:
                 raise
             return build_fallback_prompt(session.confirmed_template)
-
-    async def generate_code(
-        self,
-        session: SDKSession,
-        *,
-        model_profile: SDKModelProfile | None = None,
-    ) -> str:
-        if not session.confirmed_template:
-            raise ValueError("请先确认模板信息")
-        return await generate_cleaner_code(session.confirmed_template, model_profile=model_profile)
 
     async def commit(self, session: SDKSession) -> CommitResult:
         if not session.confirmed_template:
