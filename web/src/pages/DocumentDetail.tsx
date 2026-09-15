@@ -8,6 +8,8 @@ import {
   useProcessDocument,
   useRenameDocument,
 } from '@/hooks/useDocuments'
+import { useProfile } from '@/hooks/useProfile'
+import { appendFieldExample } from '@/services/configurations'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -37,12 +39,154 @@ import {
   Eye,
   Pencil,
   Check,
+  Lightbulb,
 } from 'lucide-react'
 
 function getConfidenceColor(confidence: number): string {
   if (confidence > 0.8) return 'text-success-500'
   if (confidence > 0.6) return 'text-warning-500'
   return 'text-error-500'
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  const err = error as { response?: { data?: { detail?: string; error?: string } } }
+  const detail = err?.response?.data?.detail || err?.response?.data?.error
+  return typeof detail === 'string' && detail.trim() ? detail : fallback
+}
+
+const EXAMPLE_PREFIX = '示例：'
+
+function AppendExampleModal({
+  open,
+  field,
+  fieldValue,
+  sourceText,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  field: ConfigurationFieldForDetail | null
+  fieldValue: string
+  sourceText: string
+  onClose: () => void
+  onSubmit: (example: string) => Promise<void>
+}) {
+  const [example, setExample] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setExample(fieldValue.trim())
+      setError('')
+      setSubmitting(false)
+    }
+  }, [open, fieldValue])
+
+  const trimmed = example.trim()
+  const currentHint = field?.extraction_hint?.trim() ?? ''
+  const exampleLine = trimmed ? `${EXAMPLE_PREFIX}${trimmed}` : ''
+  const nextHint = exampleLine
+    ? currentHint.includes(exampleLine)
+      ? currentHint
+      : currentHint
+        ? `${currentHint}；${exampleLine}`
+        : exampleLine
+    : currentHint
+
+  const handleSubmit = async () => {
+    if (!trimmed) {
+      setError('示例内容不能为空')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      await onSubmit(trimmed)
+    } catch (err) {
+      setError(getApiErrorMessage(err, '补示例失败，请稍后重试'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!field) return null
+
+  return (
+    <Modal
+      open={open}
+      title={`补示例：${field.field_label}`}
+      onClose={onClose}
+      onConfirm={handleSubmit}
+      confirmText={submitting ? '保存中...' : '保存'}
+    >
+      <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto pr-1 text-sm">
+        <p className="text-text-muted">
+          把经验证的片段追加到字段描述，作为后续抽取的 few-shot；保存会发布一个新的配置 Revision。
+        </p>
+
+        <div>
+          <div className="flex items-center justify-between">
+            <Label>真实抽取结果</Label>
+            <button
+              type="button"
+              className="text-xs text-primary-400 hover:underline disabled:opacity-40"
+              disabled={!fieldValue.trim()}
+              onClick={() => setExample(fieldValue.trim())}
+            >
+              用此值
+            </button>
+          </div>
+          <p className="mt-1 rounded-lg bg-bg-secondary p-2 text-text-primary">
+            {fieldValue || '未识别'}
+          </p>
+        </div>
+
+        {sourceText && (
+          <div>
+            <div className="flex items-center justify-between">
+              <Label>解析片段</Label>
+              <button
+                type="button"
+                className="text-xs text-primary-400 hover:underline"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const selection = window.getSelection()?.toString().trim()
+                  if (selection) setExample(selection)
+                }}
+              >
+                用选中片段
+              </button>
+            </div>
+            <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-secondary p-2 text-xs text-text-secondary">
+              {sourceText}
+            </pre>
+          </div>
+        )}
+
+        <div>
+          <Label htmlFor="field-example">示例内容</Label>
+          <Textarea
+            id="field-example"
+            className="mt-1"
+            rows={2}
+            value={example}
+            onChange={(e) => setExample(e.target.value)}
+            placeholder="代表性片段或一句话描述"
+          />
+        </div>
+
+        <div>
+          <Label>更新后的字段描述</Label>
+          <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-bg-secondary p-2 text-xs text-text-secondary">
+            {nextHint || '（空）'}
+          </pre>
+        </div>
+
+        {error && <p className="text-error-500">{error}</p>}
+      </div>
+    </Modal>
+  )
 }
 
 export function DocumentDetail() {
@@ -87,6 +231,9 @@ export function DocumentDetail() {
   const deleteMutation = useDeleteDocument()
   const processMutation = useProcessDocument()
   const renameMutation = useRenameDocument()
+  const { isTenantAdmin } = useProfile()
+
+  const [exampleField, setExampleField] = useState<ConfigurationFieldForDetail | null>(null)
 
   // Initialize edit data when result loads
   useEffect(() => {
@@ -97,6 +244,7 @@ export function DocumentDetail() {
 
   const fields: ConfigurationFieldForDetail[] = result?.fields ?? []
   const hideDownload = shouldHideDownloadForType(status?.document_type || result?.document_type)
+  const canAppendExample = isTenantAdmin && result?.is_validated === true && !!result?.configuration_id
 
   // Handle field change
   const handleFieldChange = (key: string, value: string) => {
@@ -162,6 +310,22 @@ export function DocumentDetail() {
     if (!id) return
     await processMutation.mutateAsync({ documentId: id })
   }
+
+  // 把已审核结果的代表片段追加到字段描述（发布为新 Revision）
+  const handleAppendExample = async (example: string) => {
+    if (!result?.configuration_id || !exampleField) return
+    await appendFieldExample(result.configuration_id, exampleField.field_key, example)
+    setExampleField(null)
+    setModalMessage('示例已追加到字段描述并发布为新 Revision，后续抽取将使用更新后的描述。')
+    setIsModalOpen(true)
+    refetchResult()
+  }
+
+  const exampleFieldValue = (() => {
+    if (!exampleField) return ''
+    const raw = editedData[exampleField.field_key]
+    return Array.isArray(raw) ? raw.join('\n') : String(raw ?? '')
+  })()
 
   // 开始重命名
   const startRenaming = () => {
@@ -473,18 +637,31 @@ export function DocumentDetail() {
 
                   return (
                     <div key={field.field_key}>
-                      <Label
-                        htmlFor={`field-${field.field_key}`}
-                        className={cn(
-                          isChanged && 'text-warning-500',
-                          needsHighlight && 'text-orange-500 font-semibold'
+                      <div className="flex items-center justify-between gap-2">
+                        <Label
+                          htmlFor={`field-${field.field_key}`}
+                          className={cn(
+                            isChanged && 'text-warning-500',
+                            needsHighlight && 'text-orange-500 font-semibold'
+                          )}
+                        >
+                          {field.field_label}
+                          {field.is_required && <span className="ml-1 text-error-500">*</span>}
+                          {isChanged && <span className="ml-2 text-xs">(已修改)</span>}
+                          {needsHighlight && <span className="ml-2 text-xs animate-pulse">(待审核确认)</span>}
+                        </Label>
+                        {canAppendExample && (
+                          <button
+                            type="button"
+                            title="把已审核的代表片段追加到字段描述"
+                            onClick={() => setExampleField(field)}
+                            className="inline-flex flex-shrink-0 items-center gap-1 text-xs text-primary-400 hover:underline"
+                          >
+                            <Lightbulb className="h-3.5 w-3.5" />
+                            补示例
+                          </button>
                         )}
-                      >
-                        {field.field_label}
-                        {field.is_required && <span className="ml-1 text-error-500">*</span>}
-                        {isChanged && <span className="ml-2 text-xs">(已修改)</span>}
-                        {needsHighlight && <span className="ml-2 text-xs animate-pulse">(待审核确认)</span>}
-                      </Label>
+                      </div>
                       {isEditing ? (
                         <Input
                           id={`field-${field.field_key}`}
@@ -602,6 +779,15 @@ export function DocumentDetail() {
           })}
         </ul>
       </Modal>
+
+      <AppendExampleModal
+        open={exampleField !== null}
+        field={exampleField}
+        fieldValue={exampleFieldValue}
+        sourceText={result?.ocr_text ?? ''}
+        onClose={() => setExampleField(null)}
+        onSubmit={handleAppendExample}
+      />
 
       <Modal
         open={isModalOpen}

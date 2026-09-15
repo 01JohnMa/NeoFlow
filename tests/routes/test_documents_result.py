@@ -64,6 +64,7 @@ class TestDocumentResultRead:
                         "field_label": "样品名称",
                         "field_type": "text",
                         "sort_order": 1,
+                        "extraction_hint": "位于样品名称标签后",
                     },
                 ],
             })
@@ -78,7 +79,9 @@ class TestDocumentResultRead:
         assert body["is_validated"] is True
         assert body["created_at"] == "2026-01-02T00:00:00+00:00"
         assert body["ocr_text"] == "OCR 文本"
+        assert body["configuration_id"] == TEMPLATE_ID
         assert body["fields"][0]["field_key"] == "sample_name"
+        assert body["fields"][0]["extraction_hint"] == "位于样品名称标签后"
         mock_result_service.get_document_result.assert_awaited_once_with(
             DOCUMENT_ID, tenant_id=TENANT_ID
         )

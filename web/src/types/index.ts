@@ -253,11 +253,13 @@ export interface ConfigurationFieldForDetail {
   sort_order: number
   review_enforced: boolean
   review_allowed_values: string[] | null
+  extraction_hint?: string
 }
 
 export interface ExtractionResultResponse {
   document_id: string
   document_type: string
+  configuration_id?: string | null
   extraction_data: Record<string, unknown>
   ocr_text: string
   ocr_confidence: number | null

@@ -7,7 +7,10 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+from services.base import build_extraction_prompt
 from services.configuration_service import (
+    ConfigurationFieldNotFound,
+    ConfigurationNotFound,
     ConfigurationService,
     ConfigurationStateError,
     build_extraction_config,
@@ -316,6 +319,90 @@ class TestPublishLifecycle:
         assert definition["fields"][0]["field_key"] == "a"
         assert definition["feishu"] == {"bitable_token": "token-1", "table_id": "table-2"}
         assert definition["auto_approve"] is True
+
+
+class TestFieldExamples:
+    async def _published(self, svc, hint="位于样品名称标签后"):
+        created = await svc.create_configuration(_create(definition={
+            "fields": [{
+                "field_key": "sample_name",
+                "field_label": "样品名称",
+                "extraction_hint": hint,
+            }],
+            "extraction_prompt": None,
+        }))
+        return await svc.publish_configuration(created["id"], created_by=USER_ID)
+
+    @pytest.mark.asyncio
+    async def test_append_example_creates_new_revision_keeping_old(self, service):
+        svc, _ = service
+        published = await self._published(svc)
+        configuration_id = published["configuration"]["id"]
+
+        result = await svc.append_field_example(
+            configuration_id, "sample_name", "LED 灯", created_by=USER_ID,
+        )
+
+        revision = result["revision"]
+        assert revision["revision_number"] == 2
+        assert result["configuration"]["status"] == "published"
+        assert result["configuration"]["current_revision_id"] == revision["id"]
+        assert "示例：LED 灯" in revision["definition"]["fields"][0]["extraction_hint"]
+
+        old = await svc.get_revision(published["revision"]["id"])
+        assert "示例" not in old["definition"]["fields"][0]["extraction_hint"]
+
+    @pytest.mark.asyncio
+    async def test_updated_hint_reaches_extraction_prompt(self, service):
+        svc, _ = service
+        published = await self._published(svc)
+        configuration_id = published["configuration"]["id"]
+
+        appended = await svc.append_field_example(configuration_id, "sample_name", "LED 灯")
+
+        config = await svc.get_extraction_configuration(configuration_id)
+        assert config["revision_id"] == appended["revision"]["id"]
+        assert "示例：LED 灯" in config["fields"][0]["extraction_hint"]
+
+        prompt = build_extraction_prompt(config, "样品名称：LED 灯")
+        assert "示例：LED 灯" in prompt
+
+    @pytest.mark.asyncio
+    async def test_append_same_example_is_idempotent(self, service):
+        svc, _ = service
+        published = await self._published(svc)
+        configuration_id = published["configuration"]["id"]
+
+        first = await svc.append_field_example(configuration_id, "sample_name", "LED 灯")
+        second = await svc.append_field_example(configuration_id, "sample_name", "  LED 灯  ")
+
+        assert second["revision"]["id"] == first["revision"]["id"]
+        assert len(await svc.list_revisions(configuration_id)) == 2
+
+    @pytest.mark.asyncio
+    async def test_append_example_missing_field_rejected(self, service):
+        svc, _ = service
+        published = await self._published(svc)
+        with pytest.raises(ConfigurationFieldNotFound):
+            await svc.append_field_example(
+                published["configuration"]["id"], "unknown_field", "x",
+            )
+
+    @pytest.mark.asyncio
+    async def test_append_example_archived_rejected(self, service):
+        svc, _ = service
+        published = await self._published(svc)
+        configuration_id = published["configuration"]["id"]
+        await svc.archive_configuration(configuration_id)
+
+        with pytest.raises(ConfigurationStateError):
+            await svc.append_field_example(configuration_id, "sample_name", "LED 灯")
+
+    @pytest.mark.asyncio
+    async def test_append_example_unknown_configuration(self, service):
+        svc, _ = service
+        with pytest.raises(ConfigurationNotFound):
+            await svc.append_field_example("missing-config", "sample_name", "LED 灯")
 
 
 class TestArchive:

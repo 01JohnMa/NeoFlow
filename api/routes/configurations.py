@@ -4,10 +4,11 @@
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from services.configuration_service import (
     configuration_service,
+    ConfigurationFieldNotFound,
     ConfigurationNotFound,
     ConfigurationStateError,
 )
@@ -84,6 +85,18 @@ class UpdateConfigurationRequest(BaseModel):
     description: Optional[str] = None
     type: Optional[ConfigurationType] = None
     definition: Optional[ConfigurationDefinitionModel] = None
+
+
+class AppendFieldExampleRequest(BaseModel):
+    example: str = Field(min_length=1, max_length=500)
+
+    @field_validator("example")
+    @classmethod
+    def _strip_example(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("示例内容不能为空")
+        return stripped
 
 
 # ============ 权限辅助 ============
@@ -239,6 +252,40 @@ async def archive_configuration(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     return {"success": True, "data": configuration}
+
+
+# ============ 字段示例（从已审核结果写回 few-shot） ============
+
+@router.post("/{configuration_id}/fields/{field_key}/examples")
+async def append_field_example(
+    configuration_id: str,
+    field_key: str,
+    request: AppendFieldExampleRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    把经验证的片段追加到字段描述，并以新 Revision 保存。
+
+    已发布 Revision 不被就地修改：定义先落入 draft，随即发布生成新 Revision。
+    """
+    _require_admin(user)
+    await _require_configuration_access(configuration_id, user)
+
+    try:
+        result = await configuration_service.append_field_example(
+            configuration_id,
+            field_key,
+            request.example,
+            created_by=user.user_id,
+        )
+    except ConfigurationNotFound:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    except ConfigurationFieldNotFound:
+        raise HTTPException(status_code=404, detail="字段不存在")
+    except ConfigurationStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return {"success": True, "data": result}
 
 
 # ============ Revision（只读） ============

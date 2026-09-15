@@ -61,6 +61,10 @@ DEFAULT_DEFINITION: Dict[str, Any] = {
 
 SECTION_KEYS = ("feishu", "excel", "parse")
 
+# 字段示例（few-shot）追加前缀：单行写入 extraction_hint，保持 prompt 字段表行完整
+FIELD_EXAMPLE_PREFIX = "示例："
+FIELD_EXAMPLE_SEPARATOR = "；"
+
 
 class ConfigurationError(Exception):
     """配置领域异常基类"""
@@ -72,6 +76,10 @@ class ConfigurationNotFound(ConfigurationError):
 
 class ConfigurationStateError(ConfigurationError):
     """配置生命周期状态不允许当前操作"""
+
+
+class ConfigurationFieldNotFound(ConfigurationError):
+    """配置 definition 中不存在指定字段"""
 
 
 def normalize_field(field: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -567,6 +575,51 @@ class ConfigurationService(SupabaseClientMixin):
             "current_revision_id": revision.get("id"),
         }
         return {"configuration": updated, "revision": revision}
+
+    async def append_field_example(
+        self,
+        configuration_id: str,
+        field_key: str,
+        example: str,
+        created_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        把一条经验证的示例追加到字段描述，并以新 Revision 发布。
+
+        - 只改 draft_definition，再走发布流程，历史 Revision 永不被修改
+        - 示例以「示例：<内容>」单行追加，重复内容幂等（不产生新 Revision）
+        - 后续抽取经 get_extraction_configuration 读取更新后的描述
+        """
+        configuration = await self.get_configuration(configuration_id)
+        if not configuration:
+            raise ConfigurationNotFound("配置不存在")
+        if configuration["status"] == "archived":
+            raise ConfigurationStateError("已归档的配置不可修改")
+
+        definition = normalize_definition(configuration.get("draft_definition"))
+        target = next(
+            (f for f in definition["fields"] if f.get("field_key") == field_key),
+            None,
+        )
+        if target is None:
+            raise ConfigurationFieldNotFound(f"字段不存在: {field_key}")
+
+        example_line = f"{FIELD_EXAMPLE_PREFIX}{example.strip()}"
+        hint = (target.get("extraction_hint") or "").strip()
+        if example_line in hint:
+            revision = None
+            if configuration.get("current_revision_id"):
+                revision = await self.get_revision(configuration["current_revision_id"])
+            return {"configuration": configuration, "revision": revision}
+
+        target["extraction_hint"] = (
+            f"{hint}{FIELD_EXAMPLE_SEPARATOR}{example_line}" if hint else example_line
+        )
+        await self.update_configuration(
+            configuration_id,
+            {"definition": {"fields": definition["fields"]}},
+        )
+        return await self.publish_configuration(configuration_id, created_by=created_by)
 
     async def archive_configuration(self, configuration_id: str) -> Dict[str, Any]:
         """归档配置（幂等）；归档后不可再修改或发布。"""

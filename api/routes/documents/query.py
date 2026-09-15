@@ -170,6 +170,7 @@ async def get_extraction_result(
         #   2. fields             — 完整白名单字段列表，供前端详情页纯配置驱动渲染
         review_hint_fields = []
         fields_payload = []
+        configuration_id: Optional[str] = None
         template_id = document.get("template_id")
         tenant_id = document.get("tenant_id")
         try:
@@ -185,6 +186,7 @@ async def get_extraction_result(
                     tenant_id, document_type
                 )
             if configuration:
+                configuration_id = configuration.get("id")
                 fields_list = configuration.get("fields") or []
             for field in fields_list:
                 allowed = parse_allowed_values(field.get("review_allowed_values"))
@@ -204,6 +206,7 @@ async def get_extraction_result(
                     "sort_order": f.get("sort_order", 0),
                     "review_enforced": bool(f.get("review_enforced", False)),
                     "review_allowed_values": parse_allowed_values(f.get("review_allowed_values")),
+                    "extraction_hint": f.get("extraction_hint") or "",
                 }
                 for f in sorted(fields_list, key=lambda x: x.get("sort_order", 0))
             ]
@@ -213,6 +216,7 @@ async def get_extraction_result(
         return {
             "document_id": document_id,
             "document_type": document_type,
+            "configuration_id": configuration_id,
             "extraction_data": extraction_data,
             "ocr_text": ocr_text[:1000] if ocr_text else "",
             "ocr_confidence": document.get("ocr_confidence"),
