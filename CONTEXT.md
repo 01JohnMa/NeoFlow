@@ -31,8 +31,8 @@ The derivation of field values from one source document under a Configuration's 
 _Avoid_: OCR result, LLM response
 
 **Extraction Result**:
-The structured, provenance-aware values produced for one logical sample by Extraction or Composite Extraction.
-_Avoid_: raw JSON, business table row
+The structured, provenance-aware values produced for one Document execution by Extraction. NeoFlow 2.0 does not define business-level sample semantics in this contract.
+_Avoid_: raw JSON, business table row, per-page sample
 
 **Parse Result**:
 The page- and block-structured markdown produced for one Document by Parsing, and the sole input to Extraction. Stored per Document and reused by every Configuration that consumes that Document.
@@ -75,16 +75,12 @@ _Avoid_: untyped dictionary entry
 ## Composite processing
 
 **Composite Extraction**:
-An extraction request containing multiple source documents or page-level samples whose results are aligned into one or more logical samples.
-_Avoid_: generic merge mode, paired batch
-
-**Merge Strategy**:
-A deterministic policy that defines sample alignment, cardinality, conflict precedence, and missing-value behavior for Composite Extraction.
-_Avoid_: `{**a, **b}`, merge helper
+A future, explicitly scoped operation for combining multiple source documents. It is not part of the NeoFlow 2.0 document-processing contract.
+_Avoid_: generic merge mode, paired batch, sample alignment
 
 **Logical Sample**:
-The unit of structured output representing one sample after Extraction or Composite Extraction. A single source document may produce one or many Logical Samples.
-_Avoid_: synthetic document, extra document
+A deferred business concept. NeoFlow 2.0 does not use it as a Result, review, or routing contract; a future business context must define it separately before implementation.
+_Avoid_: per-page sample, implicit sample key
 
 **Provenance**:
 The source document, page, or extraction attempt that explains where a Field Value came from.
@@ -101,7 +97,7 @@ The Configuration-owned rules that decide which approved values and source artif
 _Avoid_: push logic
 
 **Output Adapter**:
-An Adapter that translates an approved Logical Sample into an external sink such as Feishu or a fixed Excel document.
+An Adapter that translates an approved Extraction Result into an external sink such as Feishu or a fixed Excel document.
 _Avoid_: provider-specific route
 
 **Business Adapter**:
