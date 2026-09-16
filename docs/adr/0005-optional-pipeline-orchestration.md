@@ -16,6 +16,6 @@ NeoFlow supports both single-capability calls and optional pipelines through the
 - Each template-based step Job fixes one Configuration Revision at creation time, and each parameterized capability step fixes an execution spec (ADR-0007). A retry re-executes that same definition; changing it creates a new Job or pipeline run.
 - A step failure stops dependent steps. Independent steps may finish, and the orchestration reports partial success with each step's terminal state and Result.
 - A pipeline is complete only when every declared step is terminal. Cancellation prevents queued steps from starting and leaves completed Results addressable.
-- Job and Result identity remains document/job/revision based. The core pipeline contract has no sample, per-page-as-sample, sample-alignment, or business merge semantics.
+- Job and Result identity remains document/job/execution-definition based. The core pipeline contract has no sample, per-page-as-sample, sample-alignment, or business merge semantics.
 
 This design follows the LlamaParse/LlamaExtract separation of asynchronous parse and extraction jobs while keeping NeoFlow's existing persistence and tenant boundaries. Any business-specific composition must be introduced through an explicit adapter or a later ADR rather than a route or worker branch.

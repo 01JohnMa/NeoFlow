@@ -14,7 +14,7 @@ An **execution spec** is Job data, not a publishable object: capability and spec
 
 ## Consequences
 
-- A Parse Job's execution identity is its recorded parameter snapshot plus the Parse Result's engine metadata, not a pinned Revision. ADR-0005's "every step Job pins one Revision" continues to apply to template-based capabilities (Extract, and future schemaed steps); parse steps bind their parameter snapshot.
+- A Parse Job's execution identity is its recorded parameter snapshot, not a pinned Revision; the Parse Result's engine metadata observes what actually ran and is never part of the submission identity. ADR-0005's "every step Job pins one Revision" continues to apply to template-based capabilities (Extract, and future schemaed steps); parse steps bind their parameter snapshot.
 - Input selection — documents and page ranges — is Job data. Page ranges never need a configuration version.
-- The race class where concurrent runs mutate a shared definition cannot occur for Parse; reproducibility relies on the recorded parameters and engine metadata, so any future parse parameter must be recorded on the Job.
+- The race class where concurrent runs mutate a shared definition cannot occur for Parse; reproducibility relies on the recorded parameters, with engine metadata as observation, so any future parse parameter must be recorded on the Job.
 - The Parse console and the external parse contract accept the same parameters: one request, one Job, one parameter snapshot.
