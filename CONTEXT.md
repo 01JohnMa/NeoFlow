@@ -49,11 +49,11 @@ A project-owned, reusable definition of one document-processing operation. Its C
 _Avoid_: Template, department-specific application
 
 **Configuration Type**:
-The operation family defined by a Configuration, such as Parse, Extract, Classify, Split, or Composite Extraction. Each type has its own parameter contract while sharing ownership and revision rules.
+The operation family defined by a Configuration, such as Extract, Classify, Split, or Composite Extraction. Each type has its own parameter contract while sharing ownership and revision rules. Parse is a parameterized capability rather than a Configuration Type (ADR-0007); historical parse configurations remain readable.
 _Avoid_: application type, route type
 
 **Configuration Revision**:
-An immutable historical form of a Configuration. Every Processing Job runs exactly one Configuration Revision.
+An immutable historical form of a Configuration. A template-based Processing Job runs exactly one Configuration Revision; a parameterized capability records an execution spec instead (ADR-0007).
 _Avoid_: mutable configuration snapshot, current template
 
 **Configuration Drafting**:
@@ -61,7 +61,7 @@ The interactive flow that proposes a draft Field Schema (and later an extraction
 _Avoid_: AI wizard, auto template, SDK session
 
 **Processing Job**:
-An execution request that applies one Configuration Revision to a defined set of input Documents.
+An execution request that applies one immutable execution definition — a Configuration Revision for template-based capabilities, or a recorded execution spec for parameterized capabilities — to a defined set of input Documents.
 _Avoid_: background task, batch record
 
 **Field Schema**:

@@ -1,8 +1,8 @@
 # Model pipelines as ordered capability Jobs
 
-**Status: accepted**
+**Status: accepted (amended by ADR-0007)**
 
-NeoFlow supports both single-capability calls and optional pipelines through the same Configuration, immutable Revision, Processing Job, and Result contracts. A single-capability call creates one Job bound to one Configuration Revision; a pipeline creates an orchestration record plus ordered step Jobs, where every step Job is independently bound to the Revision it executes and writes its own Result. This preserves the current JobRunner seam while making retries and step-level observability explicit.
+NeoFlow supports both single-capability calls and optional pipelines through the same Configuration, immutable Revision, Processing Job, and Result contracts. A single-capability call creates one Job bound to its execution definition; a pipeline creates an orchestration record plus ordered step Jobs, where every step Job is independently bound to the definition it executes — a Configuration Revision for template-based capabilities, or a recorded execution spec for parameterized capabilities (ADR-0007) — and writes its own Result. This preserves the current JobRunner seam while making retries and step-level observability explicit.
 
 ## Step contracts
 
@@ -13,7 +13,7 @@ NeoFlow supports both single-capability calls and optional pipelines through the
 
 ## Revision, retry, and failure semantics
 
-- Each step Job fixes one Configuration Revision at creation time. A retry re-executes that same Revision; changing configuration creates a new Job or pipeline run.
+- Each template-based step Job fixes one Configuration Revision at creation time, and each parameterized capability step fixes an execution spec (ADR-0007). A retry re-executes that same definition; changing it creates a new Job or pipeline run.
 - A step failure stops dependent steps. Independent steps may finish, and the orchestration reports partial success with each step's terminal state and Result.
 - A pipeline is complete only when every declared step is terminal. Cancellation prevents queued steps from starting and leaves completed Results addressable.
 - Job and Result identity remains document/job/revision based. The core pipeline contract has no sample, per-page-as-sample, sample-alignment, or business merge semantics.
