@@ -39,7 +39,7 @@ The page- and block-structured markdown produced for one Document by Parsing, an
 _Avoid_: OCR text, raw text
 
 **Parse Mode**:
-The parsing pipeline a Parse job runs — fast (`pipeline`) or high-precision (`vlm`) — chosen by the operator, never inferred.
+The parsing pipeline a Parse job runs — fast (`pipeline`) or high-precision (`vlm`). It is never inferred from document content; it may be supplied by the caller or defaulted by tenant policy.
 _Avoid_: tier, model version, OCR mode
 
 ## Configurations and fields
