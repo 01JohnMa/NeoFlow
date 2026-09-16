@@ -4,6 +4,8 @@
 
 Parse has no business template: its output is generic markdown, and its configurable surface is a small parameter set (Parse Mode today; input and processing options later). It therefore does not get a Configuration/Revision object, and the system Parse Configuration plus the run-time republishing path (`ensure_parse_revision`) are removed. A Parse Job records the parameters it ran under, a tenant-level parse policy bounds what may be requested (allowed modes, defaults, batch and concurrency limits), and job dispatch is by capability rather than by a mutable Configuration. Extraction keeps revisioned templates because a Field Schema is authored business knowledge that must be reviewed and replayed; this split is deliberate — a template where the definition carries business semantics, policy plus a parameter snapshot where it does not.
 
+One Parse Job parses exactly one Document; a request covering several Documents creates one Job per Document plus one request record grouping them, so per-file status, failure, and provenance need no separate execution-item entity.
+
 An **execution spec** is Job data, not a publishable object: capability and spec schema version, the immutable input identity (documents plus normalized input selection), the effective parameters after policy and default resolution, and the accepted policy version. The worker reads only the frozen effective parameters; a later policy change may refuse execution but never silently substitutes parameters. Results record observed engine information and the producing attempt; they never define submission identity.
 
 ## Considered Options
