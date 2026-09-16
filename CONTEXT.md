@@ -38,6 +38,10 @@ _Avoid_: raw JSON, business table row
 The page- and block-structured markdown produced for one Document by Parsing, and the sole input to Extraction. Stored per Document and reused by every Configuration that consumes that Document.
 _Avoid_: OCR text, raw text
 
+**Parse Mode**:
+The parsing pipeline a Parse job runs — fast (`pipeline`) or high-precision (`vlm`) — chosen by the operator, never inferred.
+_Avoid_: tier, model version, OCR mode
+
 ## Configurations and fields
 
 **Configuration**:
