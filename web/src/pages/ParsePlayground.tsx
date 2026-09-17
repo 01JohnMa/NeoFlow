@@ -17,7 +17,6 @@ import {
   ChevronRight,
   Copy,
   Download,
-  FileText,
   History,
   Maximize2,
   Play,
@@ -289,6 +288,7 @@ export function ParsePlayground() {
   const [targetPages, setTargetPages] = useState('')
   const [activeTab, setActiveTab] = useState<'build' | 'results'>('build')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [dragging, setDragging] = useState(false)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState('')
   const [page, setPage] = useState(1)
@@ -664,9 +664,35 @@ export function ParsePlayground() {
               onPageChange={(next) => setPage(Math.max(1, pageCount ? Math.min(next, pageCount) : next))}
             />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg-secondary text-text-muted">
-              <FileText className="h-10 w-10 opacity-40" />
-              <p className="text-sm">上传文档或从 History 打开一次解析</p>
+            <div
+              className="flex h-full flex-col items-center justify-center bg-bg-secondary p-8"
+              onDragOver={(event) => {
+                event.preventDefault()
+                setDragging(true)
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault()
+                setDragging(false)
+                if (event.dataTransfer.files?.length) void handleFiles(event.dataTransfer.files)
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className={cn(
+                  'flex w-full max-w-xl flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-8 py-16 transition-colors',
+                  dragging
+                    ? 'border-primary-500 bg-primary-500/10'
+                    : 'border-border-default hover:border-primary-500/50 hover:bg-bg-hover',
+                )}
+              >
+                <Upload className={cn('h-9 w-9', dragging ? 'text-primary-400' : 'text-text-muted')} />
+                <span className="text-sm font-medium text-text-primary">
+                  {dragging ? '松开即可上传' : '拖拽文件到此处上传'}
+                </span>
+                <span className="text-xs text-text-muted">或点击选择文件 · PDF / PNG / JPG / TIFF / BMP</span>
+              </button>
             </div>
           )}
         </div>
