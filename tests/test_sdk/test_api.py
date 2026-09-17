@@ -110,16 +110,21 @@ def _patch_parse_env(monkeypatch, tmp_path) -> dict:
     """把创建会话所需的解析依赖全部替换掉，返回可断言的 mock 集合。"""
     mocks = {
         "create_document": AsyncMock(return_value={"id": "doc"}),
-        "create_job": AsyncMock(return_value="job-1"),
-        "ensure_parse_revision": AsyncMock(return_value={"id": "revision-1"}),
+        "admit": AsyncMock(return_value={
+            "status": "ok",
+            "request_id": "req-1",
+            "job_ids": ["job-1"],
+            "reason": None,
+        }),
         "get_document_parse_result": AsyncMock(return_value=None),
         "get_job": AsyncMock(return_value={"status": "processing", "progress": 30}),
         "get_document": AsyncMock(return_value=None),
     }
     monkeypatch.setattr(sdk_route.settings, "UPLOAD_FOLDER", str(tmp_path))
     monkeypatch.setattr(sdk_route.supabase_service, "create_document", mocks["create_document"])
-    monkeypatch.setattr(sdk_route, "create_job", mocks["create_job"])
-    monkeypatch.setattr(sdk_route, "ensure_parse_revision", mocks["ensure_parse_revision"])
+    from services.parse_request_service import parse_request_service
+
+    monkeypatch.setattr(parse_request_service, "admit", mocks["admit"])
     monkeypatch.setattr(
         sdk_route.result_service,
         "get_document_parse_result",
@@ -164,10 +169,13 @@ def test_create_session_starts_parse_job(admin_client, monkeypatch, tmp_path):
     assert document_payload["user_id"] == USER_ID
     assert Path(document_payload["file_path"]).exists()
 
-    job_kwargs = mocks["create_job"].await_args.kwargs
-    assert job_kwargs["configuration_revision_id"] == "revision-1"
-    assert job_kwargs["related_document_ids"] == [payload["document_id"]]
-    mocks["ensure_parse_revision"].assert_awaited_once()
+    admit_kwargs = mocks["admit"].await_args.kwargs
+    assert admit_kwargs["tenant_id"] == TENANT_ID
+    assert admit_kwargs["requester_id"] == USER_ID
+    assert admit_kwargs["is_admin"] is True
+    assert admit_kwargs["document_ids"] == [payload["document_id"]]
+    assert admit_kwargs["parse_mode"] == "pipeline"
+    assert admit_kwargs["target_pages"] is None
 
 
 def test_create_session_accepts_parse_mode(admin_client, monkeypatch, tmp_path):
@@ -177,7 +185,7 @@ def test_create_session_accepts_parse_mode(admin_client, monkeypatch, tmp_path):
 
     assert response.status_code == 201
     assert response.json()["parse_mode"] == "vlm"
-    assert mocks["ensure_parse_revision"].await_args.args[1] == "vlm"
+    assert mocks["admit"].await_args.kwargs["parse_mode"] == "vlm"
 
 
 def test_get_session_syncs_completed_parse(admin_client, monkeypatch, tmp_path):
@@ -213,7 +221,12 @@ def test_retry_parse_creates_new_job(admin_client, monkeypatch, tmp_path):
     mocks["get_job"].return_value = {"status": "failed", "error": "解析失败"}
     admin_client.get(f"/api/sdk/sessions/{session_id}")
 
-    mocks["create_job"].return_value = "job-2"
+    mocks["admit"].return_value = {
+        "status": "ok",
+        "request_id": "req-2",
+        "job_ids": ["job-2"],
+        "reason": None,
+    }
     mocks["get_job"].return_value = {"status": "queued", "progress": 0}
 
     response = admin_client.post(
@@ -227,8 +240,8 @@ def test_retry_parse_creates_new_job(admin_client, monkeypatch, tmp_path):
     assert payload["state"] == "parsing"
     assert payload["parse_job_id"] == "job-2"
     assert payload["parse_mode"] == "vlm"
-    assert mocks["create_job"].await_count == 2
-    assert mocks["ensure_parse_revision"].await_args.args[1] == "vlm"
+    assert mocks["admit"].await_count == 2
+    assert mocks["admit"].await_args.kwargs["parse_mode"] == "vlm"
 
 
 def test_retry_parse_reuses_matching_result(admin_client, monkeypatch, tmp_path):
@@ -242,7 +255,7 @@ def test_retry_parse_reuses_matching_result(admin_client, monkeypatch, tmp_path)
 
     assert response.status_code == 200
     assert response.json()["state"] == "parsed"
-    assert mocks["create_job"].await_count == 1
+    assert mocks["admit"].await_count == 1
 
 
 def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
@@ -791,3 +804,55 @@ def test_get_session_with_unknown_id_returns_404(admin_client, monkeypatch, tmp_
     response = admin_client.get("/api/sdk/sessions/not-a-uuid")
 
     assert response.status_code == 404
+
+
+def test_rebuild_session_reads_mode_from_execution_spec(admin_client, monkeypatch, tmp_path):
+    """重启恢复优先级：execution_spec 里的冻结模式优先于 Revision/默认。"""
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    created = _create_session(admin_client).json()
+    session_id = created["id"]
+    from sdk.session import session_store
+
+    session_store.delete(session_id)
+
+    mocks["get_job"].return_value = {
+        "status": "completed",
+        "progress": 100,
+        "configuration_revision_id": None,
+        "document_ids": [created["document_id"]],
+        "execution_spec": {
+            "capability": "parse",
+            "spec_version": "1",
+            "effective_params": {"model_version": "vlm"},
+        },
+    }
+    mocks["get_document_parse_result"].return_value = _parse_result_row(model_version="vlm")
+    mocks["get_document"].return_value = {
+        "id": "doc",
+        "tenant_id": TENANT_ID,
+        "user_id": USER_ID,
+        "file_path": "/tmp/x.pdf",
+        "original_file_name": "report.pdf",
+    }
+
+    response = admin_client.get(f"/api/sdk/sessions/{session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parse_mode"] == "vlm"
+    assert payload["state"] == "parsed"
+
+
+def test_analyze_reports_insufficient_parse_content(admin_client, monkeypatch, tmp_path):
+    """Parse 成功但 markdown 为空：不冒充解析失败，analyze 明确报输入不足。"""
+    mocks = _patch_parse_env(monkeypatch, tmp_path)
+    session_id = _create_session(admin_client).json()["id"]
+    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
+    mocks["get_document_parse_result"].return_value = _parse_result_row(markdown="")
+
+    admin_client.get(f"/api/sdk/sessions/{session_id}")
+    response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze", json={})
+
+    assert response.status_code == 409
+    body = response.json()
+    assert "内容不足" in (body.get("error") or body.get("detail") or "")

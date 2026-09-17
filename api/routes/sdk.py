@@ -12,9 +12,9 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadF
 
 from api.dependencies.auth import CurrentUser, get_current_user
 from api.exceptions import AuthorizationError
-from api.jobs import create_job, get_job
+from api.jobs import get_job
 from config.settings import settings
-from services.parse_service import ensure_parse_revision, normalize_parse_mode
+from services.parse_service import normalize_parse_mode
 from services.result_service import result_service
 from services.supabase_service import supabase_service
 from sdk.agents.orchestrator import orchestrator
@@ -65,14 +65,20 @@ async def _rebuild_session(session_id: str, user: CurrentUser):
             return None
 
     tenant_id = document.get("tenant_id") or job.get("tenant_id") or ""
+    # 恢复优先级：执行规格 → 历史 Revision → 默认
     parse_mode = "pipeline"
-    revision_id = job.get("configuration_revision_id")
-    if revision_id:
-        from services.configuration_service import configuration_service
+    spec = job.get("execution_spec")
+    if isinstance(spec, dict) and spec:
+        effective = spec.get("effective_params") or {}
+        parse_mode = normalize_parse_mode(effective.get("model_version"))
+    else:
+        revision_id = job.get("configuration_revision_id")
+        if revision_id:
+            from services.configuration_service import configuration_service
 
-        revision = await configuration_service.get_revision(str(revision_id))
-        definition = (revision or {}).get("definition") or {}
-        parse_mode = normalize_parse_mode((definition.get("parse") or {}).get("model_version"))
+            revision = await configuration_service.get_revision(str(revision_id))
+            definition = (revision or {}).get("definition") or {}
+            parse_mode = normalize_parse_mode((definition.get("parse") or {}).get("model_version"))
 
     state = SDKSessionState.PARSING
     parse_error = None
@@ -85,11 +91,12 @@ async def _rebuild_session(session_id: str, user: CurrentUser):
             str(document_ids[0]),
             tenant_id=tenant_id,
         )
-        if row and (row.get("data") or {}).get("markdown"):
+        if row:
             state = SDKSessionState.PARSED
+            parse_error = None
         else:
             state = SDKSessionState.PARSE_FAILED
-            parse_error = "解析结果为空，请重试"
+            parse_error = "解析结果缺失，请重试"
 
     excel_name, excel_path, excel_placeholders = _recover_excel_template(str(document_ids[0]))
     created_at = time.time()
@@ -231,22 +238,32 @@ async def _create_parse_job(
     parse_mode: str,
     created_by: str,
 ) -> str:
-    """确保解析配置 Revision 并创建 Parse Job，返回 job_id。"""
-    revision = await ensure_parse_revision(
-        tenant_id,
-        parse_mode,
-        created_by=created_by,
-    )
-    if not revision.get("id"):
-        raise HTTPException(status_code=500, detail="解析配置不可用，请稍后重试")
+    """参数化提交 Parse（ADR-0007）：一文档一 Job，返回 job_id。"""
+    from services.parse_request_service import parse_request_service
 
-    return await create_job(
-        job_type="parse",
-        created_by=created_by,
-        related_document_ids=[document_id],
+    result = await parse_request_service.admit(
         tenant_id=tenant_id,
-        configuration_revision_id=revision["id"],
+        requester_id=created_by,
+        is_admin=True,  # SDK 会话仅管理员可用
+        document_ids=[document_id],
+        parse_mode=parse_mode,
+        target_pages=None,
+        idempotency_key=None,
     )
+
+    status = result.get("status")
+    if status in ("ok", "reused"):
+        job_ids = result.get("job_ids") or []
+        if job_ids:
+            return str(job_ids[0])
+        raise HTTPException(status_code=500, detail="解析任务创建失败")
+    if status == "conflict":
+        raise HTTPException(status_code=409, detail="该文档正在解析中，请稍后重试")
+    if status == "limit_exceeded":
+        raise HTTPException(status_code=422, detail="解析任务数量超出限制，请稍后重试")
+    if status == "not_found":
+        raise HTTPException(status_code=404, detail="文档不存在或无权访问")
+    raise HTTPException(status_code=500, detail="解析任务创建失败")
 
 
 async def _sync_parse_state(session, job=None):
@@ -264,13 +281,17 @@ async def _sync_parse_state(session, job=None):
         session.parse_error = job.get("error") or "解析失败"
         session_store.save(session)
     elif status == "completed":
-        markdown = await _existing_markdown(session, session.parse_mode)
-        if markdown:
+        row = await result_service.get_document_parse_result(
+            session.document_id,
+            tenant_id=session.tenant_id,
+        )
+        if row:
+            # Parse 成功但内容可能不足以草拟字段；由 analyze 明确报"输入不足"
             session.state = SDKSessionState.PARSED
             session.parse_error = None
         else:
             session.state = SDKSessionState.PARSE_FAILED
-            session.parse_error = "解析结果为空，请重试"
+            session.parse_error = "解析结果缺失，请重试"
         session_store.save(session)
     return session, job
 
@@ -436,7 +457,7 @@ async def analyze_session(
     )
     markdown = ((row or {}).get("data") or {}).get("markdown")
     if not markdown:
-        raise HTTPException(status_code=409, detail="解析结果为空，请重试解析")
+        raise HTTPException(status_code=409, detail="解析结果内容不足，无法生成字段建议；请尝试高精度解析后重试")
 
     analysis = await orchestrator.analyze_document(
         session,
