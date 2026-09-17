@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import * as React from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
@@ -9,19 +10,19 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          'bg-primary-600 text-white hover:bg-primary-500 active:bg-primary-700 shadow-lg shadow-primary-600/25',
+          'bg-primary-600 text-white hover:bg-primary-500 active:bg-primary-700 shadow-sm shadow-primary-600/25',
         secondary:
           'bg-bg-card text-text-primary border border-border-default hover:bg-bg-hover hover:border-primary-500/50',
         ghost:
           'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
         destructive:
-          'bg-error-500 text-white hover:bg-error-500/90 shadow-lg shadow-error-500/25',
+          'bg-error-500 text-white hover:bg-error-500/90 shadow-sm shadow-error-500/25',
         outline:
           'border border-primary-500 text-primary-400 hover:bg-primary-500/10',
         link:
           'text-primary-400 underline-offset-4 hover:underline',
         success:
-          'bg-success-500 text-white hover:bg-success-500/90 shadow-lg shadow-success-500/25',
+          'bg-success-500 text-white hover:bg-success-500/90 shadow-sm shadow-success-500/25',
       },
       size: {
         default: 'h-10 px-4 py-2',
@@ -62,6 +63,4 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 Button.displayName = 'Button'
 
 export { Button, buttonVariants }
-
-
 

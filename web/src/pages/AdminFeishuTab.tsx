@@ -19,7 +19,6 @@ export function FeishuConfigTab({
   const [tableId, setTableId] = useState(definition?.feishu?.table_id ?? '')
   const [autoApprove, setAutoApprove] = useState(definition?.auto_approve ?? false)
   const [pushAttachment, setPushAttachment] = useState(definition?.push_attachment ?? true)
-  const [perPageExtraction, setPerPageExtraction] = useState(definition?.per_page_extraction ?? false)
   const [parseMode, setParseMode] = useState<'pipeline' | 'vlm'>(
     definition?.parse?.model_version === 'vlm' ? 'vlm' : 'pipeline',
   )
@@ -31,7 +30,6 @@ export function FeishuConfigTab({
     setTableId(definition?.feishu?.table_id ?? '')
     setAutoApprove(definition?.auto_approve ?? false)
     setPushAttachment(definition?.push_attachment ?? true)
-    setPerPageExtraction(definition?.per_page_extraction ?? false)
     setParseMode(definition?.parse?.model_version === 'vlm' ? 'vlm' : 'pipeline')
   }, [definition])
 
@@ -44,7 +42,6 @@ export function FeishuConfigTab({
           feishu: { bitable_token: token, table_id: tableId },
           auto_approve: autoApprove,
           push_attachment: pushAttachment,
-          per_page_extraction: perPageExtraction,
           parse: { ...(definition?.parse ?? {}), model_version: parseMode },
         },
       })
@@ -142,23 +139,6 @@ export function FeishuConfigTab({
             className="text-primary-400 hover:text-primary-300 transition-colors"
           >
             {pushAttachment ? (
-              <ToggleRight className="h-8 w-8" />
-            ) : (
-              <ToggleLeft className="h-8 w-8 text-text-muted" />
-            )}
-          </button>
-        </div>
-        <div className="flex items-center justify-between rounded-lg border border-border-default bg-bg-secondary p-4">
-          <div>
-            <p className="text-sm font-medium text-text-primary">逐页提取</p>
-            <p className="text-xs text-text-muted">开启后将按页独立识别，每页产生一个样品结果（适用于每页一个样品的报告）</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setPerPageExtraction((v) => !v)}
-            className="text-primary-400 hover:text-primary-300 transition-colors"
-          >
-            {perPageExtraction ? (
               <ToggleRight className="h-8 w-8" />
             ) : (
               <ToggleLeft className="h-8 w-8 text-text-muted" />

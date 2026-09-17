@@ -14,7 +14,7 @@ export const CONFIGURATION_TYPE_LABELS: Record<ConfigurationType, string> = {
   composite: '组合提取',
 }
 
-export const IMPLEMENTED_CONFIGURATION_TYPES: ConfigurationType[] = ['parse', 'extract']
+export const IMPLEMENTED_CONFIGURATION_TYPES: ConfigurationType[] = ['parse', 'extract', 'classify', 'split']
 
 export function configurationStatusVariant(
   status: ConfigurationStatus,

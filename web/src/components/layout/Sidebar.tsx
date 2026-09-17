@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useUIStore, useAuthStore, useProfileStore } from '@/store/useStore'
 import {
@@ -37,12 +38,23 @@ export function Sidebar() {
     }
   }
 
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarOpen(false)
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [setSidebarOpen, sidebarOpen])
+
   return (
     <>
       {/* 移动端遮罩层 */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden cursor-pointer"
+        <button
+          type="button"
+          aria-label="关闭导航"
+          className="fixed inset-0 z-30 cursor-pointer bg-black/50 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -50,7 +62,7 @@ export function Sidebar() {
       <aside
         className={cn(
           'fixed left-0 top-0 z-40 h-screen transition-all duration-300 ease-in-out',
-          'border-r border-border-default bg-bg-secondary/80 backdrop-blur-xl',
+          'border-r border-border-default/70 bg-bg-secondary/95 backdrop-blur-xl',
           // 移动端：抽屉式，通过 translate 控制显隐
           sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
           // PC端：保持原有宽度逻辑
@@ -58,7 +70,7 @@ export function Sidebar() {
         )}
       >
       {/* Logo */}
-      <div className="flex h-16 items-center justify-between px-4 border-b border-border-default">
+      <div className="flex h-16 items-center justify-between px-4 border-b border-border-default/70">
         <Link to="/" className="flex items-center gap-3">
           <img src={Logo} alt="NeoFlow Logo" className="h-10 w-10 rounded-xl shadow-lg shadow-primary-500/25" />
           {sidebarOpen && (
@@ -70,6 +82,9 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size="icon-sm"
+          aria-label={sidebarOpen ? '收起导航' : '展开导航'}
+          title={sidebarOpen ? '收起导航' : '展开导航'}
+          aria-expanded={sidebarOpen}
           onClick={toggleSidebar}
           className="text-text-muted hover:text-text-primary"
         >
@@ -79,6 +94,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1 p-3">
+        {sidebarOpen && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-text-muted">Workspace</p>}
         {navigation.map((item) => {
           const isActive = location.pathname === item.href
           return (
@@ -86,10 +102,12 @@ export function Sidebar() {
               key={item.name}
               to={item.href}
               onClick={handleNavClick}
+              aria-current={isActive ? 'page' : undefined}
+              title={!sidebarOpen ? item.name : undefined}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200',
                 isActive
-                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
+                  ? 'bg-primary-500/15 text-primary-300 border border-primary-500/30 shadow-sm shadow-primary-500/10'
                   : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
               )}
             >
@@ -106,10 +124,12 @@ export function Sidebar() {
             <Link
               to="/admin"
               onClick={handleNavClick}
+              aria-current={isActive ? 'page' : undefined}
+              title={!sidebarOpen ? '系统配置' : undefined}
               className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 mt-1',
+                'mt-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200',
                 isActive
-                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
+                  ? 'bg-primary-500/15 text-primary-300 border border-primary-500/30'
                   : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
               )}
             >
@@ -130,6 +150,8 @@ export function Sidebar() {
         )}
         <Button
           variant="ghost"
+          aria-label="退出登录"
+          title="退出登录"
           className={cn(
             'w-full justify-start gap-3 text-text-secondary hover:text-error-500',
             !sidebarOpen && 'justify-center px-0'
@@ -144,5 +166,3 @@ export function Sidebar() {
     </>
   )
 }
-
-

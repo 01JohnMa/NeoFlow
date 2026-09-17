@@ -27,9 +27,10 @@ export function Documents() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const limit = 10
 
-  const { data, isLoading, refetch, isFetching } = useDocumentList({
+  const { data, isLoading, isError, error, refetch, isFetching } = useDocumentList({
     page,
     limit,
     status: statusFilter as DocumentStatus || undefined,
@@ -70,20 +71,23 @@ export function Documents() {
     e.preventDefault()
     e.stopPropagation()
     try {
+      setDownloadError(null)
       await documentsService.download(id, filename)
     } catch (err) {
       console.error('Download failed:', err)
+      setDownloadError('下载失败，请稍后重试。')
     }
   }
 
   const totalPages = Math.ceil((data?.total || 0) / limit)
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-8 animate-fadeIn">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-text-primary">文档列表</h2>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary-300">Library</p>
+          <h2 className="text-3xl font-semibold tracking-tight text-text-primary">文档列表</h2>
           <p className="text-text-secondary mt-1">
             共 {data?.total || 0} 个文档
           </p>
@@ -104,7 +108,7 @@ export function Documents() {
       </div>
 
       {/* Filters */}
-      <Card>
+      <Card className="overflow-hidden">
         <CardContent className="pt-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
@@ -146,26 +150,44 @@ export function Documents() {
       </Card>
 
       {/* Document List */}
+      {downloadError && (
+        <div role="alert" className="flex items-center justify-between rounded-xl border border-error-500/30 bg-error-500/10 px-4 py-3 text-sm text-error-200">
+          <span>{downloadError}</span>
+          <Button variant="ghost" size="sm" onClick={() => setDownloadError(null)}>知道了</Button>
+        </div>
+      )}
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex justify-center py-12">
               <Spinner />
             </div>
+          ) : isError ? (
+            <div className="py-12 text-center">
+              <p className="text-text-secondary">文档加载失败{error instanceof Error && error.message ? `：${error.message}` : ''}</p>
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()} disabled={isFetching}>
+                <RefreshCw className={cn('mr-2 h-4 w-4', isFetching && 'animate-spin')} />重试
+              </Button>
+            </div>
           ) : data?.items.length === 0 ? (
             <div className="text-center py-12">
               <FileText className="h-12 w-12 text-text-muted mx-auto mb-4" />
-              <p className="text-text-secondary">暂无文档</p>
-              <Link to="/upload" className="mt-4 inline-block">
-                <Button variant="outline" size="sm">
-                  上传第一个文档
-                </Button>
-              </Link>
+              {statusFilter || typeFilter ? (
+                <>
+                  <p className="text-text-secondary">没有符合当前筛选条件的文档</p>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => { setStatusFilter(''); setTypeFilter(''); setPage(1) }}>清除筛选</Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-text-secondary">暂无文档</p>
+                  <Link to="/upload" className="mt-4 inline-block"><Button variant="outline" size="sm">上传第一个文档</Button></Link>
+                </>
+              )}
             </div>
           ) : (
             <>
               {/* Table Header - Desktop */}
-              <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 border-b border-border-default bg-bg-secondary/50 text-sm font-medium text-text-muted">
+              <div className="hidden md:grid grid-cols-12 gap-4 border-b border-border-default bg-bg-secondary/70 px-6 py-3 text-xs font-semibold uppercase tracking-wide text-text-muted">
                 <div className="col-span-4">文件名</div>
                 <div className="col-span-2">类型</div>
                 <div className="col-span-2">状态</div>
@@ -299,5 +321,3 @@ export function Documents() {
     </div>
   )
 }
-
-

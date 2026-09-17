@@ -16,7 +16,9 @@ html {
 }
 
 body {
-  @apply bg-gradient-to-br from-bg-primary via-bg-secondary to-bg-tertiary text-text-primary min-h-screen;
+  @apply bg-bg-primary text-text-primary min-h-screen;
+  background-image: radial-gradient(rgba(124,92,255,.08) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 /* Scrollbar */

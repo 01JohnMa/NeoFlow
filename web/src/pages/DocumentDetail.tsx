@@ -205,7 +205,13 @@ export function DocumentDetail() {
   const [isRenaming, setIsRenaming] = useState(false)
   const [newDisplayName, setNewDisplayName] = useState('')
 
-  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useDocumentStatus(id!, !!id)
+  const {
+    data: status,
+    isLoading: statusLoading,
+    isError: statusIsError,
+    error: statusError,
+    refetch: refetchStatus,
+  } = useDocumentStatus(id!, !!id)
   const statusTerminal = status?.status === 'completed' || status?.status === 'pending_review'
   // 与 status 并行拉取，缩短首屏等待；未就绪时在状态进入终态后自动重试一次
   const {
@@ -238,6 +244,8 @@ export function DocumentDetail() {
   // Initialize edit data when result loads
   useEffect(() => {
     if (result?.extraction_data) {
+      // The API result arrives after the editable form mounts.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditedData(result.extraction_data as unknown as Record<string, unknown>)
     }
   }, [result])
@@ -308,7 +316,12 @@ export function DocumentDetail() {
   // Reprocess document
   const handleReprocess = async () => {
     if (!id) return
-    await processMutation.mutateAsync({ documentId: id })
+    try {
+      await processMutation.mutateAsync({ documentId: id })
+    } catch (err) {
+      setModalMessage(getApiErrorMessage(err, '重新处理失败，请稍后重试'))
+      setIsModalOpen(true)
+    }
   }
 
   // 把已审核结果的代表片段追加到字段描述（发布为新 Revision）
@@ -341,6 +354,8 @@ export function DocumentDetail() {
       setIsRenaming(false)
       refetchStatus()
     } catch (err) {
+      setModalMessage(getApiErrorMessage(err, '重命名失败，请稍后重试'))
+      setIsModalOpen(true)
       console.error('Rename failed:', err)
     }
   }
@@ -353,6 +368,22 @@ export function DocumentDetail() {
 
   if (statusLoading) {
     return <PageLoader />
+  }
+
+  if (statusIsError) {
+    return (
+      <div className="mx-auto max-w-xl py-16 text-center">
+        <AlertTriangle className="mx-auto mb-4 h-12 w-12 text-error-500" />
+        <p className="text-lg font-medium text-text-primary">无法加载文档</p>
+        <p className="mt-2 text-sm text-text-muted">
+          {getApiErrorMessage(statusError, '文档不存在或暂时无法访问')}
+        </p>
+        <div className="mt-5 flex justify-center gap-2">
+          <Button variant="outline" onClick={() => void refetchStatus()}>重试</Button>
+          <Link to="/documents"><Button>返回列表</Button></Link>
+        </div>
+      </div>
+    )
   }
 
   if (!status) {
@@ -808,5 +839,3 @@ export function DocumentDetail() {
     </div>
   )
 }
-
-

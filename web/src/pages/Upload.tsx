@@ -30,7 +30,7 @@ export function Upload() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadMutation = useUploadDocument()
   const processMutation = useProcessDocument()
-  const { tenantName, tenantCode, templates, isLoading: profileLoading } = useProfile()
+  const { tenantName, tenantCode, templates, profile, isLoading: profileLoading, fetchProfile, fetchTemplates } = useProfile()
 
   const availableTemplates = useMemo(
     () => templates.filter(template => template.is_active !== false),
@@ -42,6 +42,7 @@ export function Upload() {
   const [preview, setPreview] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [processError, setProcessError] = useState<string | null>(null)
 
   const selectedTemplateId = useMemo(() => {
     if (requestedTemplateId && availableTemplates.some(template => template.id === requestedTemplateId)) {
@@ -110,14 +111,15 @@ export function Upload() {
 
     try {
       setUploadError(null)
+      setProcessError(null)
       const result = await uploadMutation.mutateAsync({
         file: selectedFile,
         templateId: selectedTemplateId,
       })
-      await processMutation.mutateAsync({ documentId: result.document_id })
+      try { await processMutation.mutateAsync({ documentId: result.document_id }) } catch (error) { setProcessError(error instanceof Error ? error.message : '文档识别失败，请稍后重试'); return }
       navigate(`/documents/${result.document_id}`)
     } catch (error) {
-      const message = error instanceof Error ? error.message : '上传失败'
+      const message = error instanceof Error ? error.message : '文件上传失败，请重试'
       setUploadError(message)
     }
   }
@@ -126,6 +128,7 @@ export function Upload() {
     setSelectedFile(null)
     setPreview(null)
     setUploadError(null)
+    setProcessError(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -135,15 +138,18 @@ export function Upload() {
   const canUpload = Boolean(selectedFile && selectedTemplateId) && !isUploading
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6 px-4 sm:px-6 animate-fadeIn">
+    <div className="mx-auto w-full max-w-3xl space-y-8 animate-fadeIn">
       <div>
-        <h2 className="text-2xl font-bold text-text-primary">上传文档</h2>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary-300">Ingest</p>
+        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">上传文档</h2>
         <p className="text-text-secondary mt-1">
           支持 PDF、PNG、JPG、TIFF、BMP 格式，最大 20MB
         </p>
       </div>
 
-      {!tenantCode && !profileLoading && (
+      {profileLoading && <Card><CardContent className="py-8 text-center text-text-secondary">正在加载部门与模板信息...</CardContent></Card>}
+      {!profileLoading && !profile && <Card className="border-error-500/50"><CardContent className="pt-6"><div className="flex items-center justify-between gap-3 text-error-500"><span>部门信息加载失败，请重试。</span><Button variant="outline" onClick={() => { void fetchProfile(); void fetchTemplates() }}>重新加载</Button></div></CardContent></Card>}
+      {!tenantCode && !profileLoading && profile && (
         <Card className="border-warning-500/50">
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 text-warning-500">
@@ -190,6 +196,7 @@ export function Upload() {
                   key={template.id}
                   type="button"
                   onClick={() => setRequestedTemplateId(template.id)}
+                  aria-pressed={selectedTemplateId === template.id}
                   disabled={isUploading}
                   className={cn(
                     'px-4 py-2 rounded-lg border text-sm transition-colors',
@@ -219,8 +226,7 @@ export function Upload() {
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
+              onClick={() => fileInputRef.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); fileInputRef.current?.click() } }} role="button" tabIndex={0} aria-label="选择要上传的文档文件">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -274,8 +280,9 @@ export function Upload() {
               )}
             </div>
 
+            {processError && <div role="alert" className="mt-4 p-3 rounded-lg bg-warning-500/10 text-warning-500 text-sm">文件已上传，但识别失败：{processError}</div>}
             {uploadError && (
-              <div className="mt-4 flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
+              <div role="alert" className="mt-4 flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
                 <span>{uploadError}</span>
               </div>
@@ -306,7 +313,7 @@ export function Upload() {
       )}
 
       {!selectedFile && uploadError && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
+        <div role="alert" className="flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
           <span>{uploadError}</span>
         </div>

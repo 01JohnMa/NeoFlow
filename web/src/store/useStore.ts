@@ -117,8 +117,9 @@ export const useUploadStore = create<UploadState>()((set, get) => ({
     })),
   removeUploadProgress: (id) =>
     set((state) => {
-      const { [id]: _, ...rest } = state.uploadProgress
-      return { uploadProgress: rest }
+      const uploadProgress = { ...state.uploadProgress }
+      delete uploadProgress[id]
+      return { uploadProgress }
     }),
   addProcessingDocument: (id) =>
     set((state) => {
@@ -134,5 +135,4 @@ export const useUploadStore = create<UploadState>()((set, get) => ({
     }),
   isProcessing: (id) => get().processingDocuments.has(id),
 }))
-
 

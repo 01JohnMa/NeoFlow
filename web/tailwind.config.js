@@ -7,19 +7,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary colors - OCR-LLM 绿色主色
+        // Primary colors - NeoFlow violet accent
         primary: {
-          50: '#ecfdf3',
-          100: '#d1fae1',
-          200: '#a7f3c8',
-          300: '#6ee7a1',
-          400: '#34d37a',
-          500: '#018c39',
-          600: '#017a32',
-          700: '#016629',
-          800: '#014e20',
-          900: '#013a18',
-          950: '#0b1f10',
+          50: '#f5f3ff',
+          100: '#ede9fe',
+          200: '#ddd6fe',
+          300: '#c4b5fd',
+          400: '#a78bfa',
+          500: '#7c5cff',
+          600: '#6848e8',
+          700: '#5635c7',
+          800: '#3e278f',
+          900: '#281b5f',
+          950: '#17102f',
         },
         accent: {
           400: '#a78bfa',
@@ -37,11 +37,7 @@ export default {
         },
         // Background
         bg: {
-          primary: '#0f172a',
-          secondary: '#111f36',
-          tertiary: '#13264a',
-          card: '#162b52',
-          hover: '#1b3566',
+          primary: '#0d0d10', secondary: '#111116', tertiary: '#17171d', card: '#15151a', hover: '#202027',
         },
         // Text
         text: {
@@ -51,8 +47,7 @@ export default {
         },
         // Border
         border: {
-          default: '#334155',
-          focus: '#018c39',
+          default: '#2a2a33', focus: '#7c5cff',
         },
       },
       fontFamily: {
@@ -86,6 +81,3 @@ export default {
   },
   plugins: [],
 }
-
-
-

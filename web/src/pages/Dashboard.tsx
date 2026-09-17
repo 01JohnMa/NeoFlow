@@ -81,21 +81,21 @@ export function Dashboard() {
       bgColor: 'bg-primary-400/10',
     },
     {
-      title: '已完成',
+      title: '已完成（最近 5 条）',
       value: stats.completed,
       icon: CheckCircle,
       color: 'text-success-500',
       bgColor: 'bg-success-500/10',
     },
     {
-      title: '处理中',
+      title: '处理中（最近 5 条）',
       value: stats.processing,
       icon: Clock,
       color: 'text-accent-400',
       bgColor: 'bg-accent-400/10',
     },
     {
-      title: '处理失败',
+      title: '失败（最近 5 条）',
       value: stats.failed,
       icon: AlertTriangle,
       color: 'text-error-500',
@@ -104,15 +104,18 @@ export function Dashboard() {
   ]
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-8 animate-fadeIn">
       {/* Welcome Section */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <section className="relative overflow-hidden rounded-2xl border border-border-default bg-bg-card px-6 py-7 md:px-8">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-primary-500/10 blur-3xl" />
+        <div className="relative flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-text-primary">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary-300">Workspace overview</p>
+          <h2 className="text-3xl font-semibold tracking-tight text-text-primary">
             {displayName ? `${displayName}，` : ''}欢迎使用 NeoFlow
           </h2>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-text-secondary">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <p className="text-sm text-text-secondary">
               快速识别和提取文档关键信息
             </p>
             {tenantName && (
@@ -123,11 +126,22 @@ export function Dashboard() {
             )}
           </div>
         </div>
-        <Link to="/upload">
-          <Button className="gap-2">
+        <Link to="/upload" className="shrink-0">
+          <Button size="lg" className="gap-2">
             <Upload className="h-4 w-4" />
             上传新文档
           </Button>
+        </Link>
+        </div>
+      </section>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-text-muted">Activity</p>
+          <h3 className="mt-1 text-lg font-semibold text-text-primary">处理概览</h3>
+        </div>
+        <Link to="/documents" className="text-sm font-medium text-primary-300 transition-colors hover:text-primary-200">
+          查看全部文档 <ArrowRight className="ml-1 inline h-4 w-4" />
         </Link>
       </div>
 
@@ -136,17 +150,17 @@ export function Dashboard() {
         {statCards.map((stat, index) => (
           <Card
             key={stat.title}
-            className={`animate-slideInUp stagger-${index + 1}`}
+            className={`group animate-slideInUp stagger-${index + 1} transition-colors hover:border-primary-500/40`}
             style={{ animationFillMode: 'both' }}
           >
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-text-muted">{stat.title}</p>
-                  <p className="text-3xl font-bold text-text-primary mt-1">{stat.value}</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-text-muted">{stat.title}</p>
+                  <p className="mt-3 text-3xl font-semibold tracking-tight text-text-primary">{stat.value}</p>
                 </div>
-                <div className={`h-12 w-12 rounded-xl ${stat.bgColor} flex items-center justify-center`}>
-                  <stat.icon className={`h-6 w-6 ${stat.color}`} />
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl border border-white/5 ${stat.bgColor}`}>
+                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
                 </div>
               </div>
             </CardContent>
@@ -161,12 +175,6 @@ export function Dashboard() {
             <TrendingUp className="h-5 w-5 text-primary-400" />
             最近文档
           </CardTitle>
-          <Link to="/documents">
-            <Button variant="ghost" size="sm" className="gap-1">
-              查看全部
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -189,14 +197,14 @@ export function Dashboard() {
                 <Link
                   key={doc.id}
                   to={`/documents/${doc.id}`}
-                  className="flex items-center justify-between p-4 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors border border-border-default cursor-pointer"
+                  className="group flex items-center justify-between rounded-xl border border-transparent bg-bg-secondary/70 p-4 transition-colors hover:border-primary-500/30 hover:bg-bg-hover"
                 >
                   <div className="flex items-center gap-4">
                     <div className="h-10 w-10 rounded-lg bg-primary-500/10 flex items-center justify-center">
                       <FileText className="h-5 w-5 text-primary-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-text-primary truncate max-w-[200px] md:max-w-[300px]">
+                      <p className="max-w-[200px] truncate font-medium text-text-primary transition-colors group-hover:text-primary-200 md:max-w-[300px]">
                         {doc.original_file_name || doc.file_name}
                       </p>
                       <p className="text-sm text-text-muted">{formatDate(doc.created_at)}</p>
@@ -218,7 +226,15 @@ export function Dashboard() {
       </Card>
 
       {/* Quick Actions - 根据模板动态渲染 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div>
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-text-muted">Start here</p>
+            <h3 className="mt-1 text-lg font-semibold text-text-primary">快速开始</h3>
+          </div>
+          <span className="hidden text-xs text-text-muted sm:block">选择一个配置开始处理</span>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {templates.length > 0 ? (
           // 显示用户租户的模板
           templates.slice(0, 3).map((template, index) => (
@@ -283,10 +299,9 @@ export function Dashboard() {
             </Card>
           </>
         )}
+        </div>
       </div>
     </div>
   )
 }
-
-
 

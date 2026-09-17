@@ -45,7 +45,6 @@ export interface ConfigurationDefinition {
   fields: ConfigurationField[]
   extraction_prompt: string | null
   extraction_mode: ExtractionMode
-  per_page_extraction: boolean
   output_mode: OutputMode
   push_attachment: boolean
   auto_approve: boolean
@@ -145,7 +144,6 @@ export interface SDKConfirmTemplatePayload {
   template_name: string
   template_code: string
   description?: string | null
-  per_page_extraction: boolean
   fields: SDKDetectedField[]
 }
 

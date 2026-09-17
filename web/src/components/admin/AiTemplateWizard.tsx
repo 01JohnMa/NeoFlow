@@ -76,7 +76,6 @@ export function AiTemplateWizard({
   const [parseMode, setParseMode] = useState<'pipeline' | 'vlm'>('pipeline')
   const [instruction, setInstruction] = useState('')
   const [description, setDescription] = useState('')
-  const [perPageExtraction, setPerPageExtraction] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [configRevision, setConfigRevision] = useState(0)
   const [promptRevision, setPromptRevision] = useState<number | null>(null)
@@ -119,7 +118,6 @@ export function AiTemplateWizard({
     setAnalysis(null)
     setFields([])
     setDescription('')
-    setPerPageExtraction(false)
     setConfigRevision(0)
     resetGeneratedArtifacts()
     setCommitResult(null)
@@ -205,7 +203,6 @@ export function AiTemplateWizard({
       setAnalysis(result)
       setFields(result.detected_fields)
       setDescription(`由 AI 根据 ${session.file_name} 建议字段`)
-      setPerPageExtraction(false)
       setConfigRevision((revision) => revision + 1)
       resetGeneratedArtifacts()
       setCommitResult(null)
@@ -216,7 +213,6 @@ export function AiTemplateWizard({
     template_name: (templateName || session?.template_name || '').trim(),
     template_code: (templateCode || session?.template_code || '').trim(),
     description: description.trim() || null,
-    per_page_extraction: perPageExtraction,
     fields: fields.map((field) => ({
       ...field,
       field_key: field.field_key.trim(),
@@ -259,10 +255,8 @@ export function AiTemplateWizard({
 
   const updateTemplateField = (patch: {
     description?: string
-    perPageExtraction?: boolean
   }) => {
     if (patch.description !== undefined) setDescription(patch.description)
-    if (patch.perPageExtraction !== undefined) setPerPageExtraction(patch.perPageExtraction)
     markConfigChanged()
   }
 
@@ -543,14 +537,6 @@ export function AiTemplateWizard({
                       {(session?.parse_mode ?? parseMode) === 'vlm' ? '高精度解析' : '快速解析'}
                     </p>
                   </div>
-                  <label className="flex items-end gap-2 pb-2 text-sm text-text-secondary">
-                    <input
-                      type="checkbox"
-                      checked={perPageExtraction}
-                      onChange={(e) => updateTemplateField({ perPageExtraction: e.target.checked })}
-                    />
-                    逐页提取
-                  </label>
                 </div>
                 <Label className="mt-3 block">描述</Label>
                 <Textarea

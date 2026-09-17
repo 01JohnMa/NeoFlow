@@ -28,12 +28,11 @@ export function MainLayout() {
         )}
       >
         <Header />
-        <main className="p-6">
+        <main className="p-4 md:p-6 max-w-[1600px]">
           <Outlet />
         </main>
       </div>
     </div>
   )
 }
-
 
