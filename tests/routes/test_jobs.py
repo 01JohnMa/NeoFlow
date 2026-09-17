@@ -32,6 +32,7 @@ RESULT = {
     "id": RESULT_ID,
     "tenant_id": TENANT_ID,
     "job_id": JOB_ID,
+    "document_id": DOCUMENT_ID,
     "data": {"sample_name": "LED灯"},
     "field_meta": {},
     "review_state": "pending",
@@ -230,8 +231,14 @@ class TestJobResults:
 
 class TestGetResult:
     def test_owner_can_read_result(self, user_client):
-        with patch("api.routes.jobs.result_service") as mock_results:
+        with patch("api.routes.jobs.result_service") as mock_results, \
+             patch("api.routes.jobs.supabase_service") as mock_supabase:
             mock_results.get_result = AsyncMock(return_value=RESULT)
+            mock_supabase.get_document = AsyncMock(return_value={
+                "id": DOCUMENT_ID,
+                "tenant_id": TENANT_ID,
+                "user_id": USER_ID,
+            })
             resp = user_client.get(f"/api/results/{RESULT_ID}")
 
         assert resp.status_code == 200

@@ -190,3 +190,45 @@ class TestDocumentReviewWrite:
             review_state="rejected",
             tenant_id=TENANT_ID,
         )
+
+
+class TestDocumentParseResult:
+    """GET /api/documents/{id}/parse-result 按文档读取 Parse 产物。"""
+
+    def test_reads_parse_result_with_document_access(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run, \
+             patch("api.routes.documents.query.result_service") as mock_result_service:
+            mock_run.return_value = SimpleNamespace(data=[_document()])
+            mock_result_service.get_document_parse_result = AsyncMock(return_value={
+                "id": "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrpppp",
+                "data": {"markdown": "hello", "pages": []},
+            })
+
+            response = client.get(f"/api/documents/{DOCUMENT_ID}/parse-result")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["result_id"] == "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrpppp"
+        assert body["data"]["markdown"] == "hello"
+        mock_result_service.get_document_parse_result.assert_awaited_once_with(
+            DOCUMENT_ID, tenant_id=TENANT_ID
+        )
+
+    def test_404_when_parse_result_missing(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run, \
+             patch("api.routes.documents.query.result_service") as mock_result_service:
+            mock_run.return_value = SimpleNamespace(data=[_document()])
+            mock_result_service.get_document_parse_result = AsyncMock(return_value=None)
+
+            response = client.get(f"/api/documents/{DOCUMENT_ID}/parse-result")
+
+        assert response.status_code == 404
+
+    def test_other_users_document_hidden(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = SimpleNamespace(
+                data=[_document(user_id="22222222-2222-4222-8222-222222222222")]
+            )
+            response = client.get(f"/api/documents/{DOCUMENT_ID}/parse-result")
+
+        assert response.status_code == 404

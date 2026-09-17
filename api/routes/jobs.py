@@ -195,13 +195,34 @@ async def get_job_parse_result(
 
 # ============ Result ============
 
+def _can_access_document(document: Dict[str, Any], user: CurrentUser) -> bool:
+    """文档授权：所有者（需租户一致）/ 租户管理员 / 超级管理员。"""
+    if user.is_super_admin():
+        return True
+    if user.is_tenant_admin() and document.get("tenant_id") == user.tenant_id:
+        return True
+    if document.get("user_id") != user.user_id:
+        return False
+    return not user.tenant_id or document.get("tenant_id") == user.tenant_id
+
+
 @router.get("/results/{result_id}")
 async def get_result(
     result_id: str,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """读取单条 Result（租户隔离）。"""
+    """读取单条 Result：继承文档授权；脱链结果仅管理员可读。"""
     result = await result_service.get_result(result_id)
     if not result or not user.can_access_tenant(result.get("tenant_id")):
+        raise HTTPException(status_code=404, detail="结果不存在")
+
+    document_id = result.get("document_id")
+    if not document_id:
+        if not user.is_tenant_admin():
+            raise HTTPException(status_code=404, detail="结果不存在")
+        return result
+
+    document = await supabase_service.get_document(str(document_id))
+    if not document or not _can_access_document(document, user):
         raise HTTPException(status_code=404, detail="结果不存在")
     return result

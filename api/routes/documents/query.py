@@ -232,6 +232,42 @@ async def get_extraction_result(
         raise_auth_or_processing_error(e, "获取结果失败")
 
 
+@router.get("/{document_id}/parse-result")
+async def get_document_parse_result(
+    document_id: str,
+    user: CurrentUser = Depends(get_current_user)
+):
+    """读取文档最新的 Parse Result（权限同提取结果）。"""
+    try:
+        doc_result = await _run_supabase(
+            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
+        )
+        document = doc_result.data[0] if doc_result.data else None
+
+        if not document:
+            raise DocumentNotFoundError(document_id)
+
+        _check_document_access(document, user, document_id)
+
+        row = await result_service.get_document_parse_result(
+            document_id,
+            tenant_id=document.get("tenant_id"),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="解析结果不存在")
+
+        return {
+            "success": True,
+            "result_id": row.get("id"),
+            "data": row.get("data") or {},
+        }
+
+    except (DocumentNotFoundError, HTTPException):
+        raise
+    except Exception as e:
+        raise_auth_or_processing_error(e, "获取解析结果失败")
+
+
 @router.get("/{document_id}/download")
 async def download_document(
     document_id: str,

@@ -353,3 +353,53 @@ class TestResultExtractionDataAdapter:
         adapted = result_to_extraction_data(row, DOCUMENT_ID)
 
         assert adapted["is_validated"] is False
+
+
+class TestFilterBeforeLimit:
+    """sample_key 过滤必须发生在 LIMIT 之前，避免被截断窗口挤出。"""
+
+    @pytest.mark.asyncio
+    async def test_parse_result_survives_many_newer_extraction_rows(self, service):
+        svc, _ = service
+        parse_row = await svc.create_result(svc.build_result_row(
+            tenant_id=TENANT_ID,
+            document_id=DOCUMENT_ID,
+            data={"markdown": "old-parse"},
+            sample_key=PARSE_SAMPLE_KEY,
+            field_meta={},
+        ))
+        for index in range(55):
+            await svc.create_result(svc.build_result_row(
+                tenant_id=TENANT_ID,
+                document_id=DOCUMENT_ID,
+                data={"sample_name": f"n{index}"},
+                sample_key=DEFAULT_SAMPLE_KEY,
+            ))
+
+        found = await svc.get_document_parse_result(DOCUMENT_ID, tenant_id=TENANT_ID)
+
+        assert found is not None
+        assert found["id"] == parse_row["id"]
+
+    @pytest.mark.asyncio
+    async def test_extraction_result_survives_many_parse_reruns(self, service):
+        svc, _ = service
+        extraction_row = await svc.create_result(svc.build_result_row(
+            tenant_id=TENANT_ID,
+            document_id=DOCUMENT_ID,
+            data={"sample_name": "kept"},
+            sample_key=DEFAULT_SAMPLE_KEY,
+        ))
+        for index in range(205):
+            await svc.create_result(svc.build_result_row(
+                tenant_id=TENANT_ID,
+                document_id=DOCUMENT_ID,
+                data={"markdown": f"parse-{index}"},
+                sample_key=PARSE_SAMPLE_KEY,
+                field_meta={},
+            ))
+
+        found = await svc.get_document_result(DOCUMENT_ID, tenant_id=TENANT_ID)
+
+        assert found is not None
+        assert found["id"] == extraction_row["id"]

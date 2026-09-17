@@ -129,9 +129,15 @@ class ResultService(SupabaseClientMixin):
         job_id: Optional[str] = None,
         document_id: Optional[str] = None,
         review_state: Optional[str] = None,
+        sample_key: Optional[str] = None,
+        exclude_sample_key: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """列出 Result（按租户/Job/文档/复核状态过滤，新→旧）。"""
+        """列出 Result（按租户/Job/文档/复核状态/样品类型过滤，新→旧）。
+
+        sample_key / exclude_sample_key 在数据库层过滤（LIMIT 之前），
+        避免大量结果把目标类型挤出截断窗口。
+        """
         try:
             query = self._get_client().table(RESULTS_TABLE).select("*")
             if tenant_id:
@@ -142,6 +148,10 @@ class ResultService(SupabaseClientMixin):
                 query = query.eq("document_id", document_id)
             if review_state:
                 query = query.eq("review_state", review_state)
+            if sample_key:
+                query = query.eq("sample_key", sample_key)
+            if exclude_sample_key:
+                query = query.neq("sample_key", exclude_sample_key)
             query = query.order("created_at", desc=True).limit(limit)
             result = await self._run_sync(query.execute)
             return result.data or []
@@ -162,14 +172,10 @@ class ResultService(SupabaseClientMixin):
         rows = await self.list_results(
             document_id=document_id,
             tenant_id=tenant_id,
+            exclude_sample_key=PARSE_SAMPLE_KEY,
             limit=200,
         )
-        samples = [
-            row for row in rows if row.get("sample_key") != PARSE_SAMPLE_KEY
-        ]
-        if not samples:
-            return None
-        return samples[0]
+        return rows[0] if rows else None
 
     async def get_document_parse_result(
         self,
@@ -181,12 +187,10 @@ class ResultService(SupabaseClientMixin):
         rows = await self.list_results(
             document_id=document_id,
             tenant_id=tenant_id,
-            limit=50,
+            sample_key=PARSE_SAMPLE_KEY,
+            limit=1,
         )
-        for row in rows:
-            if row.get("sample_key") == PARSE_SAMPLE_KEY:
-                return row
-        return None
+        return rows[0] if rows else None
 
     async def update_result_review(
         self,

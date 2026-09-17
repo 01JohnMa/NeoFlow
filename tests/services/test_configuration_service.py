@@ -66,6 +66,10 @@ class FakeQuery:
         self._filters.append(("in", key, list(values)))
         return self
 
+    def neq(self, key: str, value: Any):
+        self._filters.append(("neq", key, value))
+        return self
+
     def order(self, key: str, desc: bool = False):
         self._order_key = key
         self._order_desc = desc
@@ -80,6 +84,8 @@ class FakeQuery:
             if op == "eq" and row.get(key) != value:
                 return False
             if op == "in" and row.get(key) not in value:
+                return False
+            if op == "neq" and row.get(key) == value:
                 return False
         return True
 
