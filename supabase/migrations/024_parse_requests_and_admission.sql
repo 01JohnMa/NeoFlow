@@ -182,7 +182,7 @@ BEGIN
 
     -- 4. 活动请求冲突：文档集合有交集时，只有完全一致（发起人+指纹+集合）才复用
     FOR v_conflict IN
-        SELECT jr.request_id, jr.request_fingerprint, jr.requester_id,
+        SELECT jr.request_id, jr.request_fingerprint, jr.requester_id, jr.request_payload,
                array_agg(DISTINCT d.doc_id) AS doc_set
         FROM job_requests jr
         JOIN processing_jobs j
@@ -190,13 +190,16 @@ BEGIN
          AND j.status IN ('queued', 'processing')
         CROSS JOIN LATERAL unnest(j.document_ids) AS d(doc_id)
         WHERE jr.tenant_id = p_tenant_id
-        GROUP BY jr.request_id, jr.request_fingerprint, jr.requester_id
+          AND jr.reused_from_request_id IS NULL
+        GROUP BY jr.request_id, jr.request_fingerprint, jr.requester_id, jr.request_payload
         HAVING array_agg(DISTINCT d.doc_id) && p_document_ids
     LOOP
         IF v_conflict.doc_set @> p_document_ids
            AND v_conflict.doc_set <@ p_document_ids
            AND v_conflict.requester_id = p_requester_id
-           AND v_conflict.request_fingerprint = p_request_fingerprint THEN
+           AND v_conflict.request_fingerprint = p_request_fingerprint
+           -- 执行等价：冻结规格完全一致（含策略版本与有效参数）
+           AND v_conflict.request_payload = COALESCE(p_spec, '{}'::jsonb) THEN
             -- 新 Key 命中活动复用：落一条别名受理记录，保证终态后重试仍可找回
             IF p_idempotency_key IS NOT NULL THEN
                 INSERT INTO job_requests (

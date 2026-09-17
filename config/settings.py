@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     DOC_WORKER_STALE_LOCK_SECONDS: int = 1800
     DOC_WORKER_ID: str = ""
 
+    # ============ Parse 策略（服务端写死 + 版本号；环境变量可按部署调整） ============
+    PARSE_POLICY_VERSION: str = "parse-policy-1"
+    PARSE_MAX_FILES_PER_REQUEST: int = 50
+    PARSE_MAX_ACTIVE_JOBS_PER_TENANT: int = 30
+    PARSE_MAX_TARGET_PAGES: int = 500
+
     # ============ MinerU 解析（#8；key 由本地 .env 提供，不入库） ============
     MINERU_API_KEY: str = ""
     MINERU_BASE_URL: str = "https://mineru.net"
