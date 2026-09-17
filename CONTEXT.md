@@ -5,8 +5,8 @@ NeoFlow turns one or more source documents into reviewable, structured records a
 ## Tenancy and projects
 
 **Tenant**:
-The ownership and data-isolation boundary for one organization using NeoFlow. A Tenant owns one or more Projects.
-_Avoid_: account, customer workspace, department (use Tenant even when the UI groups by department, e.g. 质量管理中心)
+The ownership and data-isolation boundary for one organization using NeoFlow. It is established by the integrating application — an enterprise SaaS that already models its own tenants — and supplied to NeoFlow at integration time; NeoFlow isolates by it but does not onboard or manage it. A Tenant owns one or more Projects.
+_Avoid_: account, customer workspace, department (internal org units are not Tenants)
 
 **Project**:
 A workspace within one Tenant that owns Configurations, Processing Jobs, and Extraction Results.
