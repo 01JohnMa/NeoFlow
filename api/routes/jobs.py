@@ -32,13 +32,27 @@ class CreateJobRequest(BaseModel):
 
 # ============ 权限辅助 ============
 
-def _can_access_job(job: Dict[str, Any], user: CurrentUser) -> bool:
-    """租户隔离：优先看 job.tenant_id；历史 job 无租户时按创建人。"""
+async def _can_access_job(job: Dict[str, Any], user: CurrentUser) -> bool:
+    """Job 授权：继承输入文档权限；管理员按租户；历史无租户 Job 按创建人。
+
+    普通成员只有在能访问 Job 的全部输入文档时才可完整读取该 Job。
+    """
     if user.is_super_admin():
         return True
-    if job.get("tenant_id"):
-        return user.can_access_tenant(job["tenant_id"])
-    return job.get("created_by") == user.user_id
+    if job.get("tenant_id") and not user.can_access_tenant(job["tenant_id"]):
+        return False
+    if user.is_tenant_admin():
+        return True
+
+    document_ids = [str(doc_id) for doc_id in (job.get("document_ids") or []) if doc_id]
+    if not document_ids:
+        return job.get("created_by") == user.user_id
+
+    for document_id in document_ids:
+        document = await supabase_service.get_document(document_id)
+        if not document or not _can_access_document(document, user):
+            return False
+    return True
 
 
 async def _load_pinned_configuration(
@@ -104,21 +118,32 @@ async def create_job_endpoint(
 async def list_jobs_endpoint(
     document_id: Optional[str] = None,
     configuration_revision_id: Optional[str] = None,
+    created_by: Optional[str] = None,
     limit: int = 50,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """列出当前租户的 Job（新→旧）；super_admin 可查全部。"""
+    """列出 Job（新→旧）。
+
+    - super_admin：可跨租户，可选 tenant 过滤
+    - 租户管理员：本租户全部
+    - 普通成员：强制只看自己发起的 Job
+    """
     if user.is_super_admin():
         tenant_id = None
+        effective_created_by = created_by
     else:
         if not user.tenant_id:
             return {"success": True, "data": []}
         tenant_id = user.tenant_id
+        effective_created_by = created_by
+        if not user.is_tenant_admin():
+            effective_created_by = user.user_id
 
     jobs = await list_jobs(
         tenant_id=tenant_id,
         document_id=document_id,
         configuration_revision_id=configuration_revision_id,
+        created_by=effective_created_by,
         limit=max(1, min(limit, 100)),
     )
     return {"success": True, "data": jobs}
@@ -131,7 +156,7 @@ async def get_job_status(
 ):
     """查询 Job 状态（tenant 隔离）。"""
     job = await get_job(job_id)
-    if not job or not _can_access_job(job, user):
+    if not job or not await _can_access_job(job, user):
         raise HTTPException(status_code=404, detail="任务不存在")
     return job
 
@@ -143,13 +168,17 @@ async def list_job_results(
 ):
     """读取某个 Job 产生的全部 Result（新→旧）。"""
     job = await get_job(job_id)
-    if not job or not _can_access_job(job, user):
+    if not job or not await _can_access_job(job, user):
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return await result_service.list_results(
+    results = await result_service.list_results(
         job_id=job_id,
         tenant_id=job.get("tenant_id"),
     )
+    if not user.is_tenant_admin():
+        # 脱链结果（文档已删除）仅管理员可读
+        results = [row for row in results if row.get("document_id")]
+    return results
 
 
 @router.get("/jobs/{job_id}/parse-result")
@@ -163,7 +192,7 @@ async def get_job_parse_result(
     写入时 job_id 为空，回退按 Job 关联文档取最新 ParseResult。
     """
     job = await get_job(job_id)
-    if not job or not _can_access_job(job, user):
+    if not job or not await _can_access_job(job, user):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     results = await result_service.list_results(
@@ -184,6 +213,14 @@ async def get_job_parse_result(
             if parse_row:
                 break
     if not parse_row:
+        raise HTTPException(status_code=404, detail="解析结果不存在")
+
+    # 回退路径可能命中其他文档的最新 Parse：仍须通过文档授权
+    if parse_row.get("document_id"):
+        document = await supabase_service.get_document(str(parse_row["document_id"]))
+        if not document or not _can_access_document(document, user):
+            raise HTTPException(status_code=404, detail="解析结果不存在")
+    elif not user.is_tenant_admin():
         raise HTTPException(status_code=404, detail="解析结果不存在")
 
     return {

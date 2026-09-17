@@ -376,42 +376,57 @@ async def list_documents(
 
 
 @router.delete("/{document_id}")
+async def _delete_document_guarded(document_id: str, user: CurrentUser) -> dict:
+    """原子删除（迁移 024 RPC）：租户锁内校验权限与活动占用后删除数据库行。"""
+    result = await _run_supabase(
+        lambda: supabase_service.client.rpc(
+            "delete_document_guarded",
+            {
+                "p_document_id": document_id,
+                "p_requester_id": user.user_id,
+                "p_is_admin": user.is_tenant_admin(),
+            },
+        ).execute()
+    )
+    data = result.data or []
+    row = data if isinstance(data, dict) else (data[0] if data else None)
+    return row or {}
+
+
 async def delete_document(
     document_id: str,
     user: CurrentUser = Depends(get_current_user)
 ):
     """
-    删除文档（需要登录）
+    删除文档（需要登录）。
+
+    数据库删除由原子命令完成（活动任务占用时拒绝）；文件清理由数据库
+    事务提交后执行，失败只记日志，不影响删除结果。
     """
     try:
-        # 使用 service_role 查询，手动验证权限
-        result = await _run_supabase(
-            lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
-        )
-        document = result.data[0] if result.data else None
-        
-        if not document:
+        outcome = await _delete_document_guarded(document_id, user)
+        status = outcome.get("out_status")
+
+        if status == "not_found":
             raise DocumentNotFoundError(document_id)
-        
-        # 验证用户权限（只有文档所有者或管理员可以删除）
-        _check_document_access(document, user, document_id)
-        
-        # 删除文件
-        file_path = document.get("file_path")
+        if status == "conflict":
+            raise HTTPException(status_code=409, detail="文档正在处理中，暂不能删除")
+        if status != "ok":
+            raise ProcessingError("删除失败")
+
+        file_path = outcome.get("out_file_path")
         if file_path and os.path.exists(file_path):
-            os.remove(file_path)
-        
-        # 删除数据库记录
-        await _run_supabase(
-            lambda: supabase_service.client.table("documents").delete().eq("id", document_id).execute()
-        )
-        
+            try:
+                os.remove(file_path)
+            except OSError as file_err:
+                logger.warning(f"删除文档文件失败（不影响数据库删除）: {file_path} - {file_err}")
+
         return {
             "document_id": document_id,
             "message": "文档删除成功"
         }
-        
-    except DocumentNotFoundError:
+
+    except (DocumentNotFoundError, HTTPException):
         raise
     except Exception as e:
         raise_auth_or_processing_error(e, "删除失败")

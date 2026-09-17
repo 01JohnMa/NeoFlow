@@ -21,6 +21,11 @@ CONFIGURATION = {
     "status": "published",
     "type": "extract",
 }
+JOB_DOCUMENT = {
+    "id": DOCUMENT_ID,
+    "tenant_id": TENANT_ID,
+    "user_id": USER_ID,
+}
 JOB = {
     "job_id": JOB_ID,
     "tenant_id": TENANT_ID,
@@ -178,10 +183,21 @@ class TestCreateJob:
 
 class TestGetJob:
     def test_owner_can_read_job(self, user_client):
-        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB):
+        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.supabase_service") as mock_supabase:
+            mock_supabase.get_document = AsyncMock(return_value={**JOB_DOCUMENT})
             resp = user_client.get(f"/api/jobs/{JOB_ID}")
         assert resp.status_code == 200
         assert resp.json()["job_id"] == JOB_ID
+
+    def test_job_hidden_when_input_document_not_owned(self, user_client):
+        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.supabase_service") as mock_supabase:
+            mock_supabase.get_document = AsyncMock(return_value={
+                **JOB_DOCUMENT, "user_id": "22222222-2222-4222-8222-222222222222",
+            })
+            resp = user_client.get(f"/api/jobs/{JOB_ID}")
+        assert resp.status_code == 404
 
     def test_other_tenant_job_hidden(self, user_client):
         job = {**JOB, "tenant_id": OTHER_TENANT_ID}
@@ -190,7 +206,7 @@ class TestGetJob:
         assert resp.status_code == 404
 
     def test_legacy_job_without_tenant_hidden_from_stranger(self, user_client):
-        job = {**JOB, "tenant_id": None, "created_by": "someone-else"}
+        job = {**JOB, "tenant_id": None, "created_by": "someone-else", "document_ids": []}
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=job):
             resp = user_client.get(f"/api/jobs/{JOB_ID}")
         assert resp.status_code == 404
@@ -210,7 +226,9 @@ class TestGetJob:
 class TestJobResults:
     def test_list_job_results(self, user_client):
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.supabase_service") as mock_supabase, \
              patch("api.routes.jobs.result_service") as mock_results:
+            mock_supabase.get_document = AsyncMock(return_value={**JOB_DOCUMENT})
             mock_results.list_results = AsyncMock(return_value=[RESULT])
             resp = user_client.get(f"/api/jobs/{JOB_ID}/results")
 
@@ -272,7 +290,9 @@ class TestGetParseResult:
     def test_returns_parse_result_for_job(self, user_client):
         row = {**RESULT, "sample_key": "parse", "data": self.PARSE_DATA}
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.supabase_service") as mock_supabase, \
              patch("api.routes.jobs.result_service") as mock_results:
+            mock_supabase.get_document = AsyncMock(return_value={**JOB_DOCUMENT})
             mock_results.list_results = AsyncMock(return_value=[row])
             resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
 
@@ -285,7 +305,9 @@ class TestGetParseResult:
 
     def test_returns_404_without_parse_result(self, user_client):
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.supabase_service") as mock_supabase, \
              patch("api.routes.jobs.result_service") as mock_results:
+            mock_supabase.get_document = AsyncMock(return_value={**JOB_DOCUMENT})
             mock_results.list_results = AsyncMock(return_value=[])
             mock_results.get_document_parse_result = AsyncMock(return_value=None)
             resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")
@@ -296,7 +318,9 @@ class TestGetParseResult:
         """抽取内联解析的 Job 无 job_id 结果时，按关联文档取最新 ParseResult。"""
         row = {**RESULT, "job_id": None, "sample_key": "parse", "data": self.PARSE_DATA}
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
+             patch("api.routes.jobs.supabase_service") as mock_supabase, \
              patch("api.routes.jobs.result_service") as mock_results:
+            mock_supabase.get_document = AsyncMock(return_value={**JOB_DOCUMENT})
             mock_results.list_results = AsyncMock(return_value=[])
             mock_results.get_document_parse_result = AsyncMock(return_value=row)
             resp = user_client.get(f"/api/jobs/{JOB_ID}/parse-result")

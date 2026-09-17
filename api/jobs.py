@@ -62,9 +62,10 @@ async def list_jobs(
     tenant_id: Optional[str] = None,
     document_id: Optional[str] = None,
     configuration_revision_id: Optional[str] = None,
+    created_by: Optional[str] = None,
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    """按租户/文档/Revision 查询 Job（新→旧），供列表接口使用。"""
+    """按租户/文档/Revision/发起人查询 Job（新→旧），供列表接口使用。"""
 
     def _query():
         query = _job_table().select("*").order("created_at", desc=True).limit(limit)
@@ -74,6 +75,8 @@ async def list_jobs(
             query = query.eq("configuration_revision_id", configuration_revision_id)
         if document_id:
             query = query.contains("document_ids", [document_id])
+        if created_by:
+            query = query.eq("created_by", created_by)
         return query.execute()
 
     result = await _run_db(_query)

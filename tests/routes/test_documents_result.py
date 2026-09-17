@@ -232,3 +232,43 @@ class TestDocumentParseResult:
             response = client.get(f"/api/documents/{DOCUMENT_ID}/parse-result")
 
         assert response.status_code == 404
+
+
+class TestDeleteDocumentGuarded:
+    """DELETE /api/documents/{id} 走原子命令：活动占用拒绝、权限隐藏。"""
+
+    def test_conflict_when_document_in_active_job(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = SimpleNamespace(data=[{
+                "out_status": "conflict",
+                "out_file_path": None,
+                "out_reason": "document_in_active_job",
+            }])
+            response = client.delete(f"/api/documents/{DOCUMENT_ID}")
+
+        assert response.status_code == 409
+
+    def test_not_found_hidden(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = SimpleNamespace(data=[{
+                "out_status": "not_found",
+                "out_file_path": None,
+                "out_reason": "document_unavailable",
+            }])
+            response = client.delete(f"/api/documents/{DOCUMENT_ID}")
+
+        assert response.status_code == 404
+
+    def test_deletes_database_row_and_tolerates_missing_file(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = SimpleNamespace(data=[{
+                "out_status": "ok",
+                "out_file_path": "/nonexistent/nf-test-missing.pdf",
+                "out_reason": None,
+            }])
+            response = client.delete(f"/api/documents/{DOCUMENT_ID}")
+
+        assert response.status_code == 200
+        assert response.json()["message"] == "文档删除成功"
+        # 只调用一次（原子 RPC），不再先查后删
+        assert mock_run.await_count == 1
