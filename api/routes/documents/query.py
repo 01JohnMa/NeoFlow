@@ -375,7 +375,6 @@ async def list_documents(
         raise_auth_or_processing_error(e, "查询失败")
 
 
-@router.delete("/{document_id}")
 async def _delete_document_guarded(document_id: str, user: CurrentUser) -> dict:
     """原子删除（迁移 024 RPC）：租户锁内校验权限与活动占用后删除数据库行。"""
     result = await _run_supabase(
@@ -393,6 +392,7 @@ async def _delete_document_guarded(document_id: str, user: CurrentUser) -> dict:
     return row or {}
 
 
+@router.delete("/{document_id}")
 async def delete_document(
     document_id: str,
     user: CurrentUser = Depends(get_current_user)
