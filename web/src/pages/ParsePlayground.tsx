@@ -598,15 +598,6 @@ export function ParsePlayground() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border-default bg-bg-primary px-4 py-2.5">
           <h1 className="text-sm font-semibold text-text-primary">Parse</h1>
-          <Button
-            ref={historyButtonRef}
-            variant="outline"
-            size="sm"
-            onClick={() => setHistoryOpen(true)}
-          >
-            <History className="mr-1 h-4 w-4" />
-            History
-          </Button>
         </div>
 
         <div className="flex items-center gap-2 border-b border-border-default bg-bg-primary px-3 py-2">
@@ -700,8 +691,9 @@ export function ParsePlayground() {
 
       {/* 右栏：Build | Results */}
       <div className="flex w-[440px] flex-shrink-0 flex-col border-l border-border-default bg-bg-card">
-        <div role="tablist" aria-label="解析配置与结果" className="flex border-b border-border-default">
-          {(['build', 'results'] as const).map((tab) => (
+        <div className="flex items-center border-b border-border-default">
+          <div role="tablist" aria-label="解析配置与结果" className="flex">
+            {(['build', 'results'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -719,7 +711,18 @@ export function ParsePlayground() {
             >
               {tab === 'build' ? 'Build' : 'Results'}
             </button>
-          ))}
+            ))}
+          </div>
+          <Button
+            ref={historyButtonRef}
+            variant="ghost"
+            size="sm"
+            className="ml-auto mr-2"
+            onClick={() => setHistoryOpen(true)}
+          >
+            <History className="mr-1 h-4 w-4" />
+            History
+          </Button>
         </div>
 
         {activeTab === 'build' ? (

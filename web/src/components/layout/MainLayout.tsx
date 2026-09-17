@@ -34,7 +34,7 @@ export function MainLayout() {
       >
         {!isPlayground && <Header />}
         {isPlayground ? (
-          <main className="theme-light h-screen overflow-hidden bg-bg-primary">
+          <main className="h-screen overflow-hidden bg-bg-primary">
             <Outlet />
           </main>
         ) : (

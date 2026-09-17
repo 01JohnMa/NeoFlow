@@ -15,19 +15,6 @@
   --nf-border-default: 42 42 51;
 }
 
-/* 浅色作用域（Playground 内容区；旧页面不受影响） */
-.theme-light {
-  --nf-bg-primary: 248 250 252;
-  --nf-bg-secondary: 255 255 255;
-  --nf-bg-tertiary: 241 245 249;
-  --nf-bg-card: 255 255 255;
-  --nf-bg-hover: 241 245 249;
-  --nf-text-primary: 15 23 42;
-  --nf-text-secondary: 51 65 85;
-  --nf-text-muted: 100 116 139;
-  --nf-border-default: 226 232 240;
-}
-
 /* Base Styles */
 * {
   box-sizing: border-box;
