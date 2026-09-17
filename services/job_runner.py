@@ -178,14 +178,28 @@ class JobRunner:
     def handlers(self) -> Dict[str, JobHandler]:
         return dict(self._handlers)
 
-    async def _resolve_configuration_type(
+    async def _resolve_dispatch(
         self,
         job: Dict[str, Any],
     ) -> tuple[str, Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """判别执行定义（fail-closed）：
+
+        1. execution_spec：参数化能力（ADR-0007），无 Configuration Revision
+        2. configuration_revision_id：按 Revision 所属 Configuration.type
+        3. 两者都无：拒绝——来源不明的历史 Job 不得回落旧抽取路径
+        """
+        spec = job.get("execution_spec")
+        if isinstance(spec, dict) and spec:
+            capability = spec.get("capability")
+            if not capability:
+                raise JobRunnerError("execution_spec 缺少 capability")
+            return str(capability), None, None
+
         revision_id = job.get("configuration_revision_id")
         if not revision_id:
-            # 兼容没有 Revision 的历史 job：旧文档处理统一按抽取处理
-            return EXTRACT_CONFIGURATION_TYPE, None, None
+            raise JobRunnerError(
+                "Job 缺少执行定义（execution_spec 与 configuration_revision_id 均缺失）"
+            )
 
         revision = await configuration_service.get_revision(str(revision_id))
         if not revision:
@@ -202,16 +216,17 @@ class JobRunner:
         return configuration.get("type"), revision, configuration
 
     async def run(self, job: Dict[str, Any]) -> Any:
-        """加载 job 固定的 Revision 并分发到对应 handler。"""
-        configuration_type, revision, configuration = await self._resolve_configuration_type(job)
+        """判别执行定义并分发到对应 handler。"""
+        execution_type, revision, configuration = await self._resolve_dispatch(job)
 
-        handler = self._handlers.get(configuration_type)
+        handler = self._handlers.get(execution_type)
         if handler is None:
-            raise JobRunnerError(f"未注册的 Configuration Type: {configuration_type}")
+            raise JobRunnerError(f"未注册的执行能力: {execution_type}")
 
         logger.info(
             f"JobRunner 分发: job_id={job.get('job_id')} "
-            f"type={configuration_type} revision={job.get('configuration_revision_id') or 'legacy'}"
+            f"capability={execution_type} "
+            f"revision={job.get('configuration_revision_id') or 'none'}"
         )
         return await handler(job=job, revision=revision, configuration=configuration)
 

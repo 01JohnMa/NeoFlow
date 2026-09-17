@@ -78,19 +78,50 @@ class TestDispatch:
                 await runner.run(_job())
 
     @pytest.mark.asyncio
-    async def test_legacy_job_without_revision_uses_extract_handler(self):
-        from services.job_runner import JobRunner
+    async def test_job_without_execution_definition_rejected(self):
+        """无 execution_spec 且无 Revision：来源不明，fail-closed 不回落旧抽取。"""
+        from services.job_runner import JobRunner, JobRunnerError
 
-        handler = AsyncMock(return_value="legacy-ok")
+        handler = AsyncMock()
         runner = JobRunner(handlers={"extract": handler})
 
         with patch("services.job_runner.configuration_service") as mock_svc:
-            result = await runner.run(_job(configuration_revision_id=None))
+            with pytest.raises(JobRunnerError):
+                await runner.run(_job(configuration_revision_id=None))
 
-        assert result == "legacy-ok"
+        mock_svc.get_revision.assert_not_called()
+        handler.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execution_spec_dispatches_capability_without_revision(self):
+        from services.job_runner import JobRunner
+
+        handler = AsyncMock(return_value="parse-ok")
+        runner = JobRunner(handlers={"parse": handler})
+        job = _job(
+            configuration_revision_id=None,
+            execution_spec={
+                "capability": "parse",
+                "spec_version": "1",
+                "effective_params": {"model_version": "vlm"},
+            },
+        )
+
+        with patch("services.job_runner.configuration_service") as mock_svc:
+            result = await runner.run(job)
+
+        assert result == "parse-ok"
         mock_svc.get_revision.assert_not_called()
         assert handler.await_args.kwargs["revision"] is None
         assert handler.await_args.kwargs["configuration"] is None
+
+    @pytest.mark.asyncio
+    async def test_execution_spec_without_capability_rejected(self):
+        from services.job_runner import JobRunner, JobRunnerError
+
+        runner = JobRunner(handlers={"parse": AsyncMock()})
+        with pytest.raises(JobRunnerError):
+            await runner.run(_job(configuration_revision_id=None, execution_spec={"spec_version": "1"}))
 
 
 class TestDefaultHandlers:

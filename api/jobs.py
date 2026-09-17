@@ -147,6 +147,80 @@ async def update_job(job_id: str, stage: str, **extra: Any) -> None:
     )
 
 
+async def update_job_if_owned(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    stage: str,
+    **extra: Any,
+) -> bool:
+    """认领感知更新：仅当仍持有认领令牌（worker + attempt + processing）时生效。
+
+    返回是否真正更新到行；False 表示认领已失效，调用方应停止写入。
+    """
+    payload = {
+        "stage": stage,
+        "progress": STAGE_PROGRESS.get(stage, 0),
+        "updated_at": _utc_now_iso(),
+        **extra,
+    }
+    result = await _run_db(
+        lambda: _job_table().update(payload)
+        .eq("job_id", job_id)
+        .eq("locked_by", worker_id)
+        .eq("attempts", attempts)
+        .eq("status", "processing")
+        .execute()
+    )
+    return bool(result.data)
+
+
+async def renew_job_claim(job_id: str, worker_id: str, attempts: int) -> bool:
+    """心跳续租：仅持有认领时刷新 locked_at，避免长任务被重领。"""
+    result = await _run_db(
+        lambda: _job_table().update({
+            "locked_at": _utc_now_iso(),
+            "updated_at": _utc_now_iso(),
+        })
+        .eq("job_id", job_id)
+        .eq("locked_by", worker_id)
+        .eq("attempts", attempts)
+        .eq("status", "processing")
+        .execute()
+    )
+    return bool(result.data)
+
+
+async def commit_parse_job(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    outcome: str,
+    error: Optional[str] = None,
+    parse_data: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """原子交卷（迁移 024 RPC）：锁 Job、校验认领、写规范产物或失败终态。
+
+    返回 completed / failed / already_committed / stale_token / stale / not_found。
+    """
+    result = await _run_db(
+        lambda: supabase_service.client.rpc(
+            "commit_parse_job",
+            {
+                "p_job_id": job_id,
+                "p_worker_id": worker_id,
+                "p_attempts": attempts,
+                "p_outcome": outcome,
+                "p_error": error,
+                "p_parse_data": parse_data,
+            },
+        ).execute()
+    )
+    data = result.data or []
+    row = data if isinstance(data, dict) else (data[0] if data else None)
+    return (row or {}).get("out_status")
+
+
 async def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     """按 ID 获取 Job，不存在返回 None。"""
     result = await _run_db(

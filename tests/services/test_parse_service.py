@@ -370,3 +370,106 @@ class TestEnsureParseRevision:
         updated_definition = mock_config.update_configuration.await_args.args[1]
         assert updated_definition["definition"]["parse"]["model_version"] == "vlm"
         mock_config.publish_configuration.assert_awaited_once()
+
+
+class TestParameterizedParseJob:
+    """execution_spec 路径：单文件、冻结参数、认领感知、原子交卷。"""
+
+    def _spec_job(self, **spec_overrides):
+        spec = {
+            "capability": "parse",
+            "spec_version": "1",
+            "effective_params": {"model_version": "vlm", "backend": "mineru-api"},
+        }
+        spec.update(spec_overrides)
+        return _job(
+            configuration_revision_id=None,
+            locked_by="worker-1",
+            attempts=2,
+            execution_spec=spec,
+        )
+
+    @pytest.mark.asyncio
+    async def test_uses_frozen_params_and_commits_result(self):
+        from services.parse_service import handle_parse_job
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+        job = self._spec_job()
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter) as mock_adapter, \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job_if_owned", new_callable=AsyncMock) as mock_owned, \
+             patch("api.jobs.commit_parse_job", new_callable=AsyncMock) as mock_commit:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_owned.return_value = True
+            mock_commit.return_value = "completed"
+
+            result = await handle_parse_job(job)
+
+        assert result is not None
+        # worker 只读冻结参数，不回退当前默认值
+        mock_adapter.assert_called_once_with(job["execution_spec"]["effective_params"])
+        mock_commit.assert_awaited_once()
+        assert mock_commit.await_args.args[3] == "ok"
+        assert mock_commit.await_args.kwargs["parse_data"]["markdown"] == "hello"
+
+    @pytest.mark.asyncio
+    async def test_adapter_failure_commits_failed_without_product(self):
+        from services.parse_service import handle_parse_job
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(side_effect=RuntimeError("mineru timeout"))
+        job = self._spec_job()
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job_if_owned", new_callable=AsyncMock) as mock_owned, \
+             patch("api.jobs.commit_parse_job", new_callable=AsyncMock) as mock_commit:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_owned.return_value = True
+            mock_commit.return_value = "failed"
+
+            result = await handle_parse_job(job)
+
+        assert result is None
+        mock_commit.assert_awaited_once()
+        assert mock_commit.await_args.args[3] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_lost_claim_before_commit_writes_no_product(self):
+        from services.parse_service import handle_parse_job
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=_parse_result())
+        job = self._spec_job()
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job_if_owned", new_callable=AsyncMock) as mock_owned, \
+             patch("api.jobs.commit_parse_job", new_callable=AsyncMock) as mock_commit:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_owned.return_value = False
+
+            result = await handle_parse_job(job)
+
+        assert result is None
+        mock_owned.assert_awaited_once()
+        mock_commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unsupported_spec_version_fails_closed(self):
+        from services.parse_service import handle_parse_job
+
+        job = self._spec_job(spec_version="99")
+
+        with patch("services.parse_service.get_parser_adapter") as mock_adapter, \
+             patch("services.supabase_service.supabase_service"), \
+             patch("api.jobs.commit_parse_job", new_callable=AsyncMock) as mock_commit:
+            mock_commit.return_value = "failed"
+            result = await handle_parse_job(job)
+
+        assert result is None
+        mock_adapter.assert_not_called()
+        mock_commit.assert_awaited_once()
+        assert "99" in mock_commit.await_args.kwargs["error"]

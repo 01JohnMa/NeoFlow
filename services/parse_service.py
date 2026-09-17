@@ -1,12 +1,12 @@
 # services/parse_service.py
-"""Parse Job handler：按固定 Revision 的 parse 参数解析文档并落 Result。
+"""Parse Job handler：解析文档并落 Result。
 
-执行入口仍是 JobRunner seam；本模块只做三件事：
-1. 从 Revision definition 的 parse 段落取解析参数（缺省用 PARSE_DEFAULTS）；
-2. 通过 ParserAdapter 产出 ParseResult；
-3. 整体 JSONB 写入 results 表（sample_key=parse），并推进 Job 状态。
+两条路径（ADR-0007）：
+- 参数化（execution_spec）：单文件、冻结参数、心跳续租、commit_parse_job 原子交卷
+- 历史 Revision：从 Revision definition.parse 取参数，逐文档写 Result 并推进 Job 状态
 """
 
+import asyncio
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -151,12 +151,153 @@ async def ensure_parse_result(
     return parse_data
 
 
+async def _heartbeat_until(
+    stop_event: "asyncio.Event",
+    *,
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    interval: float,
+) -> None:
+    """长任务心跳：定时续租，认领失效即退出。"""
+    from api.jobs import renew_job_claim
+
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            return
+        except asyncio.TimeoutError:
+            pass
+        if not await renew_job_claim(job_id, worker_id, attempts):
+            logger.warning(f"Parse 心跳续租失败，认领已失效: job_id={job_id}")
+            return
+
+
+async def _commit_parameterized_job(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    outcome: str,
+    error: Optional[str] = None,
+    parse_data: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """参数化 Parse 的交卷（原子 RPC）。"""
+    from api.jobs import commit_parse_job
+
+    status = await commit_parse_job(
+        job_id, worker_id, attempts, outcome, error=error, parse_data=parse_data
+    )
+    if status not in ("completed", "failed", "already_committed"):
+        logger.warning(f"Parse 交卷未确认: job_id={job_id}, status={status}")
+    return status
+
+
+async def _handle_parameterized_parse_job(
+    job: Dict[str, Any],
+    spec: Dict[str, Any],
+) -> Any:
+    """参数化 Parse（execution_spec）：单文件、冻结参数、认领感知写入。"""
+    from api.jobs import update_job, update_job_if_owned
+    from services.parse_request_service import PARSE_CAPABILITY, PARSE_SPEC_VERSION
+    from services.supabase_service import supabase_service
+
+    job_id = str(job.get("job_id"))
+    worker_id = job.get("locked_by")
+    attempts = job.get("attempts")
+
+    if not worker_id or attempts is None:
+        await update_job(job_id, "failed", error="参数化 Parse Job 缺少认领令牌")
+        return None
+
+    if spec.get("capability") != PARSE_CAPABILITY:
+        await _commit_parameterized_job(
+            job_id, worker_id, attempts, "failed",
+            f"不支持的执行能力: {spec.get('capability')}",
+        )
+        return None
+    if spec.get("spec_version") != PARSE_SPEC_VERSION:
+        await _commit_parameterized_job(
+            job_id, worker_id, attempts, "failed",
+            f"不支持的执行规格版本: {spec.get('spec_version')}",
+        )
+        return None
+
+    document_ids = job.get("document_ids") or []
+    if len(document_ids) != 1:
+        await _commit_parameterized_job(
+            job_id, worker_id, attempts, "failed",
+            "参数化 Parse Job 必须且只能包含一个文档",
+        )
+        return None
+
+    document_id = str(document_ids[0])
+    document = await supabase_service.get_document(document_id)
+    if not document or not document.get("file_path"):
+        await _commit_parameterized_job(
+            job_id, worker_id, attempts, "failed", f"文档不存在或缺少文件: {document_id}"
+        )
+        return None
+
+    params = dict(spec.get("effective_params") or {})
+
+    if not await update_job_if_owned(job_id, worker_id, attempts, "parsing"):
+        logger.warning(f"Parse 任务认领已失效，跳过执行: job_id={job_id}")
+        return None
+
+    stop_event = asyncio.Event()
+    interval = max(30.0, float(settings.DOC_WORKER_STALE_LOCK_SECONDS) / 3.0)
+    heartbeat = asyncio.create_task(
+        _heartbeat_until(
+            stop_event,
+            job_id=job_id,
+            worker_id=worker_id,
+            attempts=attempts,
+            interval=interval,
+        )
+    )
+
+    try:
+        adapter = get_parser_adapter(params)
+        result = await adapter.parse(document["file_path"], params)
+    except Exception as exc:
+        logger.opt(exception=exc).error(
+            f"参数化 Parse 失败: job_id={job_id}, document_id={document_id}"
+        )
+        stop_event.set()
+        await heartbeat
+        await _commit_parameterized_job(
+            job_id, worker_id, attempts, "failed", str(exc)
+        )
+        return None
+    finally:
+        stop_event.set()
+        if not heartbeat.done():
+            await heartbeat
+
+    if not await update_job_if_owned(job_id, worker_id, attempts, "saving"):
+        # 解析期间认领失效：不得提交产物
+        return None
+
+    await _commit_parameterized_job(
+        job_id, worker_id, attempts, "ok", parse_data=result.to_dict()
+    )
+    return result
+
+
 async def handle_parse_job(
     job: Dict[str, Any],
     revision: Optional[Dict[str, Any]] = None,
     configuration: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """JobRunner 的 parse handler。"""
+    """JobRunner 的 parse handler。
+
+    - execution_spec 存在：参数化 Parse（单文件、冻结参数、原子交卷）
+    - 否则：历史 Revision 路径（系统解析配置，逐文档写 Result）
+    """
+    spec = job.get("execution_spec")
+    if isinstance(spec, dict) and spec:
+        return await _handle_parameterized_parse_job(job, spec)
+
     from api.jobs import update_job
     from services.supabase_service import supabase_service
 
