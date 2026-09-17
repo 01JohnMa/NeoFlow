@@ -6,7 +6,7 @@ API 进程只负责创建 processing_jobs；本模块负责认领并执行重 OC
 import asyncio
 import os
 import socket
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
