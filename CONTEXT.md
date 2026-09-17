@@ -5,8 +5,12 @@ NeoFlow turns one or more source documents into reviewable, structured records a
 ## Tenancy and projects
 
 **Tenant**:
-The ownership and data-isolation boundary for one organization using NeoFlow. It is established by the integrating application — an enterprise SaaS that already models its own tenants — and supplied to NeoFlow at integration time; NeoFlow isolates by it but does not onboard or manage it. A Tenant owns one or more Projects.
+The ownership and data-isolation boundary for one organization using NeoFlow. It is established upstream by the integrating application and the enterprise AI middle platform that registers applications, and arrives with each request; NeoFlow isolates by it but never onboards, registers, or manages it. A Tenant owns one or more Projects.
 _Avoid_: account, customer workspace, department (internal org units are not Tenants)
+
+**Integrating Application**:
+An application registered in the enterprise AI middle platform that consumes NeoFlow capabilities on behalf of one Tenant. NeoFlow does not manage its registration or credentials.
+_Avoid_: client, API consumer, customer
 
 **Project**:
 A workspace within one Tenant that owns Configurations, Processing Jobs, and Extraction Results.
