@@ -193,14 +193,17 @@ function DocumentPreview({
 function HistoryDrawer({
   open,
   currentUser,
+  returnFocusTo,
   onClose,
   onOpenJob,
 }: {
   open: boolean
   currentUser?: string
+  returnFocusTo?: React.RefObject<HTMLButtonElement | null>
   onClose: () => void
   onOpenJob: (jobId: string) => void
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const historyQuery = useQuery({
     queryKey: ['parse-history', currentUser],
     queryFn: () => parseService.listJobs({ created_by: currentUser, limit: 50 }),
@@ -210,12 +213,17 @@ function HistoryDrawer({
 
   useEffect(() => {
     if (!open) return
+    const returnTarget = returnFocusTo?.current
+    closeButtonRef.current?.focus()
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [open, onClose])
+    return () => {
+      window.removeEventListener('keydown', handler)
+      returnTarget?.focus()
+    }
+  }, [open, onClose, returnFocusTo])
 
   if (!open) return null
 
@@ -229,7 +237,7 @@ function HistoryDrawer({
       <div className="flex h-full w-full max-w-md flex-col border-l border-border-default bg-bg-card">
         <div className="flex items-center justify-between border-b border-border-default px-4 py-3">
           <h2 className="text-sm font-semibold text-text-primary">解析历史（我的）</h2>
-          <Button variant="ghost" size="icon-sm" aria-label="关闭" onClick={onClose}>
+          <Button ref={closeButtonRef} variant="ghost" size="icon-sm" aria-label="关闭" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -287,7 +295,9 @@ export function ParsePlayground() {
   const [copied, setCopied] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const historyButtonRef = useRef<HTMLButtonElement>(null)
   const restoreAttempted = useRef(false)
+  const docRestoreAttempted = useRef(false)
   const queryClient = useQueryClient()
   const { profile } = useProfile()
 
@@ -408,6 +418,44 @@ export function ParsePlayground() {
     void restoreJob(jobId).catch(() => undefined)
   }, [searchParams, restoreJob])
 
+  // 无 job 参数时按 ?doc= 恢复选中文档
+  useEffect(() => {
+    const docId = searchParams.get('doc')
+    if (!docId || docRestoreAttempted.current || chunks.some((c) => c.documentId === docId)) return
+    docRestoreAttempted.current = true
+    void (async () => {
+      try {
+        const status = await documentsService.getStatus(docId)
+        const key = `restored-doc-${docId}`
+        setChunks((prev) =>
+          prev.some((c) => c.documentId === docId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  key,
+                  name: status.display_name || status.original_file_name || `文档 ${docId.slice(0, 8)}`,
+                  documentId: docId,
+                  status: 'ready',
+                },
+              ],
+        )
+        setSelectedKey(key)
+      } catch {
+        // 文档不可用则忽略
+      }
+    })()
+  }, [searchParams, chunks])
+
+  // 选中文档同步到 URL（replace，不新增历史）
+  useEffect(() => {
+    if (!selectedDocumentId) return
+    if (searchParams.get('doc') === selectedDocumentId) return
+    const next = new URLSearchParams(searchParams)
+    next.set('doc', selectedDocumentId)
+    setSearchParams(next, { replace: true })
+  }, [selectedDocumentId, searchParams, setSearchParams])
+
   const handleFiles = async (files: FileList) => {
     const incoming = Array.from(files)
     const newChunks: FileChunk[] = incoming.map((file, index) => ({
@@ -448,13 +496,28 @@ export function ParsePlayground() {
       const confirmed = window.confirm('该文件仍在解析，移除不会取消任务。确定移除？')
       if (!confirmed) return
     }
-    setChunks((prev) => prev.filter((item) => item.key !== chunk.key))
-    if (selectedKey === chunk.key) setSelectedKey(null)
+    const remaining = chunks.filter((item) => item.key !== chunk.key)
+    setChunks(remaining)
+    if (selectedKey === chunk.key) setSelectedKey(remaining[0]?.key ?? null)
   }
 
   const handleRun = async () => {
     const eligible = chunks.filter((chunk) => chunk.documentId)
     if (eligible.length === 0) return
+
+    const reprocessed = eligible.filter((chunk) => chunk.status === 'done' || chunk.status === 'failed')
+    if (reprocessed.length > 0) {
+      const preview = eligible
+        .slice(0, 3)
+        .map((chunk) => chunk.name)
+        .join('、')
+      const more = eligible.length > 3 ? ` 等 ${eligible.length} 个文件` : ''
+      const confirmed = window.confirm(
+        `将对 ${preview}${more} 重新解析（含 ${reprocessed.length} 个已有结果的文件），继续？`,
+      )
+      if (!confirmed) return
+    }
+
     setRunError('')
     setRunning(true)
     try {
@@ -508,6 +571,14 @@ export function ParsePlayground() {
   }
 
   const anyRunning = chunks.some((chunk) => chunk.status === 'running')
+  const runningCount = chunks.filter((chunk) => chunk.status === 'running').length
+  const doneCount = chunks.filter((chunk) => chunk.status === 'done').length
+  const failedCount = chunks.filter((chunk) => chunk.status === 'failed').length
+  const announcement = anyRunning
+    ? `解析进行中：${runningCount} 个文件`
+    : chunks.length > 0 && doneCount + failedCount === chunks.length
+      ? `解析结束：成功 ${doneCount}，失败 ${failedCount}`
+      : ''
 
   return (
     <div className="flex h-full text-text-primary">
@@ -525,55 +596,62 @@ export function ParsePlayground() {
 
       {/* 左栏：文件与原件 */}
       <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center justify-between border-b border-border-default bg-bg-primary px-4 py-2.5">
+          <h1 className="text-sm font-semibold text-text-primary">Parse</h1>
+          <Button
+            ref={historyButtonRef}
+            variant="outline"
+            size="sm"
+            onClick={() => setHistoryOpen(true)}
+          >
+            <History className="mr-1 h-4 w-4" />
+            History
+          </Button>
+        </div>
+
         <div className="flex items-center gap-2 border-b border-border-default bg-bg-primary px-3 py-2">
           <Button size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="mr-1 h-4 w-4" />
             Upload
           </Button>
           <span className="text-xs text-text-muted">{chunks.length} file{chunks.length === 1 ? '' : 's'}</span>
-          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-            {chunks.map((chunk) => (
-              <button
-                key={chunk.key}
-                type="button"
-                onClick={() => setSelectedKey(chunk.key)}
-                title={chunk.error || chunkStatusLabel(chunk.status)}
-                className={cn(
-                  'flex flex-shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-                  selectedKey === chunk.key
-                    ? 'border-primary-500/60 bg-primary-500/10 text-text-primary'
-                    : 'border-border-default bg-bg-card text-text-secondary hover:bg-bg-hover',
-                )}
-              >
-                <StatusDot status={chunk.status} />
-                <span className="max-w-[140px] truncate">{chunk.name}</span>
-                <span className="text-[10px] text-text-muted">{chunkStatusLabel(chunk.status)}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`移除 ${chunk.name}`}
-                  className="text-text-muted hover:text-error-500"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    handleRemoveChunk(chunk)
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      handleRemoveChunk(chunk)
-                    }
-                  }}
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto" role="list" aria-label="已上传文件">
+            {chunks.map((chunk) => {
+              const selected = selectedKey === chunk.key
+              return (
+                <div
+                  key={chunk.key}
+                  role="listitem"
+                  className={cn(
+                    'flex flex-shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors',
+                    selected
+                      ? 'border-primary-500/60 bg-primary-500/10 text-text-primary'
+                      : 'border-border-default bg-bg-card text-text-secondary hover:bg-bg-hover',
+                  )}
                 >
-                  <X className="h-3.5 w-3.5" />
-                </span>
-              </button>
-            ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedKey(chunk.key)}
+                    aria-pressed={selected}
+                    title={chunk.error || chunkStatusLabel(chunk.status)}
+                    className="flex items-center gap-2"
+                  >
+                    <StatusDot status={chunk.status} />
+                    <span className="max-w-[140px] truncate">{chunk.name}</span>
+                    <span className="text-[10px] text-text-muted">{chunkStatusLabel(chunk.status)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`移除 ${chunk.name}`}
+                    className="rounded p-0.5 text-text-muted hover:text-error-500"
+                    onClick={() => handleRemoveChunk(chunk)}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )
+            })}
           </div>
-          <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
-            <History className="mr-1 h-4 w-4" />
-            History
-          </Button>
         </div>
 
         <div className="min-h-0 flex-1">
@@ -596,11 +674,15 @@ export function ParsePlayground() {
 
       {/* 右栏：Build | Results */}
       <div className="flex w-[440px] flex-shrink-0 flex-col border-l border-border-default bg-bg-card">
-        <div className="flex border-b border-border-default">
+        <div role="tablist" aria-label="解析配置与结果" className="flex border-b border-border-default">
           {(['build', 'results'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
+              role="tab"
+              id={`parse-tab-${tab}`}
+              aria-selected={activeTab === tab}
+              aria-controls={`parse-panel-${tab}`}
               onClick={() => setActiveTab(tab)}
               className={cn(
                 'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors',
@@ -615,7 +697,12 @@ export function ParsePlayground() {
         </div>
 
         {activeTab === 'build' ? (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            role="tabpanel"
+            id="parse-panel-build"
+            aria-labelledby="parse-tab-build"
+            className="flex min-h-0 flex-1 flex-col"
+          >
             <div className="flex-1 space-y-5 overflow-auto p-4">
               <div>
                 <h3 className="text-sm font-semibold text-text-primary">解析模式</h3>
@@ -678,7 +765,12 @@ export function ParsePlayground() {
             </div>
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            role="tabpanel"
+            id="parse-panel-results"
+            aria-labelledby="parse-tab-results"
+            className="flex min-h-0 flex-1 flex-col"
+          >
             <div className="flex items-center gap-2 border-b border-border-default px-3 py-2">
               <span className="text-xs text-text-muted">
                 {result ? `${result.engine?.model_version || 'pipeline'} · ${result.pages.length} 页` : '暂无结果'}
@@ -711,12 +803,28 @@ export function ParsePlayground() {
 
             <div className="min-h-0 flex-1 overflow-auto p-4">
               {!selectedChunk && <p className="py-10 text-center text-sm text-text-muted">选择左侧文件查看结果</p>}
+              {selectedChunk?.status === 'failed' && selectedChunk.error && (
+                <p
+                  role="alert"
+                  className="mb-3 rounded-lg border border-error-500/30 bg-error-500/10 p-3 text-xs text-error-500"
+                >
+                  {selectedChunk.error}
+                </p>
+              )}
+              {selectedChunk && resultQuery.isError && (
+                <p
+                  role="alert"
+                  className="mb-3 rounded-lg border border-error-500/30 bg-error-500/10 p-3 text-xs text-error-500"
+                >
+                  结果加载失败：{getApiErrorMessage(resultQuery.error, '请稍后重试')}
+                </p>
+              )}
               {selectedChunk && resultQuery.isLoading && (
                 <div className="flex justify-center py-10">
                   <Spinner />
                 </div>
               )}
-              {selectedChunk && !resultQuery.isLoading && !result && (
+              {selectedChunk && !resultQuery.isLoading && !resultQuery.isError && !result && (
                 <p className="py-10 text-center text-sm text-text-muted">
                   {selectedChunk.status === 'running' ? '解析进行中，完成后自动展示' : '该文档还没有解析结果'}
                 </p>
@@ -733,9 +841,14 @@ export function ParsePlayground() {
       <HistoryDrawer
         open={historyOpen}
         currentUser={profile?.user_id}
+        returnFocusTo={historyButtonRef}
         onClose={() => setHistoryOpen(false)}
         onOpenJob={handleOpenHistoryJob}
       />
+
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
     </div>
   )
 }
