@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 语义 token：默认深色 */
+:root {
+  --nf-bg-primary: 13 13 16;
+  --nf-bg-secondary: 17 17 22;
+  --nf-bg-tertiary: 23 23 29;
+  --nf-bg-card: 21 21 26;
+  --nf-bg-hover: 32 32 39;
+  --nf-text-primary: 241 245 249;
+  --nf-text-secondary: 203 213 225;
+  --nf-text-muted: 148 163 184;
+  --nf-border-default: 42 42 51;
+}
+
+/* 浅色作用域（Playground 内容区；旧页面不受影响） */
+.theme-light {
+  --nf-bg-primary: 248 250 252;
+  --nf-bg-secondary: 255 255 255;
+  --nf-bg-tertiary: 241 245 249;
+  --nf-bg-card: 255 255 255;
+  --nf-bg-hover: 241 245 249;
+  --nf-text-primary: 15 23 42;
+  --nf-text-secondary: 51 65 85;
+  --nf-text-muted: 100 116 139;
+  --nf-border-default: 226 232 240;
+}
+
 /* Base Styles */
 * {
   box-sizing: border-box;

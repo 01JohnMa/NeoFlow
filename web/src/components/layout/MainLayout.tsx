@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/useStore'
 import { Sidebar } from './Sidebar'
@@ -9,6 +9,11 @@ import { PageLoader } from '@/components/ui/spinner'
 export function MainLayout() {
   const { sidebarOpen } = useUIStore()
   const { isLoading, isAuthenticated } = useRequireAuth()
+  const location = useLocation()
+
+  // Playground（Parse 页）自带顶栏与浅色作用域，不使用全局 Header 与页面留白
+  const isPlayground =
+    location.pathname === '/parse' || location.pathname.startsWith('/parse?')
 
   if (isLoading) {
     return <PageLoader />
@@ -27,12 +32,17 @@ export function MainLayout() {
           sidebarOpen ? 'md:ml-64 ml-0' : 'md:ml-20 ml-0'
         )}
       >
-        <Header />
-        <main className="p-4 md:p-6 max-w-[1600px]">
-          <Outlet />
-        </main>
+        {!isPlayground && <Header />}
+        {isPlayground ? (
+          <main className="theme-light h-screen overflow-hidden bg-bg-primary">
+            <Outlet />
+          </main>
+        ) : (
+          <main className="p-4 md:p-6 max-w-[1600px]">
+            <Outlet />
+          </main>
+        )}
       </div>
     </div>
   )
 }
-

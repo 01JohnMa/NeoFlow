@@ -35,19 +35,23 @@ export default {
         error: {
           500: '#ef4444',
         },
-        // Background
+        // Surface / text / border 使用语义 CSS 变量：
+        // 默认深色；`.theme-light` 作用域内切换为浅色（Playground 内容区）
         bg: {
-          primary: '#0d0d10', secondary: '#111116', tertiary: '#17171d', card: '#15151a', hover: '#202027',
+          primary: 'rgb(var(--nf-bg-primary) / <alpha-value>)',
+          secondary: 'rgb(var(--nf-bg-secondary) / <alpha-value>)',
+          tertiary: 'rgb(var(--nf-bg-tertiary) / <alpha-value>)',
+          card: 'rgb(var(--nf-bg-card) / <alpha-value>)',
+          hover: 'rgb(var(--nf-bg-hover) / <alpha-value>)',
         },
-        // Text
         text: {
-          primary: '#f1f5f9',
-          secondary: '#cbd5e1',
-          muted: '#94a3b8',
+          primary: 'rgb(var(--nf-text-primary) / <alpha-value>)',
+          secondary: 'rgb(var(--nf-text-secondary) / <alpha-value>)',
+          muted: 'rgb(var(--nf-text-muted) / <alpha-value>)',
         },
-        // Border
         border: {
-          default: '#2a2a33', focus: '#7c5cff',
+          default: 'rgb(var(--nf-border-default) / <alpha-value>)',
+          focus: '#7c5cff',
         },
       },
       fontFamily: {

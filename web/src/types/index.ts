@@ -339,6 +339,15 @@ export interface ProcessingJob {
   error: string | null
   tenant_id: string | null
   configuration_revision_id: string | null
+  execution_spec?: {
+    capability?: string
+    spec_version?: string
+    document_id?: string
+    effective_params?: { model_version?: string; [key: string]: unknown }
+    policy_version?: string
+    [key: string]: unknown
+  } | null
+  request_id?: string | null
   created_at: string
   updated_at: string
   finished_at?: string | null
