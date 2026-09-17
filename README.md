@@ -171,7 +171,7 @@ neoflow/
 # 上传文档
 POST /api/documents/upload
 
-# 处理文档（自动分类或按文档关联模板）
+# 按已发布 Configuration 处理文档
 POST /api/documents/{id}/process?sync=false
 
 # 按指定配置处理
@@ -214,7 +214,7 @@ GET /api/tenants
 ### 管理员配置
 
 ```bash
-# 模板、部门、示例等配置接口（需管理员权限）
+# Configuration、Revision 与字段描述接口（需管理员权限）
 # 详见 /docs
 ```
 
@@ -238,13 +238,11 @@ FEISHU_APP_ID=your-app-id
 FEISHU_APP_SECRET=your-app-secret
 FEISHU_PUSH_ENABLED=false
 
-# 文档处理模式：ocr_llm（默认）| vlm
-DOC_PROCESS_MODE=ocr_llm
-
-# VLM 配置（DOC_PROCESS_MODE=vlm 时生效）
-VLM_API_KEY=
-VLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-VLM_MODEL_ID=qwen3.7-plus
+# MinerU 解析（配置的 parse.model_version 选择 pipeline 或 vlm）
+MINERU_API_KEY=
+MINERU_BASE_URL=https://mineru.net
+MINERU_POLL_INTERVAL_SECONDS=5.0
+MINERU_PARSE_TIMEOUT_SECONDS=900
 ```
 
 > 各模板的飞书目标表格（feishu_bitable_token、feishu_table_id）在

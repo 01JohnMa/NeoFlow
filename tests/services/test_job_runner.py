@@ -96,14 +96,45 @@ class TestDispatch:
 class TestDefaultHandlers:
     def test_default_runner_registers_extract_and_parse(self):
         from services.job_runner import (
+            CLASSIFY_CONFIGURATION_TYPE,
             EXTRACT_CONFIGURATION_TYPE,
             PARSE_CONFIGURATION_TYPE,
+            SPLIT_CONFIGURATION_TYPE,
             JobRunner,
         )
 
         handlers = JobRunner().handlers
         assert EXTRACT_CONFIGURATION_TYPE in handlers
         assert PARSE_CONFIGURATION_TYPE in handlers
+        assert CLASSIFY_CONFIGURATION_TYPE in handlers
+        assert SPLIT_CONFIGURATION_TYPE in handlers
+
+    @pytest.mark.asyncio
+    async def test_classify_handler_consumes_parse_result_and_persists_result(self):
+        from services.job_runner import handle_classify_job
+
+        parse_row = {"id": "parse-1", "data": {"markdown": "invoice", "pages": []}}
+        stored = {"id": "result-1"}
+        with patch("agents.workflow.document_workflow") as mock_workflow, \
+             patch("services.result_service.result_service") as mock_result, \
+             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update, \
+             patch("services.classify_split_service.run_classify", new_callable=AsyncMock) as mock_run:
+            mock_workflow._llm_invoke_with_retry = AsyncMock()
+            mock_result.get_document_parse_result = AsyncMock(return_value=parse_row)
+            mock_result.build_result_row.return_value = {"data": {"label": "invoice"}}
+            mock_result.create_result = AsyncMock(return_value=stored)
+            mock_run.return_value = {"label": "invoice", "confidence": 0.9, "source_refs": []}
+
+            result = await handle_classify_job(
+                job=_job(),
+                revision={"definition": {"classify": {"rules": ["invoice"]}}},
+                configuration={"type": "classify"},
+            )
+
+        assert result["label"] == "invoice"
+        mock_result.get_document_parse_result.assert_awaited_once_with(DOCUMENT_ID, tenant_id=TENANT_ID)
+        mock_result.create_result.assert_awaited_once()
+        assert [call.args[1] for call in mock_update.await_args_list] == ["llm", "completed"]
 
     @pytest.mark.asyncio
     async def test_default_runner_dispatches_parse_jobs(self):

@@ -46,20 +46,33 @@ PARSE_DEFAULTS: Dict[str, Any] = {
     "poll_interval_seconds": 5,
 }
 
+CLASSIFY_DEFAULTS: Dict[str, Any] = {
+    "rules": [],
+    "fallback_label": "unclassified",
+    "instructions": None,
+}
+
+SPLIT_DEFAULTS: Dict[str, Any] = {
+    "categories": [],
+    "allow_uncategorized": "include",
+    "instructions": None,
+}
+
 DEFAULT_DEFINITION: Dict[str, Any] = {
     "fields": [],
     "extraction_prompt": None,
     "extraction_mode": "ocr_llm",
-    "per_page_extraction": False,
     "output_mode": "bitable",
     "push_attachment": True,
     "auto_approve": False,
     "feishu": {"bitable_token": None, "table_id": None},
     "excel": {"file_name": None, "path": None, "placeholders": []},
     "parse": deepcopy(PARSE_DEFAULTS),
+    "classify": deepcopy(CLASSIFY_DEFAULTS),
+    "split": deepcopy(SPLIT_DEFAULTS),
 }
 
-SECTION_KEYS = ("feishu", "excel", "parse")
+SECTION_KEYS = ("feishu", "excel", "parse", "classify", "split")
 
 # 字段示例（few-shot）追加前缀：单行写入 extraction_hint，保持 prompt 字段表行完整
 FIELD_EXAMPLE_PREFIX = "示例："
@@ -165,8 +178,9 @@ def build_extraction_config(
         "fields": definition["fields"],
         "extraction_prompt": definition["extraction_prompt"],
         "extraction_mode": definition["extraction_mode"],
-        "per_page_extraction": definition["per_page_extraction"],
         "parse": definition["parse"],
+        "classify": definition["classify"],
+        "split": definition["split"],
         "output_mode": definition["output_mode"],
         "push_attachment": definition["push_attachment"],
         "auto_approve": definition["auto_approve"],

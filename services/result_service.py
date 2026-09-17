@@ -1,16 +1,15 @@
 # services/result_service.py
 """Result 服务 - append-only 抽取结果存储。
 
-每次抽取都会为每个逻辑样品追加一条 Result：
+每个 Document execution 追加一条通用 Result：
 - data：抽取字段值
 - field_meta：逐字段 provenance/source/confidence 与复核状态
-- review_state：样品级复核状态
+- review_state：结果复核状态
 
 读取侧统一走 get_document_result（共享访问器）；Result 是唯一结果事实源，
 旧业务表镜像已随 #12 移除。
 """
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -24,9 +23,6 @@ DEFAULT_REVIEW_STATE = "pending"
 APPROVED_REVIEW_STATE = "approved"
 REJECTED_REVIEW_STATE = "rejected"
 
-# 无 job_id 的同步抽取按时间窗口归批（逐样品写入发生在同一次处理内）。
-RESULT_BATCH_WINDOW_SECONDS = 120
-
 
 def result_to_extraction_data(
     row: Dict[str, Any],
@@ -37,46 +33,6 @@ def result_to_extraction_data(
     data["document_id"] = document_id or row.get("document_id")
     data["is_validated"] = row.get("review_state") == APPROVED_REVIEW_STATE
     return data
-
-
-def _sample_sort_key(row: Dict[str, Any]) -> tuple:
-    """逐页抽取时第一页为主样品；非数字 key 排在数字之后。"""
-    key = str(row.get("sample_key") or DEFAULT_SAMPLE_KEY)
-    if key.isdigit():
-        return (0, int(key))
-    return (1, key)
-
-
-def _parse_timestamp(value: Any) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _latest_batch(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """把 desc 排序的样品行切成“最新一批”。"""
-    newest = samples[0]
-    newest_job_id = newest.get("job_id")
-    if newest_job_id:
-        return [row for row in samples if row.get("job_id") == newest_job_id]
-
-    newest_time = _parse_timestamp(newest.get("created_at"))
-    if newest_time is None:
-        return [newest]
-
-    batch: List[Dict[str, Any]] = []
-    for row in samples:
-        row_time = _parse_timestamp(row.get("created_at"))
-        if (
-            row_time is None
-            or abs((newest_time - row_time).total_seconds()) > RESULT_BATCH_WINDOW_SECONDS
-        ):
-            break
-        batch.append(row)
-    return batch
 
 
 def build_field_meta(
@@ -199,11 +155,9 @@ class ResultService(SupabaseClientMixin):
         *,
         tenant_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """获取文档最新一批抽取的 Result 主样品行（排除 parse 结果）。
+        """获取文档最新的抽取 Result（排除 parse 结果）。
 
         这是读取侧的唯一入口：详情、审核、飞书/Excel、CRM 都从这里取数据。
-        逐页抽取时主样品为 sample_key 最小（第一页）的那条，
-        与旧业务表镜像写入的 extraction_data 保持一致。
         """
         rows = await self.list_results(
             document_id=document_id,
@@ -215,9 +169,7 @@ class ResultService(SupabaseClientMixin):
         ]
         if not samples:
             return None
-
-        batch = _latest_batch(samples)
-        return min(batch, key=_sample_sort_key)
+        return samples[0]
 
     async def get_document_parse_result(
         self,
@@ -248,7 +200,7 @@ class ResultService(SupabaseClientMixin):
 
         - data：字段修正，合并进原 JSONB（不整行覆盖）
         - field_meta：逐字段保留 source/confidence，更新 review_state
-        - review_state：样品级复核状态（approved / rejected）
+        - review_state：结果复核状态（approved / rejected）
 
         文档没有 Result（历史数据）时返回 None，由调用方决定是否走镜像兜底。
         """
@@ -299,7 +251,7 @@ class ResultService(SupabaseClientMixin):
         config_revision_id: Optional[str] = None,
         source: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """把一次抽取输出写成 Result（逐页抽取时每个样品一行）。
+        """把一次抽取输出写成单个通用 Result。
 
         缺少 tenant_id 时跳过（历史数据兜底），避免破坏旧流程。
         """
@@ -309,23 +261,7 @@ class ResultService(SupabaseClientMixin):
             )
             return []
 
-        samples = result.get("extraction_results") or []
-        rows: List[Dict[str, Any]] = []
-
-        if samples:
-            for index, sample in enumerate(samples, 1):
-                sample_data = sample.get("data") or {}
-                rows.append(self.build_result_row(
-                    tenant_id=tenant_id,
-                    document_id=document_id,
-                    data=sample_data,
-                    sample_key=str(sample.get("sample_index") or index),
-                    job_id=job_id,
-                    config_revision_id=config_revision_id,
-                    source=source,
-                ))
-        else:
-            rows.append(self.build_result_row(
+        rows: List[Dict[str, Any]] = [self.build_result_row(
                 tenant_id=tenant_id,
                 document_id=document_id,
                 data=result.get("extraction_data") or {},
@@ -333,7 +269,7 @@ class ResultService(SupabaseClientMixin):
                 job_id=job_id,
                 config_revision_id=config_revision_id,
                 source=source,
-            ))
+            )]
 
         created: List[Dict[str, Any]] = []
         for row in rows:

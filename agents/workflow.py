@@ -107,7 +107,7 @@ class DocumentWorkflow:
         configuration: Dict[str, Any],
         parse_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """以 ParseResult 的 markdown 作为 LLM 输入执行抽取（含逐页模式）。"""
+        """以 ParseResult 的 markdown 作为 LLM 输入执行一次抽取。"""
         from services.parse_extraction import run_parse_extraction
 
         processing_start = datetime.now()
@@ -132,8 +132,6 @@ class DocumentWorkflow:
             template_id=configuration.get("id"),
             template_name=configuration.get("name"),
         )
-        if payload.get("extraction_results"):
-            result["extraction_results"] = payload["extraction_results"]
         return result
 
     async def extract_with_prompt(

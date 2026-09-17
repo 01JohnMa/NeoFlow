@@ -104,7 +104,6 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
             template_code="shipment_report",
             tenant_id="tenant-1",
             extraction_mode="vlm",
-            per_page_extraction=True,
             fields=[
                 {
                     "field_key": "order_no",
@@ -138,7 +137,7 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
     definition = normalize_definition(payload["definition"])
     assert definition["extraction_prompt"] == "抽取订单号 {ocr_text}"
     assert definition["parse"]["model_version"] == "vlm"
-    assert definition["per_page_extraction"] is True
+    assert "per_page_extraction" not in definition
     assert definition["output_mode"] == "both"
     assert definition["excel"] == {
         "file_name": "template.xlsx",

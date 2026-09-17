@@ -1,5 +1,7 @@
 # NeoFlow — OpenAI Agents SDK 集成计划 v2
 
+> **历史草稿，已废弃。** 本文记录早期 OCR、逐页样品、自动推断和清洗代码方案，不代表 NeoFlow 2.0 当前设计。现行边界以 `CONTEXT.md`、ADR-0002、ADR-0003 和 ADR-0004 为准。
+
 ## Context
 
 在现有 OCR-LLM 文档处理平台基础上，集成 OpenAI Agents SDK。管理员上传一份实际文档（PDF/图片），系统 OCR 后分析文档内容，AI 推荐模板类型、所属部门、识别字段及默认配置。管理员预览确认后一键写入 Supabase。字段配置由模型推荐默认值，管理员后续可在「识别字段管理」中自行修改。

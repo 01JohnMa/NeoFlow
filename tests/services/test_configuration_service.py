@@ -256,12 +256,16 @@ class TestPublishLifecycle:
             await svc.publish_configuration(created["id"])
 
     @pytest.mark.asyncio
-    async def test_publish_unimplemented_type_rejected(self, service):
+    async def test_publish_classify_type_is_supported(self, service):
         svc, _ = service
-        created = await svc.create_configuration(_create(type="classify"))
+        created = await svc.create_configuration(_create(
+            type="classify",
+            definition={"classify": {"rules": ["invoice"]}},
+        ))
 
-        with pytest.raises(ConfigurationStateError, match="尚未实现"):
-            await svc.publish_configuration(created["id"])
+        published = await svc.publish_configuration(created["id"])
+
+        assert published["revision"]["definition"]["classify"]["rules"] == ["invoice"]
 
     @pytest.mark.asyncio
     async def test_update_published_creates_new_draft_then_new_revision(self, service):
@@ -531,7 +535,7 @@ class TestExtractionConfig:
         assert "examples" not in config
         assert config["extraction_prompt"] == "请抽取字段"
         assert config["extraction_mode"] == "vlm"
-        assert config["per_page_extraction"] is True
+        assert "per_page_extraction" not in config
         assert config["push_attachment"] is False
         assert config["auto_approve"] is True
         assert config["feishu"] == {"bitable_token": "app-token", "table_id": "tbl-1"}

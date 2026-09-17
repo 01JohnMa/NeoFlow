@@ -41,7 +41,6 @@ class ConfirmTemplateRequest(BaseModel):
     template_name: str
     template_code: str
     description: Optional[str] = None
-    per_page_extraction: bool = False
     fields: List[DetectedField]
 
 

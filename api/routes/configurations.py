@@ -61,12 +61,13 @@ class ConfigurationDefinitionModel(BaseModel):
     fields: List[ConfigurationFieldModel] = Field(default_factory=list)
     extraction_prompt: Optional[str] = None
     extraction_mode: ExtractionMode = "ocr_llm"
-    per_page_extraction: bool = False
     output_mode: OutputMode = "bitable"
     push_attachment: bool = True
     auto_approve: bool = False
     feishu: FeishuOutputModel = Field(default_factory=FeishuOutputModel)
     excel: ExcelOutputModel = Field(default_factory=ExcelOutputModel)
+    classify: Dict[str, Any] = Field(default_factory=dict)
+    split: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateConfigurationRequest(BaseModel):

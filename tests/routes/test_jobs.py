@@ -140,18 +140,25 @@ class TestCreateJob:
             )
         assert resp.status_code == 409
 
-    def test_unimplemented_configuration_type_conflict(self, user_client):
-        with patch("api.routes.jobs.configuration_service") as mock_svc:
+    def test_classify_configuration_job_is_accepted(self, user_client):
+        with patch("api.routes.jobs.configuration_service") as mock_svc, \
+             patch("api.routes.jobs.supabase_service") as mock_supabase, \
+             patch("api.routes.jobs.create_job", new_callable=AsyncMock, return_value=JOB_ID), \
+             patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB) as mock_get_job:
             mock_svc.get_revision = AsyncMock(return_value=REVISION)
             mock_svc.get_configuration = AsyncMock(
                 return_value={**CONFIGURATION, "type": "classify"}
+            )
+            mock_supabase.get_document = AsyncMock(
+                return_value={"id": DOCUMENT_ID, "tenant_id": TENANT_ID}
             )
             resp = user_client.post(
                 "/api/jobs",
                 json={"configuration_revision_id": REVISION_ID},
             )
-        assert resp.status_code == 409
-        assert "尚未实现" in resp.json()["error"]
+        assert resp.status_code == 201
+        assert resp.json()["data"]["job_id"] == JOB_ID
+        mock_get_job.assert_awaited_once_with(JOB_ID)
 
     def test_document_from_other_tenant_returns_404(self, user_client):
         with patch("api.routes.jobs.configuration_service") as mock_svc, \

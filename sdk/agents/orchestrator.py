@@ -37,7 +37,6 @@ def build_configuration_definition(
         "fields": fields,
         "extraction_prompt": prompt,
         "parse": {"model_version": session.parse_mode},
-        "per_page_extraction": confirmed.per_page_extraction,
         "output_mode": "both" if session.excel_template_path else "bitable",
         "excel": {
             "file_name": session.excel_template_file_name,

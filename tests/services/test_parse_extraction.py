@@ -22,7 +22,6 @@ def _configuration(**overrides):
         "name": "检测报告",
         "code": "inspection_report",
         "extraction_mode": "ocr_llm",
-        "per_page_extraction": False,
     }
     config.update(overrides)
     return config
@@ -49,30 +48,27 @@ async def test_single_pass_uses_document_markdown():
 
 
 @pytest.mark.asyncio
-async def test_per_page_uses_each_page_markdown():
+async def test_ignores_page_boundaries_and_uses_document_markdown():
     prompts = []
 
     async def fake_llm(prompt):
         prompts.append(prompt)
-        return f'{{"page": "{len(prompts)}"}}'
+        return '{"document": true}'
 
     payload = await run_parse_extraction(
-        configuration=_configuration(per_page_extraction=True),
+        configuration=_configuration(),
         parse_data=PARSE_DATA,
         llm_invoke=fake_llm,
     )
 
-    assert "第一页 markdown" in prompts[0]
-    assert "第二页 markdown" in prompts[1]
-    assert payload["extraction_data"] == {"page": "1"}
-    assert payload["extraction_results"] == [
-        {"sample_index": 1, "data": {"page": "1"}},
-        {"sample_index": 2, "data": {"page": "2"}},
-    ]
+    assert "整文档 markdown" in prompts[0]
+    assert len(prompts) == 1
+    assert payload["extraction_data"] == {"document": True}
+    assert "extraction_results" not in payload
 
 
 @pytest.mark.asyncio
-async def test_per_page_skips_empty_pages():
+async def test_document_markdown_is_used_when_pages_are_empty():
     prompts = []
 
     async def fake_llm(prompt):
@@ -88,7 +84,7 @@ async def test_per_page_skips_empty_pages():
     }
 
     payload = await run_parse_extraction(
-        configuration=_configuration(per_page_extraction=True),
+        configuration=_configuration(),
         parse_data=parse_data,
         llm_invoke=fake_llm,
     )

@@ -130,7 +130,7 @@ class TestRecordExtractionResult:
         assert row["document_id"] == DOCUMENT_ID
 
     @pytest.mark.asyncio
-    async def test_per_page_samples_each_get_own_result_row(self, service):
+    async def test_legacy_sample_array_is_ignored_and_writes_one_default_result(self, service):
         svc, fake = service
         result = {
             "document_type": "inspection_report",
@@ -148,11 +148,11 @@ class TestRecordExtractionResult:
             source="vlm",
         )
 
-        assert len(created) == 2
+        assert len(created) == 1
         rows = fake.tables["results"]
-        assert [r["sample_key"] for r in rows] == ["1", "2"]
-        assert [r["data"]["sample_name"] for r in rows] == ["第一页", "第二页"]
-        assert rows[1]["field_meta"]["sample_name"]["source"] == "vlm"
+        assert [r["sample_key"] for r in rows] == [DEFAULT_SAMPLE_KEY]
+        assert [r["data"]["sample_name"] for r in rows] == ["第一页"]
+        assert rows[0]["field_meta"]["sample_name"]["source"] == "vlm"
 
     @pytest.mark.asyncio
     async def test_missing_tenant_skips_result_write(self, service):
@@ -227,7 +227,7 @@ def _result_row(result_id, *, job_id=None, sample_key=DEFAULT_SAMPLE_KEY, data=N
 
 class TestGetDocumentResult:
     @pytest.mark.asyncio
-    async def test_returns_first_sample_of_latest_job_batch_by_created_at(self, service):
+    async def test_returns_latest_extraction_result_by_created_at(self, service):
         svc, fake = service
         fake.tables["results"] = [
             _result_row("old", job_id="job-old", data={"a": 1},
@@ -240,8 +240,8 @@ class TestGetDocumentResult:
 
         row = await svc.get_document_result(DOCUMENT_ID, tenant_id=TENANT_ID)
 
-        assert row["id"] == "new-1"
-        assert row["data"] == {"a": 21}
+        assert row["id"] == "new-2"
+        assert row["data"] == {"a": 22}
 
     @pytest.mark.asyncio
     async def test_excludes_parse_rows(self, service):
@@ -271,7 +271,7 @@ class TestGetDocumentResult:
 
         row = await svc.get_document_result(DOCUMENT_ID)
 
-        assert row["id"] == "page-1"
+        assert row["id"] == "page-2"
 
     @pytest.mark.asyncio
     async def test_missing_document_result_returns_none(self, service):
