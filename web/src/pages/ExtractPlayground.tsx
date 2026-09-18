@@ -12,16 +12,26 @@ import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { CONFIGURATION_STATUS_LABELS, configurationStatusVariant } from '@/lib/configuration'
+import {
+  buildHistoryResultRef,
+  buildResultRefs,
+  configurationDefinitionPreview,
+  resolveResultTarget,
+  resultMatchesJob,
+  selectableConfigurations,
+  type ResultRef,
+} from '@/lib/extractSelection'
 import { cn, formatDate, getStatusText } from '@/lib/utils'
 import type { Document, ProcessingJob } from '@/types'
 import { Check, Copy, Download, History, Play, X } from 'lucide-react'
 
 type Tab = 'build' | 'results'
 
-interface ResultSelection {
-  documentId: string
-  /** 指定时按 Job 读取（History / ?job= 恢复），否则读取文档最新正式结果 */
-  jobId?: string
+/** 结果 job_id 与所选 Job 不一致时抛出，阻止按当前 Job 展示 */
+class ResultJobMismatchError extends Error {
+  constructor() {
+    super('结果与所选任务不匹配')
+  }
 }
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
@@ -196,6 +206,13 @@ function HistoryDrawer({
             <div className="flex justify-center py-10">
               <Spinner />
             </div>
+          ) : historyQuery.isError ? (
+            <div className="flex flex-col items-center gap-3 py-10">
+              <p className="text-sm text-error-500">加载失败，可重试</p>
+              <Button variant="secondary" size="sm" onClick={() => void historyQuery.refetch()}>
+                重试
+              </Button>
+            </div>
           ) : jobs.length === 0 ? (
             <p className="py-10 text-center text-sm text-text-muted">暂无抽取记录</p>
           ) : (
@@ -235,9 +252,8 @@ export function ExtractPlayground() {
   const [activeTab, setActiveTab] = useState<Tab>('build')
   const [configId, setConfigId] = useState('')
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
-  const [jobByDoc, setJobByDoc] = useState<Record<string, string>>({})
-  const [resultDocIds, setResultDocIds] = useState<string[]>([])
-  const [selection, setSelection] = useState<ResultSelection | null>(null)
+  const [results, setResults] = useState<ResultRef[]>([])
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -252,8 +268,12 @@ export function ExtractPlayground() {
     queryFn: () => extractService.listConfigurations(),
     staleTime: 0,
   })
-  const configs = useMemo(() => configsQuery.data || [], [configsQuery.data])
+  const configs = useMemo(
+    () => selectableConfigurations(configsQuery.data || []),
+    [configsQuery.data],
+  )
   const selectedConfig = configs.find((config) => config.id === configId) || null
+  const definitionPreview = configurationDefinitionPreview(selectedConfig)
 
   const documentsQuery = useQuery({
     queryKey: ['extract-documents'],
@@ -276,72 +296,84 @@ export function ExtractPlayground() {
     setConfigId((prev) => (prev && configs.some((config) => config.id === prev) ? prev : configs[0].id))
   }, [configs])
 
-  // Job 轮询：任一任务排队/执行中时 1.5s 刷新
-  const jobIds = useMemo(() => Object.values(jobByDoc), [jobByDoc])
+  // Job 轮询：结果列表中的任一任务排队/执行中时 1.5s 刷新
+  const trackedJobIds = useMemo(
+    () => Array.from(new Set(results.map((ref) => ref.jobId))),
+    [results],
+  )
   const jobsQuery = useQuery({
-    queryKey: ['extract-jobs', jobIds.join(',')],
-    queryFn: () => Promise.all(jobIds.map((id) => extractService.getJob(id))),
-    enabled: jobIds.length > 0,
+    queryKey: ['extract-jobs', trackedJobIds.join(',')],
+    queryFn: () => Promise.all(trackedJobIds.map((id) => extractService.getJob(id))),
+    enabled: trackedJobIds.length > 0,
     refetchInterval: (query) => {
+      if (query.state.status === 'error') return 3000
       const jobs = (query.state.data as ProcessingJob[] | undefined) || []
       return jobs.some((job) => job.status === 'queued' || job.status === 'processing')
         ? 1500
         : false
     },
   })
-  const jobsByDocument = useMemo(() => {
+  const jobsByJobId = useMemo(() => {
     const map = new Map<string, ProcessingJob>()
-    for (const job of jobsQuery.data || []) {
-      const documentId = job.document_ids?.[0]
-      if (documentId) map.set(documentId, job)
-    }
+    for (const job of jobsQuery.data || []) map.set(job.job_id, job)
     return map
   }, [jobsQuery.data])
 
   useEffect(() => {
     for (const job of jobsQuery.data || []) {
       if (job.status !== 'completed') continue
-      const documentId = job.document_ids?.[0]
-      if (documentId) {
-        void queryClient.invalidateQueries({ queryKey: ['extract-result', documentId] })
-      }
+      void queryClient.invalidateQueries({ queryKey: ['extract-result', job.job_id] })
     }
   }, [jobsQuery.data, queryClient])
 
-  const selectedDocumentId = selection?.documentId
-  const selectedJobId = selection?.jobId
+  const selectedRef = useMemo(
+    () => resolveResultTarget(results, selectedJobId),
+    [results, selectedJobId],
+  )
+  const selectedJob = selectedJobId ? jobsByJobId.get(selectedJobId) : undefined
+  const selectedDocumentId = selectedRef?.documentId
   const resultQuery = useQuery({
-    queryKey: ['extract-result', selectedDocumentId, selectedJobId],
+    queryKey: ['extract-result', selectedRef?.jobId],
     queryFn: async (): Promise<ExtractResultResponse | null> => {
-      if (!selection) return null
+      if (!selectedRef) return null
       try {
-        return selection.jobId
-          ? await extractService.getJobResult(selection.jobId)
-          : await extractService.getDocumentResult(selection.documentId)
+        const response = await extractService.getJobResult(selectedRef.jobId)
+        if (!resultMatchesJob(response, selectedRef.jobId)) {
+          throw new ResultJobMismatchError()
+        }
+        return response
       } catch (error) {
         if (getErrorStatus(error) === 404) return null
         throw error
       }
     },
-    enabled: !!selection,
+    enabled: !!selectedRef,
     retry: false,
     staleTime: 15000,
   })
   const result = resultQuery.data || null
+  // 任务失败时不展示任何 JSON（即使后端残留了正式结果）
+  const displayableResult = result && selectedJob?.status !== 'failed' ? result : null
 
-  // ?job=<id> 恢复：读取该 Job 的正式结果
+  // 选中结果变化（Run / 切换文档 / 打开 History）时同步 ?job=<selectedJobId>
   useEffect(() => {
-    const jobId = searchParams.get('job')
-    if (!jobId || restoreAttempted.current) return
+    if (!selectedJobId || searchParams.get('job') === selectedJobId) return
+    setSearchParams({ job: selectedJobId }, { replace: true })
+  }, [selectedJobId, searchParams, setSearchParams])
+
+  // 仅首次加载时按 ?job=<id> 恢复该 Job 的正式结果
+  useEffect(() => {
+    if (restoreAttempted.current) return
     restoreAttempted.current = true
+    const jobId = searchParams.get('job')
+    if (!jobId) return
     void (async () => {
       try {
         const job = await extractService.getJob(jobId)
-        const documentId = job.document_ids?.[0]
-        if (!documentId) return
-        setJobByDoc((prev) => ({ ...prev, [documentId]: jobId }))
-        setResultDocIds((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
-        setSelection({ documentId, jobId })
+        const ref = buildHistoryResultRef(job)
+        if (!ref) return
+        setResults([ref])
+        setSelectedJobId(ref.jobId)
         setActiveTab('results')
       } catch {
         // 任务不可用则忽略
@@ -373,14 +405,13 @@ export function ExtractPlayground() {
         configuration_id: configId,
         document_ids: documentIds,
       })
-      const nextJobs: Record<string, string> = {}
-      documentIds.forEach((documentId, index) => {
-        const jobId = response.job_ids[index]
-        if (jobId) nextJobs[documentId] = jobId
-      })
-      setJobByDoc((prev) => ({ ...prev, ...nextJobs }))
-      setResultDocIds(documentIds)
-      setSelection({ documentId: documentIds[0] })
+      const refs = buildResultRefs(documentIds, response.job_ids)
+      if (refs.length === 0) {
+        setRunError('提交成功但未返回任务 ID，请稍后在 History 中查看')
+        return
+      }
+      setResults(refs)
+      setSelectedJobId(refs[0].jobId)
       setActiveTab('results')
       void queryClient.invalidateQueries({ queryKey: ['extract-history'] })
     } catch (error) {
@@ -392,15 +423,13 @@ export function ExtractPlayground() {
 
   const openHistoryJob = (jobId: string) => {
     setHistoryOpen(false)
-    setSearchParams({ job: jobId })
     void (async () => {
       try {
         const job = await extractService.getJob(jobId)
-        const documentId = job.document_ids?.[0]
-        if (!documentId) return
-        setJobByDoc((prev) => ({ ...prev, [documentId]: jobId }))
-        setResultDocIds((prev) => (prev.includes(documentId) ? prev : [...prev, documentId]))
-        setSelection({ documentId, jobId })
+        const ref = buildHistoryResultRef(job)
+        if (!ref) return
+        setResults([ref])
+        setSelectedJobId(ref.jobId)
         setActiveTab('results')
       } catch {
         // 任务不可用则忽略
@@ -409,19 +438,19 @@ export function ExtractPlayground() {
   }
 
   const handleCopy = async () => {
-    if (!result) return
-    await navigator.clipboard.writeText(JSON.stringify(result.data, null, 2))
+    if (!displayableResult) return
+    await navigator.clipboard.writeText(JSON.stringify(displayableResult.data, null, 2))
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
   }
 
   const handleDownload = () => {
-    if (!result) return
+    if (!displayableResult) return
     const baseName = selectedDocumentId
       ? documentName(documentById.get(selectedDocumentId), selectedDocumentId)
       : 'extract-result'
     const safeName = baseName.replace(/[\\/:*?"<>|]/g, '_')
-    const blob = new Blob([JSON.stringify(result.data, null, 2)], {
+    const blob = new Blob([JSON.stringify(displayableResult.data, null, 2)], {
       type: 'application/json;charset=utf-8',
     })
     const url = URL.createObjectURL(blob)
@@ -432,8 +461,7 @@ export function ExtractPlayground() {
     URL.revokeObjectURL(url)
   }
 
-  const selectedJob = selectedDocumentId ? jobsByDocument.get(selectedDocumentId) : undefined
-  const summary = result ? engineSummary(result.engine) : null
+  const summary = displayableResult ? engineSummary(displayableResult.engine) : null
 
   return (
     <div className="flex h-full flex-col text-text-primary">
@@ -529,14 +557,21 @@ export function ExtractPlayground() {
                       )}
                     </div>
                     <div className="mt-3">
-                      {selectedConfig?.draft_definition?.data_schema ? (
+                      {definitionPreview.kind === 'schema' ? (
                         <pre className="max-h-40 overflow-auto rounded-lg border border-border-default bg-bg-secondary p-3 font-mono text-[11px] leading-relaxed text-text-secondary">
-                          {JSON.stringify(selectedConfig.draft_definition.data_schema, null, 2)}
+                          {JSON.stringify(definitionPreview.schema, null, 2)}
                         </pre>
+                      ) : definitionPreview.kind === 'legacy' ? (
+                        <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
+                          旧版配置：运行时按字段自动转换（{definitionPreview.fieldCount} 个字段）
+                        </p>
+                      ) : definitionPreview.kind === 'empty' ? (
+                        <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
+                          配置没有可预览的定义
+                        </p>
                       ) : (
                         <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
-                          旧版配置：运行时按字段自动转换（
-                          {selectedConfig?.draft_definition?.fields?.length ?? 0} 个字段）
+                          已发布模板（定义在执行时读取）
                         </p>
                       )}
                     </div>
@@ -654,15 +689,15 @@ export function ExtractPlayground() {
               role="list"
               aria-label="本次运行的文档"
             >
-              {resultDocIds.map((documentId) => {
-                const active = selection?.documentId === documentId
+              {results.map((ref) => {
+                const active = ref.jobId === selectedJobId
                 return (
                   <button
-                    key={documentId}
+                    key={ref.jobId}
                     type="button"
                     role="listitem"
                     aria-pressed={active}
-                    onClick={() => setSelection({ documentId })}
+                    onClick={() => setSelectedJobId(ref.jobId)}
                     className={cn(
                       'flex-shrink-0 rounded-md border px-2.5 py-1 text-xs transition-colors',
                       active
@@ -671,12 +706,12 @@ export function ExtractPlayground() {
                     )}
                   >
                     <span className="block max-w-[180px] truncate">
-                      {documentName(documentById.get(documentId), documentId)}
+                      {documentName(documentById.get(ref.documentId), ref.documentId)}
                     </span>
                   </button>
                 )
               })}
-              {resultDocIds.length === 0 && (
+              {results.length === 0 && (
                 <span className="text-xs text-text-muted">暂无本次运行的文档</span>
               )}
             </div>
@@ -685,7 +720,7 @@ export function ExtractPlayground() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="复制 JSON"
-                disabled={!result}
+                disabled={!displayableResult}
                 onClick={() => void handleCopy()}
               >
                 {copied ? <Check className="h-4 w-4 text-success-500" /> : <Copy className="h-4 w-4" />}
@@ -694,7 +729,7 @@ export function ExtractPlayground() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="下载 JSON"
-                disabled={!result}
+                disabled={!displayableResult}
                 onClick={handleDownload}
               >
                 <Download className="h-4 w-4" />
@@ -703,15 +738,23 @@ export function ExtractPlayground() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto p-4">
-            {resultDocIds.length === 0 && (
+            {jobsQuery.isError && (
+              <p
+                role="status"
+                className="mb-3 rounded-lg border border-warning-500/30 bg-warning-500/10 p-3 text-xs text-warning-500"
+              >
+                任务状态刷新失败，仍在重试
+              </p>
+            )}
+            {results.length === 0 && (
               <p className="py-10 text-center text-sm text-text-muted">
                 提交抽取任务后可在此查看结果
               </p>
             )}
-            {resultDocIds.length > 0 && !selection && (
+            {results.length > 0 && !selectedRef && (
               <p className="py-10 text-center text-sm text-text-muted">选择上方文档查看抽取结果</p>
             )}
-            {selection && selectedJob?.status === 'failed' && selectedJob.error && (
+            {selectedRef && selectedJob?.status === 'failed' && selectedJob.error && (
               <p
                 role="alert"
                 className="mb-3 rounded-lg border border-error-500/30 bg-error-500/10 p-3 text-xs text-error-500"
@@ -719,33 +762,33 @@ export function ExtractPlayground() {
                 {selectedJob.error}
               </p>
             )}
-            {selection && resultQuery.isError && (
+            {selectedRef && resultQuery.isError && (
               <p
                 role="alert"
                 className="mb-3 rounded-lg border border-error-500/30 bg-error-500/10 p-3 text-xs text-error-500"
               >
-                结果加载失败：{getApiErrorMessage(resultQuery.error, '请稍后重试')}
+                {resultQuery.error instanceof ResultJobMismatchError
+                  ? '结果与所选任务不匹配，已阻止展示'
+                  : `结果加载失败：${getApiErrorMessage(resultQuery.error, '请稍后重试')}`}
               </p>
             )}
-            {selection && resultQuery.isLoading && (
+            {selectedRef && resultQuery.isLoading && (
               <div className="flex justify-center py-10">
                 <Spinner />
               </div>
             )}
-            {selection && !resultQuery.isLoading && !resultQuery.isError && !result && (
+            {selectedRef && !resultQuery.isLoading && !resultQuery.isError && !displayableResult && (
               <p className="py-10 text-center text-sm text-text-muted">
-                {selection.jobId
-                  ? '该任务没有正式结果（失败或进行中）'
-                  : selectedJob?.status === 'queued' || selectedJob?.status === 'processing'
-                    ? '抽取进行中，完成后自动展示'
-                    : '该文档还没有抽取结果'}
+                {selectedJob?.status === 'queued' || selectedJob?.status === 'processing'
+                  ? '抽取进行中，完成后自动展示'
+                  : '该任务没有正式结果（失败或进行中）'}
               </p>
             )}
-            {result && (
+            {displayableResult && (
               <>
                 {summary && <p className="mb-2 text-xs text-text-muted">{summary}</p>}
                 <div className="overflow-auto rounded-lg border border-border-default bg-bg-secondary p-3 font-mono text-xs leading-relaxed">
-                  <JsonNode value={result.data} depth={0} />
+                  <JsonNode value={displayableResult.data} depth={0} />
                 </div>
               </>
             )}
