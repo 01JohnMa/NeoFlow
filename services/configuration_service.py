@@ -529,6 +529,19 @@ class ConfigurationService(SupabaseClientMixin):
             )
 
         definition = normalize_definition(configuration.get("draft_definition"))
+        if configuration.get("type") == "extract":
+            from services.extract_service import (
+                ExtractFailure,
+                build_execution_spec,
+                resolve_extract_spec,
+            )
+
+            try:
+                resolve_extract_spec({"execution_spec": build_execution_spec(definition)})
+            except ExtractFailure as exc:
+                raise ConfigurationStateError(
+                    f"Extract 定义不可发布——{exc.reason}: {exc.message}"
+                )
         revision_number = await self._next_revision_number(configuration_id)
         published_at = datetime.now(timezone.utc).isoformat()
 
@@ -601,18 +614,25 @@ class ConfigurationService(SupabaseClientMixin):
         return 1
 
     async def list_revisions(self, configuration_id: str) -> List[Dict[str, Any]]:
-        """列出配置的所有 Revision（新→旧）"""
-        try:
-            result = await self._run_sync(
-                lambda: self._get_client().table("configuration_revisions").select("*")
-                .eq("configuration_id", configuration_id)
-                .order("revision_number", desc=True)
-                .execute()
-            )
-            return result.data or []
-        except Exception as e:
-            logger.error(f"列出 Revision 失败: {e}")
+        """列出配置的所有 Revision（新→旧）；数据库错误向上抛出。"""
+        result = await self._run_sync(
+            lambda: self._get_client().table("configuration_revisions").select("*")
+            .eq("configuration_id", configuration_id)
+            .order("revision_number", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    async def list_revision_ids(self, configuration_ids: List[str]) -> List[str]:
+        """一次取出多个配置的全部 Revision ID（供能力过滤，避免逐配置查询）。"""
+        if not configuration_ids:
             return []
+        result = await self._run_sync(
+            lambda: self._get_client().table("configuration_revisions").select("id")
+            .in_("configuration_id", configuration_ids)
+            .execute()
+        )
+        return [str(row["id"]) for row in (result.data or []) if row.get("id")]
 
     async def get_revision(self, revision_id: str) -> Optional[Dict[str, Any]]:
         """按 ID 获取 Revision（只读快照）"""

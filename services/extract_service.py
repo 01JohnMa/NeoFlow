@@ -6,11 +6,14 @@
   per_table_row 明确拒绝；
 - 整文直抽：超上下文明确失败，不截断、不做分块；
 - 严格校验（JSON Schema 子集）失败最多修复一次；请求预算由单元执行器计数；
-- 绑定写一次（写进 Job 的 parse_result_id），重试只读绑定。
+- 绑定写一次（写进 Job 的 parse_result_id），重试只读绑定；
+- 心跳覆盖绑定→交卷确认，失锁即停；成功交卷响应丢失时回读/重试，绝不盲目标失败；
+- 所有失败路径走认领感知交卷。
 """
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -22,7 +25,6 @@ from api.jobs import (
     ensure_extract_budget,
     get_job,
     renew_job_claim,
-    update_job,
 )
 from config.settings import settings
 from services.extract_prompt import (
@@ -44,6 +46,7 @@ SUPPORTED_TARGETS = ("per_doc", "per_page")
 MAX_REQUESTS_PER_UNIT = 3
 ENGINE_MAX_BYTES = 16384
 ENGINE_MAX_CALLS = 20
+EXTRACT_SAMPLE_KEY = "extract"
 
 LEGACY_TYPE_MAP = {
     "text": {"type": "string"},
@@ -60,6 +63,24 @@ class ExtractFailure(Exception):
         super().__init__(f"{reason}: {message}" if message else reason)
         self.reason = reason
         self.message = message
+
+
+def build_execution_spec(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """构造执行快照：原样保留 target/data_schema 的存在性与取值。
+
+    显式提供的非法值（如 data_schema=[]、target=""）必须被下游校验拒绝，
+    不能被快照层悄悄替换成默认值。
+    """
+    definition = definition or {}
+    return {
+        "capability": EXTRACT_CAPABILITY,
+        "spec_version": SPEC_VERSION,
+        "effective_params": {
+            "target": definition.get("target"),
+            "data_schema": definition.get("data_schema"),
+            "fields": definition.get("fields") or [],
+        },
+    }
 
 
 def resolve_extract_spec(
@@ -83,13 +104,18 @@ def resolve_extract_spec(
 
 
 def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
-    target = params.get("target") or "per_doc"
-    if target not in SUPPORTED_TARGETS:
+    target = params.get("target")
+    if target is None:
+        target = "per_doc"
+    if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ExtractFailure("target_not_supported", str(target))
 
-    schema = params.get("data_schema")
     schema_source = "data_schema"
-    if not isinstance(schema, dict):
+    if "data_schema" in params and params.get("data_schema") is not None:
+        schema = params.get("data_schema")
+        if not isinstance(schema, dict):
+            raise ExtractFailure("schema_invalid", "data_schema 必须是 JSON 对象")
+    else:
         fields = params.get("fields")
         if isinstance(fields, list) and fields:
             schema = legacy_fields_to_schema(fields)
@@ -198,6 +224,24 @@ def classify_finish(reason: Optional[str]) -> str:
     return "unknown"
 
 
+def _parse_deadline(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _remaining_seconds(deadline: Optional[datetime]) -> Optional[float]:
+    if deadline is None:
+        return None
+    return (deadline - datetime.now(timezone.utc)).total_seconds()
+
+
 async def _heartbeat_until(
     stop: asyncio.Event,
     lost: asyncio.Event,
@@ -248,6 +292,49 @@ async def _load_bound_result(
     return row
 
 
+async def _reload_claimed_job(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    lost: asyncio.Event,
+) -> Dict[str, Any]:
+    """回读 Job 并确认仍持有认领；不满足则标记失锁并抛 claim_lost。"""
+    fresh = await get_job(job_id)
+    if (
+        not fresh
+        or fresh.get("locked_by") != worker_id
+        or int(fresh.get("attempts") or 0) != attempts
+        or fresh.get("status") != "processing"
+    ):
+        lost.set()
+        raise ExtractFailure("claim_lost")
+    return fresh
+
+
+async def _bind_with_recovery(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    result_id: str,
+) -> Optional[str]:
+    """绑定 RPC 响应不确定时：先回读 Job 确认，再重试同一绑定一次。"""
+    try:
+        return await bind_extract_parse_result(job_id, worker_id, attempts, result_id)
+    except Exception as exc:
+        logger.opt(exception=exc).warning(
+            f"Extract 绑定响应不确定，回读确认: job_id={job_id}"
+        )
+
+    fresh = await get_job(job_id)
+    if fresh and fresh.get("parse_result_id"):
+        return "bound_existing"
+
+    try:
+        return await bind_extract_parse_result(job_id, worker_id, attempts, result_id)
+    except Exception as exc:
+        raise ExtractFailure("binding_unconfirmed", str(exc)) from exc
+
+
 async def ensure_parse_binding(
     job: Dict[str, Any],
     document: Dict[str, Any],
@@ -279,19 +366,11 @@ async def ensure_parse_binding(
 
     _validate_binding_row(row, job, document, tenant_id)
 
-    status = await bind_extract_parse_result(job_id, worker_id, attempts, str(row["id"]))
+    status = await _bind_with_recovery(job_id, worker_id, attempts, str(row["id"]))
     if status == "bound":
         return row
 
-    fresh = await get_job(job_id)
-    if (
-        not fresh
-        or fresh.get("locked_by") != worker_id
-        or int(fresh.get("attempts") or 0) != attempts
-        or fresh.get("status") != "processing"
-    ):
-        lost.set()
-        raise ExtractFailure("claim_lost")
+    fresh = await _reload_claimed_job(job_id, worker_id, attempts, lost)
     existing_id = fresh.get("parse_result_id")
     if existing_id:
         return await _load_bound_result(str(existing_id), fresh, document, tenant_id)
@@ -318,6 +397,8 @@ async def _run_unit(
     attempts: int,
     lost: asyncio.Event,
     calls: List[Dict[str, Any]],
+    usage: Dict[str, int],
+    deadline: datetime,
 ) -> Any:
     messages = build_extract_messages(
         schema=schema,
@@ -327,24 +408,45 @@ async def _run_unit(
     )
     _ensure_unit_fits(messages, unit["id"])
 
-    repair_used = False
-    requests_made = 0
-    while requests_made < MAX_REQUESTS_PER_UNIT:
+    budget_left = MAX_REQUESTS_PER_UNIT
+    repair_sent = False
+    protocol_retry_used = False
+
+    while True:
         if lost.is_set():
             raise ExtractFailure("claim_lost")
+
+        remaining = _remaining_seconds(deadline)
+        if remaining is not None and remaining <= 0:
+            raise ExtractFailure("deadline_exceeded", unit["id"])
+        if budget_left <= 0:
+            raise ExtractFailure("unit_failed", unit["id"])
 
         consumed = await consume_extract_request(job_id, worker_id, attempts)
         if not consumed.get("allowed"):
             raise ExtractFailure(
                 f"budget_{consumed.get('reason') or 'denied'}", unit["id"]
             )
+        budget_left -= 1
+        used = consumed.get("requests_used")
+        usage["requests"] = int(used) if isinstance(used, int) else usage["requests"] + 1
 
-        result: LLMResult = await invoke_llm(
-            messages,
-            json_mode=True,
-            max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
-        )
-        requests_made += 1
+        try:
+            result: LLMResult = await invoke_llm(
+                messages,
+                json_mode=True,
+                max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
+                timeout=_remaining_seconds(deadline),
+            )
+        except Exception as exc:
+            if repair_sent or budget_left <= 0:
+                raise ExtractFailure("request_failed", f"{unit['id']}: {exc}") from exc
+            logger.warning(f"Extract 请求异常，额度内重试: unit={unit['id']} error={exc}")
+            continue
+
+        if lost.is_set():
+            raise ExtractFailure("claim_lost")
+
         calls.append(
             {
                 "unit": unit["id"],
@@ -356,38 +458,48 @@ async def _run_unit(
             }
         )
 
+        remaining = _remaining_seconds(deadline)
+        if remaining is not None and remaining <= 0:
+            raise ExtractFailure("deadline_exceeded", unit["id"])
+
+        if result.refusal:
+            raise ExtractFailure("response_refused", unit["id"])
+        if result.content_invalid:
+            raise ExtractFailure("response_content_invalid", unit["id"])
+
         kind = classify_finish(result.finish_reason)
         if kind == "truncated":
             raise ExtractFailure("response_truncated", unit["id"])
         if kind == "filtered":
             raise ExtractFailure("response_filtered", unit["id"])
         if kind == "unknown":
-            if requests_made >= MAX_REQUESTS_PER_UNIT:
+            if protocol_retry_used or repair_sent or budget_left <= 0:
                 raise ExtractFailure("completion_unknown", unit["id"])
+            protocol_retry_used = True
             continue
 
         try:
             value = strict_json_loads(result.content)
         except StrictJSONError as exc:
-            if repair_used or requests_made >= MAX_REQUESTS_PER_UNIT:
+            if repair_sent or budget_left <= 0:
                 raise ExtractFailure("invalid_json", f"{unit['id']}: {exc}") from exc
             messages = build_repair_messages(
                 messages, result.content, [{"json_path": "$", "message": str(exc)}]
             )
-            repair_used = True
+            repair_sent = True
+            _ensure_unit_fits(messages, unit["id"])
             continue
 
         errors = validate_value(schema, value)
         if errors:
-            if repair_used or requests_made >= MAX_REQUESTS_PER_UNIT:
+            if repair_sent or budget_left <= 0:
                 raise ExtractFailure("schema_validation_failed", f"{unit['id']}: {errors[0]}")
             messages = build_repair_messages(messages, result.content, errors)
-            repair_used = True
+            repair_sent = True
+            _ensure_unit_fits(messages, unit["id"])
             continue
 
         return value
-
-    raise ExtractFailure("unit_failed", unit["id"])
 
 
 async def _run_units(
@@ -399,6 +511,8 @@ async def _run_units(
     worker_id: str,
     attempts: int,
     lost: asyncio.Event,
+    usage: Dict[str, int],
+    deadline: datetime,
 ) -> Tuple[List[Any], List[Dict[str, Any]]]:
     outputs: List[Any] = []
     calls: List[Dict[str, Any]] = []
@@ -415,6 +529,8 @@ async def _run_units(
                 attempts=attempts,
                 lost=lost,
                 calls=calls,
+                usage=usage,
+                deadline=deadline,
             )
         )
     return outputs, calls
@@ -427,7 +543,12 @@ def _sum_tokens(calls: List[Dict[str, Any]], field: str) -> Optional[int]:
     return sum(values)
 
 
-def build_engine(spec: Dict[str, Any], calls: List[Dict[str, Any]], attempts: int) -> Dict[str, Any]:
+def build_engine(
+    spec: Dict[str, Any],
+    calls: List[Dict[str, Any]],
+    attempts: int,
+    requests: Optional[int] = None,
+) -> Dict[str, Any]:
     engine: Dict[str, Any] = {
         "name": "neoflow-extract",
         "target": spec["target"],
@@ -436,15 +557,26 @@ def build_engine(spec: Dict[str, Any], calls: List[Dict[str, Any]], attempts: in
         "prompt_version": "v1",
         "attempts": attempts,
         "usage": {
-            "requests": len(calls),
+            "requests": requests if requests is not None else len(calls),
             "input_tokens": _sum_tokens(calls, "input_tokens"),
             "output_tokens": _sum_tokens(calls, "output_tokens"),
             "calls": calls[:ENGINE_MAX_CALLS],
         },
     }
-    if len(json.dumps(engine, ensure_ascii=False)) > ENGINE_MAX_BYTES:
-        engine["usage"].pop("calls", None)
+    serialized = json.dumps(engine, ensure_ascii=False).encode("utf-8")
+    while len(serialized) > ENGINE_MAX_BYTES and engine["usage"]["calls"]:
+        engine["usage"]["calls"] = engine["usage"]["calls"][:-1]
+        serialized = json.dumps(engine, ensure_ascii=False).encode("utf-8")
     return engine
+
+
+async def _fetch_extract_result(job_id: str) -> Optional[Dict[str, Any]]:
+    rows = await result_service.list_results(
+        job_id=job_id,
+        sample_key=EXTRACT_SAMPLE_KEY,
+        limit=1,
+    )
+    return rows[0] if rows else None
 
 
 async def _commit_failure(
@@ -460,6 +592,57 @@ async def _commit_failure(
         logger.opt(exception=exc).error(f"Extract 失败交卷异常: job_id={job_id}")
 
 
+async def _commit_success(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    payload: Any,
+    engine: Dict[str, Any],
+) -> Any:
+    """成功交卷；响应丢失时回读确认或重试同一交卷，绝不盲目标失败。"""
+    try:
+        status = await commit_extract_job(
+            job_id,
+            worker_id,
+            attempts,
+            "ok",
+            extract_data=payload,
+            engine=engine,
+        )
+    except Exception as exc:
+        logger.opt(exception=exc).warning(
+            f"Extract 交卷响应不确定，回读确认: job_id={job_id}"
+        )
+        fresh = await get_job(job_id)
+        existing = await _fetch_extract_result(job_id)
+        if fresh and fresh.get("status") == "completed" and existing:
+            return existing.get("data")
+        try:
+            status = await commit_extract_job(
+                job_id,
+                worker_id,
+                attempts,
+                "ok",
+                extract_data=payload,
+                engine=engine,
+            )
+        except Exception as retry_exc:
+            logger.opt(exception=retry_exc).error(
+                f"Extract 交卷仍不确定，交由重领兜底: job_id={job_id}"
+            )
+            return None
+
+    if status == "completed":
+        return payload
+    if status == "already_committed":
+        existing = await _fetch_extract_result(job_id)
+        return existing.get("data") if existing else None
+    if status in ("stale", "stale_token", "not_found"):
+        logger.warning(f"Extract 交卷未生效: job_id={job_id} status={status}")
+        return None
+    raise ExtractFailure("commit_rejected", str(status))
+
+
 async def handle_extract_job(
     job: Dict[str, Any],
     revision: Optional[Dict[str, Any]] = None,
@@ -470,9 +653,10 @@ async def handle_extract_job(
     worker_id = job.get("locked_by")
     attempts = int(job.get("attempts") or 0)
     if not job_id or not worker_id or attempts <= 0:
-        logger.error(f"Extract Job 缺少认领信息: job_id={job_id}")
-        if job_id:
-            await update_job(job_id, "failed", error="extract_job_not_claimed")
+        logger.error(
+            "Extract Job 缺少认领信息，跳过执行且不写终态: "
+            f"job_id={job_id} worker={worker_id} attempts={attempts}"
+        )
         return None
 
     if attempts > settings.EXTRACT_MAX_ATTEMPTS:
@@ -503,6 +687,9 @@ async def handle_extract_job(
         )
         if budget.get("status") in ("not_found", "stale_token"):
             raise ExtractFailure(f"budget_{budget.get('status')}")
+        deadline = _parse_deadline(budget.get("deadline"))
+        if deadline is None:
+            raise ExtractFailure("budget_uninitialized")
 
         stop = asyncio.Event()
         lost = asyncio.Event()
@@ -529,6 +716,7 @@ async def handle_extract_job(
             units = plan_units(spec["target"], parse_row.get("data") or {})
             if not units:
                 raise ExtractFailure("no_units")
+            usage: Dict[str, int] = {"requests": 0}
             outputs, calls = await _run_units(
                 units=units,
                 target=spec["target"],
@@ -537,16 +725,29 @@ async def handle_extract_job(
                 worker_id=worker_id,
                 attempts=attempts,
                 lost=lost,
+                usage=usage,
+                deadline=deadline,
             )
             payload = assemble(spec["target"], outputs)
             final_errors = validate_output(spec["target"], spec["data_schema"], payload)
             if final_errors:
                 raise ExtractFailure("final_validation_failed", str(final_errors[0]))
-            engine = build_engine(spec, calls, attempts)
+            engine = build_engine(spec, calls, attempts, usage["requests"])
+            if lost.is_set():
+                logger.warning(f"Extract 认领已失效，跳过交卷: job_id={job_id}")
+                return None
+            result = await _commit_success(job_id, worker_id, attempts, payload, engine)
         finally:
             stop.set()
             if not heartbeat.done():
                 await heartbeat
+
+        if result is not None:
+            logger.info(
+                f"Extract 完成: job_id={job_id} target={spec['target']} "
+                f"schema_source={spec['schema_source']} requests={engine['usage']['requests']}"
+            )
+        return result
     except ExtractFailure as exc:
         logger.error(f"Extract 失败: job_id={job_id} reason={exc.reason} message={exc.message}")
         await _commit_failure(job_id, worker_id, attempts, exc)
@@ -557,21 +758,3 @@ async def handle_extract_job(
             job_id, worker_id, attempts, ExtractFailure("internal_error", str(exc))
         )
         return None
-
-    status = await commit_extract_job(
-        job_id,
-        worker_id,
-        attempts,
-        "ok",
-        extract_data=payload,
-        engine=engine,
-    )
-    if status not in ("completed", "already_committed"):
-        logger.warning(f"Extract 交卷未成功: job_id={job_id} status={status}")
-        return None
-
-    logger.info(
-        f"Extract 完成: job_id={job_id} target={spec['target']} "
-        f"schema_source={spec['schema_source']} requests={engine['usage']['requests']}"
-    )
-    return payload

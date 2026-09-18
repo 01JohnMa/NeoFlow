@@ -74,6 +74,12 @@ async def _load_pinned_configuration(
     if configuration.get("status") == "archived":
         raise HTTPException(status_code=409, detail="配置已归档，不能创建新任务")
 
+    if configuration.get("type") == "extract":
+        raise HTTPException(
+            status_code=409,
+            detail="Extract 任务请使用 POST /api/extract/jobs（带 schema 校验与权限检查）",
+        )
+
     from services.job_runner import job_runner
 
     if configuration.get("type") not in job_runner.handlers:
@@ -161,13 +167,10 @@ async def _extract_revision_ids(tenant_id: Optional[str]) -> List[str]:
         tenant_id=tenant_id,
         type="extract",
     )
-    revision_ids: List[str] = []
-    for configuration in configurations:
-        revisions = await configuration_service.list_revisions(configuration["id"])
-        revision_ids.extend(
-            str(revision["id"]) for revision in revisions if revision.get("id")
-        )
-    return revision_ids
+    configuration_ids = [
+        str(item["id"]) for item in configurations if item.get("id")
+    ]
+    return await configuration_service.list_revision_ids(configuration_ids)
 
 
 @router.get("/jobs/{job_id}")

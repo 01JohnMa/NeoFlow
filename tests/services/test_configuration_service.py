@@ -33,8 +33,7 @@ class FakeQuery:
         self._operation = "select"
         self._payload: Optional[Dict[str, Any]] = None
         self._filters = []
-        self._order_key: Optional[str] = None
-        self._order_desc = False
+        self._order_keys: List[tuple[str, bool]] = []
         self._limit: Optional[int] = None
 
     def select(self, columns: str = "*", count: Optional[str] = None):
@@ -68,8 +67,7 @@ class FakeQuery:
         return self
 
     def order(self, key: str, desc: bool = False):
-        self._order_key = key
-        self._order_desc = desc
+        self._order_keys.append((key, desc))
         return self
 
     def limit(self, count: int):
@@ -124,8 +122,8 @@ class FakeQuery:
             return FakeResult(removed)
 
         rows = [dict(row) for row in table if self._matches(row)]
-        if self._order_key:
-            rows.sort(key=lambda r: r.get(self._order_key), reverse=self._order_desc)
+        for key, desc in reversed(self._order_keys):
+            rows.sort(key=lambda r: r.get(key), reverse=desc)
         if self._limit is not None:
             rows = rows[: self._limit]
         return FakeResult(rows, count=len(rows))
@@ -153,7 +151,7 @@ def _create(name="测试配置", tenant_id=TENANT_ID, **overrides):
     payload = {
         "tenant_id": tenant_id,
         "name": name,
-        "type": "extract",
+        "type": "classify",
         "definition": overrides.pop("definition", None),
     }
     payload.update(overrides)
@@ -352,15 +350,15 @@ class TestTenantScoping:
     @pytest.mark.asyncio
     async def test_list_filters_by_status_and_type(self, service):
         svc, _ = service
-        draft = await svc.create_configuration(_create(name="draft"))
-        published = await svc.create_configuration(_create(name="published"))
+        draft = await svc.create_configuration(_create(name="draft", type="classify"))
+        published = await svc.create_configuration(_create(name="published", type="classify"))
         await svc.publish_configuration(published["id"])
 
         drafts = await svc.list_configurations(tenant_id=TENANT_ID, status="draft")
         assert [r["id"] for r in drafts] == [draft["id"]]
 
-        extracts = await svc.list_configurations(tenant_id=TENANT_ID, type="extract")
-        assert len(extracts) == 2
+        classifies = await svc.list_configurations(tenant_id=TENANT_ID, type="classify")
+        assert len(classifies) == 2
 
 
 class TestDefinitionHelpers:
@@ -448,7 +446,13 @@ class TestExtractionConfig:
     @pytest.mark.asyncio
     async def test_get_extraction_configuration_prefers_published_revision(self, service):
         svc, _ = service
-        created = await svc.create_configuration(_create(definition={"extraction_prompt": "v1"}))
+        created = await svc.create_configuration(_create(
+            type="extract",
+            definition={
+                "fields": [{"field_key": "sample_name", "field_label": "样品名称"}],
+                "extraction_prompt": "v1",
+            },
+        ))
         published = await svc.publish_configuration(created["id"])
         await svc.update_configuration(created["id"], {"definition": {"extraction_prompt": "draft-v2"}})
 
@@ -459,7 +463,13 @@ class TestExtractionConfig:
     @pytest.mark.asyncio
     async def test_get_extraction_configuration_by_revision_pins_definition(self, service):
         svc, _ = service
-        created = await svc.create_configuration(_create(definition={"extraction_prompt": "v1"}))
+        created = await svc.create_configuration(_create(
+            type="extract",
+            definition={
+                "fields": [{"field_key": "sample_name", "field_label": "样品名称"}],
+                "extraction_prompt": "v1",
+            },
+        ))
         published = await svc.publish_configuration(created["id"])
         await svc.update_configuration(created["id"], {"definition": {"extraction_prompt": "v2"}})
         second = await svc.publish_configuration(created["id"])
@@ -474,7 +484,12 @@ class TestExtractionConfig:
     async def test_resolve_extraction_configuration_by_config_id_code_and_name(self, service):
         svc, _ = service
         created = await svc.create_configuration(
-            _create(name="检测报告", code="inspection_report")
+            _create(
+                name="检测报告",
+                code="inspection_report",
+                type="extract",
+                definition={"fields": [{"field_key": "sample_name", "field_label": "样品名称"}]},
+            )
         )
         await svc.publish_configuration(created["id"])
 
@@ -490,12 +505,41 @@ class TestExtractionConfig:
     @pytest.mark.asyncio
     async def test_list_published_extract_configurations(self, service):
         svc, _ = service
-        created = await svc.create_configuration(_create(name="检测报告", code="inspection_report"))
+        created = await svc.create_configuration(
+            _create(
+                name="检测报告",
+                code="inspection_report",
+                type="extract",
+                definition={"fields": [{"field_key": "sample_name", "field_label": "样品名称"}]},
+            )
+        )
         await svc.publish_configuration(created["id"])
 
-        draft = await svc.create_configuration(_create(name="草稿配置", code="draft_only"))
+        draft = await svc.create_configuration(
+            _create(name="草稿配置", code="draft_only", type="extract")
+        )
 
         published_configs = await svc.list_published_extract_configurations(TENANT_ID)
         ids = [c["id"] for c in published_configs]
         assert created["id"] in ids
         assert draft["id"] not in ids
+
+    @pytest.mark.asyncio
+    async def test_publish_extract_without_schema_or_fields_rejected(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(
+            _create(type="extract", definition={"extraction_prompt": "no schema"})
+        )
+
+        with pytest.raises(ConfigurationStateError):
+            await svc.publish_configuration(created["id"])
+
+    @pytest.mark.asyncio
+    async def test_publish_extract_with_invalid_schema_rejected(self, service):
+        svc, _ = service
+        created = await svc.create_configuration(
+            _create(type="extract", definition={"data_schema": {"anyOf": []}})
+        )
+
+        with pytest.raises(ConfigurationStateError):
+            await svc.publish_configuration(created["id"])

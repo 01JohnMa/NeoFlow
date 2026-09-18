@@ -201,3 +201,42 @@ class TestFilterBeforeLimit:
         )
 
         assert found_rows[0]["id"] == extraction_row["id"]
+
+
+class TestReadFailureAndOrdering:
+    @pytest.mark.asyncio
+    async def test_list_results_propagates_db_errors(self, service, monkeypatch):
+        svc, _ = service
+
+        class BrokenQuery:
+            def select(self, *args, **kwargs):
+                raise RuntimeError("db down")
+
+        class BrokenClient:
+            def table(self, name):
+                return BrokenQuery()
+
+        monkeypatch.setattr(svc, "_get_client", lambda: BrokenClient())
+
+        with pytest.raises(RuntimeError):
+            await svc.list_results(document_id=DOCUMENT_ID)
+
+    @pytest.mark.asyncio
+    async def test_latest_tie_broken_by_id_desc(self, service):
+        svc, fake = service
+        await svc.create_result({
+            "tenant_id": TENANT_ID, "document_id": DOCUMENT_ID,
+            "sample_key": "extract", "data": {"a": 1},
+        })
+        await svc.create_result({
+            "tenant_id": TENANT_ID, "document_id": DOCUMENT_ID,
+            "sample_key": "extract", "data": {"a": 2},
+        })
+        rows = fake.tables["results"]
+        rows[0]["created_at"] = rows[1]["created_at"] = "2026-01-01T00:00:00+00:00"
+        rows[0]["id"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        rows[1]["id"] = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+        fetched = await svc.list_results(document_id=DOCUMENT_ID, limit=1)
+
+        assert fetched[0]["data"] == {"a": 2}

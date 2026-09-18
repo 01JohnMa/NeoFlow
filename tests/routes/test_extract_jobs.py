@@ -113,6 +113,42 @@ class TestCreateExtractJobs:
         assert resp.status_code == 422
         mod.create_job.assert_not_awaited()
 
+    def test_wrong_schema_type_not_masked_by_legacy_fields(self, client, monkeypatch):
+        bad = _draft_config(
+            definition={
+                "target": "per_doc",
+                "data_schema": [],
+                "fields": [
+                    {"field_key": "report_no", "field_label": "报告编号", "field_type": "text"}
+                ],
+            }
+        )
+        mod = _patch(monkeypatch, bad)
+
+        resp = client.post(
+            "/api/extract/jobs",
+            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+        )
+
+        assert resp.status_code == 422
+        assert "schema_invalid" in resp.json()["error"]
+        mod.create_job.assert_not_awaited()
+
+    def test_explicit_invalid_target_rejected(self, client, monkeypatch):
+        bad = _draft_config(
+            definition={"target": "", "data_schema": SCHEMA, "fields": []}
+        )
+        mod = _patch(monkeypatch, bad)
+
+        resp = client.post(
+            "/api/extract/jobs",
+            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+        )
+
+        assert resp.status_code == 422
+        assert "target_not_supported" in resp.json()["error"]
+        mod.create_job.assert_not_awaited()
+
     def test_per_table_row_rejected_with_422(self, client, monkeypatch):
         mod = _patch(
             monkeypatch,
@@ -165,6 +201,7 @@ class TestExtractResultReads:
                     {
                         "id": "res-1",
                         "job_id": "job-1",
+                        "config_revision_id": "rev-1",
                         "data": {"report_no": "WT-1"},
                         "engine": {"target": "per_doc"},
                     }
@@ -178,6 +215,7 @@ class TestExtractResultReads:
         body = resp.json()
         assert body["data"] == {"report_no": "WT-1"}
         assert body["engine"]["target"] == "per_doc"
+        assert body["config_revision_id"] == "rev-1"
 
     def test_job_result_does_not_fall_back_to_document(self, client, monkeypatch):
         from api.routes import extract as extract_mod

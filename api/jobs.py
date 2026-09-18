@@ -163,16 +163,30 @@ async def update_job_if_owned(
     stage: str,
     **extra: Any,
 ) -> bool:
-    """认领感知更新：仅当仍持有认领令牌（worker + attempt + processing）时生效。
+    """认领感知更新（含终态）：仅当仍持有认领令牌时生效。
 
     返回是否真正更新到行；False 表示认领已失效，调用方应停止写入。
     """
+    if stage == "failed":
+        status = "failed"
+    elif stage == "completed":
+        status = "completed"
+    elif stage in ("queued", "pending"):
+        status = "queued"
+    else:
+        status = "processing"
+
     payload = {
+        "status": status,
         "stage": stage,
         "progress": STAGE_PROGRESS.get(stage, 0),
         "updated_at": _utc_now_iso(),
         **extra,
     }
+    if status in ("completed", "failed"):
+        payload.setdefault("finished_at", _utc_now_iso())
+        payload.setdefault("locked_by", None)
+        payload.setdefault("locked_at", None)
     result = await _run_db(
         lambda: _job_table().update(payload)
         .eq("job_id", job_id)
@@ -237,7 +251,7 @@ async def ensure_extract_budget(
     max_requests: int,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
-    """初始化/读取跨 attempt 预算（迁移 026 RPC）。返回 {status, ...}。"""
+    """初始化/读取跨 attempt 预算（迁移 026 RPC）。返回 {status, requests_used, max_requests, deadline}。"""
     result = await _run_db(
         lambda: supabase_service.client.rpc(
             "ensure_extract_budget",
@@ -252,7 +266,13 @@ async def ensure_extract_budget(
     )
     data = result.data or []
     row = data if isinstance(data, dict) else (data[0] if data else None)
-    return row or {}
+    row = row or {}
+    return {
+        "status": row.get("out_status"),
+        "requests_used": row.get("out_requests_used"),
+        "max_requests": row.get("out_max_requests"),
+        "deadline": row.get("out_deadline"),
+    }
 
 
 async def bind_extract_parse_result(

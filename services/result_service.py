@@ -86,29 +86,26 @@ class ResultService(SupabaseClientMixin):
         exclude_sample_key: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """列出 Result（按租户/Job/文档/样品类型过滤，新→旧）。
+        """列出 Result（按租户/Job/文档/样品类型过滤，新→旧，同刻按 id 降序）。
 
         sample_key / exclude_sample_key 在数据库层过滤（LIMIT 之前），
         避免大量结果把目标类型挤出截断窗口。
+        数据库错误向上抛出：读取失败不得伪装成“没有结果”。
         """
-        try:
-            query = self._get_client().table(RESULTS_TABLE).select("*")
-            if tenant_id:
-                query = query.eq("tenant_id", tenant_id)
-            if job_id:
-                query = query.eq("job_id", job_id)
-            if document_id:
-                query = query.eq("document_id", document_id)
-            if sample_key:
-                query = query.eq("sample_key", sample_key)
-            if exclude_sample_key:
-                query = query.neq("sample_key", exclude_sample_key)
-            query = query.order("created_at", desc=True).limit(limit)
-            result = await self._run_sync(query.execute)
-            return result.data or []
-        except Exception as e:
-            logger.error(f"列出 Result 失败: {e}")
-            return []
+        query = self._get_client().table(RESULTS_TABLE).select("*")
+        if tenant_id:
+            query = query.eq("tenant_id", tenant_id)
+        if job_id:
+            query = query.eq("job_id", job_id)
+        if document_id:
+            query = query.eq("document_id", document_id)
+        if sample_key:
+            query = query.eq("sample_key", sample_key)
+        if exclude_sample_key:
+            query = query.neq("sample_key", exclude_sample_key)
+        query = query.order("created_at", desc=True).order("id", desc=True).limit(limit)
+        result = await self._run_sync(query.execute)
+        return result.data or []
 
     async def get_document_parse_result(
         self,

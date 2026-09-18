@@ -1,6 +1,8 @@
 # tests/services/test_extract_service.py
-"""Extract handler 测试：绑定、预算、修复环、target 形状与失败路径（假 LLM/RPC）。"""
+"""Extract handler 测试：绑定、预算、修复环、状态机、交卷确认与失败路径（假 LLM/RPC）。"""
 
+import asyncio
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,6 +10,7 @@ import pytest
 from services import extract_service
 from services.extract_service import (
     ExtractFailure,
+    build_engine,
     handle_extract_job,
     legacy_fields_to_schema,
     plan_units,
@@ -20,6 +23,10 @@ JOB_ID = "99999999-9999-4999-8999-999999999999"
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
 TENANT_ID = "a0000000-0000-0000-0000-000000000001"
 RESULT_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def _deadline_iso(seconds: float = 600) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 SCHEMA = {
     "type": "object",
@@ -79,7 +86,12 @@ def _parse_row(data=None):
     }
 
 
-def _llm_result(content: str, finish_reason="stop"):
+def _llm_result(
+    content: str,
+    finish_reason="stop",
+    refusal=None,
+    content_invalid=False,
+):
     return LLMResult(
         content=content,
         finish_reason=finish_reason,
@@ -87,6 +99,8 @@ def _llm_result(content: str, finish_reason="stop"):
         input_tokens=10,
         output_tokens=5,
         request_id="req-1",
+        refusal=refusal,
+        content_invalid=content_invalid,
     )
 
 
@@ -99,6 +113,7 @@ def _patch_env(
     budget=None,
     renewed=True,
     auto_parse=True,
+    commit_status="completed",
 ):
     monkeypatch.setattr(
         extract_service.supabase_service, "get_document", AsyncMock(return_value=_document())
@@ -120,19 +135,22 @@ def _patch_env(
     )
     monkeypatch.setattr(
         extract_service, "ensure_extract_budget",
-        AsyncMock(return_value=budget or {"status": "initialized"}),
+        AsyncMock(
+            return_value=budget
+            or {"status": "initialized", "requests_used": 0, "max_requests": 200,
+                "deadline": _deadline_iso()}
+        ),
     )
     monkeypatch.setattr(
         extract_service, "consume_extract_request",
-        AsyncMock(return_value={"allowed": True, "reason": None}),
+        AsyncMock(return_value={"allowed": True, "reason": None, "requests_used": None}),
     )
     monkeypatch.setattr(
         extract_service, "renew_job_claim", AsyncMock(return_value=renewed)
     )
     monkeypatch.setattr(
-        extract_service, "commit_extract_job", AsyncMock(return_value="completed")
+        extract_service, "commit_extract_job", AsyncMock(return_value=commit_status)
     )
-    monkeypatch.setattr(extract_service, "update_job", AsyncMock())
     monkeypatch.setattr(extract_service, "get_job", AsyncMock(return_value=None))
 
     responses = list(llm_responses or [])
@@ -344,7 +362,7 @@ class TestHandleExtract:
         assert extract_service.invoke_llm.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_unknown_finish_reason_retries_within_budget(self, monkeypatch):
+    async def test_unknown_finish_reason_retries_once_then_fails(self, monkeypatch):
         _patch_env(
             monkeypatch,
             llm_responses=[
@@ -358,7 +376,221 @@ class TestHandleExtract:
 
         assert result is None
         assert "completion_unknown" in _committed_failure()
-        assert extract_service.invoke_llm.await_count == 3
+        assert extract_service.invoke_llm.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_unknown_finish_reason_recovers_after_one_protocol_retry(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[
+                _llm_result('{"report_no": "WT-4"}', finish_reason=None),
+                _llm_result('{"report_no": "WT-4"}'),
+            ],
+        )
+
+        payload = await handle_extract_job(_job())
+
+        assert payload == {"report_no": "WT-4"}
+        _, engine = _committed_ok()
+        assert engine["usage"]["requests"] == 2
+
+    @pytest.mark.asyncio
+    async def test_transport_error_retries_within_budget(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[
+                RuntimeError("connection reset"),
+                _llm_result('{"report_no": "WT-5"}'),
+            ],
+        )
+
+        payload = await handle_extract_job(_job())
+
+        assert payload == {"report_no": "WT-5"}
+        _, engine = _committed_ok()
+        assert engine["usage"]["requests"] == 2
+
+    @pytest.mark.asyncio
+    async def test_transport_error_after_repair_does_not_resend(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[
+                _llm_result('{"conclusion": null}'),
+                RuntimeError("connection reset"),
+            ],
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "request_failed" in _committed_failure()
+        assert extract_service.invoke_llm.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_unknown_on_repair_does_not_resend(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[
+                _llm_result('{"conclusion": null}'),
+                _llm_result('{"report_no": "WT-6"}', finish_reason=None),
+            ],
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "completion_unknown" in _committed_failure()
+        assert extract_service.invoke_llm.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_refusal_fails_without_repair(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[_llm_result("", refusal="I cannot help with that")],
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "response_refused" in _committed_failure()
+        assert extract_service.invoke_llm.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_invalid_content_type_fails_without_repair(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[_llm_result("", content_invalid=True)],
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "response_content_invalid" in _committed_failure()
+        assert extract_service.invoke_llm.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_deadline_expired_before_request(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[],
+            budget={"status": "existing", "requests_used": 0, "max_requests": 200,
+                    "deadline": _deadline_iso(-5)},
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "deadline_exceeded" in _committed_failure()
+        extract_service.invoke_llm.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_deadline_expired_after_response_not_accepted(self, monkeypatch):
+        async def slow_invoke(messages, **kwargs):
+            await asyncio.sleep(0.15)
+            return _llm_result('{"report_no": "WT-7"}')
+
+        _patch_env(monkeypatch, llm_responses=[])
+        monkeypatch.setattr(extract_service, "invoke_llm", AsyncMock(side_effect=slow_invoke))
+        monkeypatch.setattr(
+            extract_service, "ensure_extract_budget",
+            AsyncMock(return_value={"status": "initialized", "requests_used": 0,
+                                    "max_requests": 200, "deadline": _deadline_iso(0.05)}),
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "deadline_exceeded" in _committed_failure()
+
+    @pytest.mark.asyncio
+    async def test_commit_response_lost_recovers_committed_result(self, monkeypatch):
+        payload = {"report_no": "WT-8"}
+        _patch_env(
+            monkeypatch,
+            llm_responses=[_llm_result('{"report_no": "WT-8"}')],
+        )
+        monkeypatch.setattr(
+            extract_service, "commit_extract_job",
+            AsyncMock(side_effect=[RuntimeError("timeout"), "completed"]),
+        )
+        monkeypatch.setattr(
+            extract_service, "get_job",
+            AsyncMock(return_value={"job_id": JOB_ID, "status": "completed"}),
+        )
+        monkeypatch.setattr(
+            extract_service.result_service, "list_results",
+            AsyncMock(return_value=[{"id": "res-1", "job_id": JOB_ID, "data": payload}]),
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result == payload
+        assert extract_service.commit_extract_job.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_commit_unconfirmed_retries_and_never_marks_failed(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[_llm_result('{"report_no": "WT-9"}')],
+        )
+        monkeypatch.setattr(
+            extract_service, "commit_extract_job",
+            AsyncMock(side_effect=RuntimeError("timeout")),
+        )
+        monkeypatch.setattr(
+            extract_service, "get_job",
+            AsyncMock(return_value={"job_id": JOB_ID, "status": "processing"}),
+        )
+        monkeypatch.setattr(
+            extract_service.result_service, "list_results", AsyncMock(return_value=[])
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert extract_service.commit_extract_job.await_count == 2
+        for call in extract_service.commit_extract_job.await_args_list:
+            assert call.args[3] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_binding_rpc_error_recovered_by_reread(self, monkeypatch):
+        parse_row = _parse_row()
+        fresh = {
+            "job_id": JOB_ID,
+            "status": "processing",
+            "locked_by": "worker-1",
+            "attempts": 1,
+            "document_ids": [DOCUMENT_ID],
+            "parse_result_id": RESULT_ID,
+        }
+        _patch_env(
+            monkeypatch,
+            parse_row=parse_row,
+            llm_responses=[_llm_result('{"report_no": "WT-10"}')],
+        )
+        monkeypatch.setattr(
+            extract_service, "bind_extract_parse_result",
+            AsyncMock(side_effect=RuntimeError("timeout")),
+        )
+        monkeypatch.setattr(extract_service, "get_job", AsyncMock(return_value=fresh))
+
+        payload = await handle_extract_job(_job())
+
+        assert payload == {"report_no": "WT-10"}
+        assert extract_service.bind_extract_parse_result.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_budget_wrapper_status_not_found(self, monkeypatch):
+        _patch_env(monkeypatch, llm_responses=[])
+        monkeypatch.setattr(
+            extract_service, "ensure_extract_budget",
+            AsyncMock(return_value={"status": "stale_token"}),
+        )
+
+        result = await handle_extract_job(_job())
+
+        assert result is None
+        assert "budget_stale_token" in _committed_failure()
 
     @pytest.mark.asyncio
     async def test_budget_denied_before_llm(self, monkeypatch):
@@ -416,7 +648,117 @@ class TestHandleExtract:
                 worker_id="worker-1",
                 attempts=1,
                 lost=lost,
+                usage={"requests": 0},
+                deadline=datetime.now(timezone.utc) + timedelta(seconds=600),
             )
 
         assert exc.value.reason == "claim_lost"
         assert extract_service.invoke_llm.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_claim_lost_detected_after_llm_return(self, monkeypatch):
+        _patch_env(monkeypatch, llm_responses=[])
+        lost = extract_service.asyncio.Event()
+
+        async def invoke_then_lose(messages, **kwargs):
+            lost.set()
+            return _llm_result('{"report_no": "WT-11"}')
+
+        monkeypatch.setattr(
+            extract_service, "invoke_llm", AsyncMock(side_effect=invoke_then_lose)
+        )
+
+        with pytest.raises(ExtractFailure) as exc:
+            await extract_service._run_unit(
+                unit={"id": "doc", "label": "整份文档", "source": "s"},
+                target="per_doc",
+                schema=SCHEMA,
+                job_id=JOB_ID,
+                worker_id="worker-1",
+                attempts=1,
+                lost=lost,
+                calls=[],
+                usage={"requests": 0},
+                deadline=datetime.now(timezone.utc) + timedelta(seconds=600),
+            )
+
+        assert exc.value.reason == "claim_lost"
+
+
+class TestResolveSpecGuards:
+    def test_invalid_schema_type_not_masked_by_legacy_fields(self):
+        fields = [{"field_key": "report_no", "field_label": "报告编号", "field_type": "text"}]
+        job = _job(
+            execution_spec={
+                "capability": "extract",
+                "spec_version": "1",
+                "effective_params": {
+                    "target": "per_doc",
+                    "data_schema": [],
+                    "fields": fields,
+                },
+            }
+        )
+        with pytest.raises(ExtractFailure) as exc:
+            resolve_extract_spec(job)
+        assert exc.value.reason == "schema_invalid"
+
+    def test_explicit_invalid_target_is_not_defaulted(self):
+        for bad_target in ("", False, "per_table_row"):
+            job = _job(
+                execution_spec={
+                    "capability": "extract",
+                    "spec_version": "1",
+                    "effective_params": {"target": bad_target, "data_schema": SCHEMA},
+                }
+            )
+            with pytest.raises(ExtractFailure) as exc:
+                resolve_extract_spec(job)
+            assert exc.value.reason == "target_not_supported"
+
+    def test_null_schema_falls_back_to_legacy_fields(self):
+        fields = [{"field_key": "report_no", "field_label": "报告编号", "field_type": "text"}]
+        job = _job(
+            execution_spec={
+                "capability": "extract",
+                "spec_version": "1",
+                "effective_params": {
+                    "target": "per_doc",
+                    "data_schema": None,
+                    "fields": fields,
+                },
+            }
+        )
+        spec = resolve_extract_spec(job)
+        assert spec["schema_source"] == "legacy_fields"
+
+
+class TestEngineBounds:
+    def test_engine_bytes_limit_keeps_calls_structure(self):
+        calls = [
+            {
+                "unit": "p1",
+                "model": "fake-model",
+                "finish_reason": "stop",
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "request_id": "x" * 1200,
+            }
+            for _ in range(20)
+        ]
+        spec = {"target": "per_doc", "data_schema": SCHEMA, "schema_source": "data_schema"}
+        engine = build_engine(spec, calls, 1, requests=20)
+
+        assert isinstance(engine["usage"]["calls"], list)
+        assert len(engine["usage"]["calls"]) < 20
+        assert len(engine["usage"]["calls"]) <= extract_service.ENGINE_MAX_CALLS
+        assert engine["usage"]["requests"] == 20
+        encoded = extract_service.json.dumps(engine, ensure_ascii=False).encode("utf-8")
+        assert len(encoded) <= extract_service.ENGINE_MAX_BYTES
+
+    def test_sum_tokens_zero_is_not_missing(self):
+        assert extract_service._sum_tokens([{"input_tokens": 0}], "input_tokens") == 0
+        assert extract_service._sum_tokens(
+            [{"input_tokens": 0}, {"input_tokens": None}], "input_tokens"
+        ) is None
+        assert extract_service._sum_tokens([], "input_tokens") is None

@@ -20,14 +20,17 @@ from api.jobs import create_job, get_job
 from api.routes.jobs import _can_access_job
 from api.routes.documents.query import _check_document_access
 from services.configuration_service import configuration_service
-from services.extract_service import ExtractFailure, resolve_extract_spec
+from services.extract_service import (
+    ExtractFailure,
+    build_execution_spec,
+    resolve_extract_spec,
+)
 from services.result_service import result_service
 from services.supabase_service import supabase_service
 
 router = APIRouter(tags=["抽取能力"])
 
 EXTRACT_SAMPLE_KEY = "extract"
-SPEC_VERSION = "1"
 
 
 class CreateExtractRequest(BaseModel):
@@ -37,38 +40,24 @@ class CreateExtractRequest(BaseModel):
     document_ids: List[str] = Field(min_length=1)
 
 
-def _snapshot_params(definition: Dict[str, Any]) -> Dict[str, Any]:
-    """草稿快照：只冻结执行需要的字段（含 legacy fields 回退）。"""
-    return {
-        "target": definition.get("target") or "per_doc",
-        "data_schema": definition.get("data_schema"),
-        "fields": definition.get("fields") or [],
-    }
-
-
 async def _load_definition_and_spec(
     configuration: Dict[str, Any],
 ) -> tuple[Optional[str], Dict[str, Any]]:
-    """返回 (revision_id, execution_spec)；两者按配置状态二选一。"""
+    """返回 (revision_id, execution_spec)；两者按配置状态二选一。
+
+    快照原样保留 target/data_schema 的取值与存在性，非法显式值在这里被
+    resolve_extract_spec 拒绝（422、零 Job），不会被 legacy 回退掩盖。
+    """
     if configuration.get("status") == "published":
         revision_id = configuration.get("current_revision_id")
         revision = await configuration_service.get_revision(str(revision_id or ""))
         if not revision:
             raise HTTPException(status_code=409, detail="配置没有可用的已发布修订")
-        spec = {
-            "capability": "extract",
-            "spec_version": SPEC_VERSION,
-            "effective_params": _snapshot_params(revision.get("definition") or {}),
-        }
+        spec = build_execution_spec(revision.get("definition") or {})
         resolve_extract_spec({"execution_spec": spec})
         return revision["id"], spec
 
-    definition = configuration.get("draft_definition") or {}
-    spec = {
-        "capability": "extract",
-        "spec_version": SPEC_VERSION,
-        "effective_params": _snapshot_params(definition),
-    }
+    spec = build_execution_spec(configuration.get("draft_definition") or {})
     resolve_extract_spec({"execution_spec": spec})
     return None, spec
 
@@ -150,6 +139,7 @@ async def get_document_extract_result(
         "success": True,
         "result_id": row.get("id"),
         "job_id": row.get("job_id"),
+        "config_revision_id": row.get("config_revision_id"),
         "data": row.get("data"),
         "engine": row.get("engine"),
     }
@@ -177,6 +167,7 @@ async def get_job_extract_result(
         "success": True,
         "result_id": row.get("id"),
         "job_id": row.get("job_id"),
+        "config_revision_id": row.get("config_revision_id"),
         "data": row.get("data"),
         "engine": row.get("engine"),
     }

@@ -19,7 +19,7 @@ CONFIGURATION = {
     "id": CONFIG_ID,
     "tenant_id": TENANT_ID,
     "status": "published",
-    "type": "extract",
+    "type": "classify",
 }
 JOB_DOCUMENT = {
     "id": DOCUMENT_ID,
@@ -151,9 +151,7 @@ class TestCreateJob:
              patch("api.routes.jobs.create_job", new_callable=AsyncMock, return_value=JOB_ID), \
              patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB) as mock_get_job:
             mock_svc.get_revision = AsyncMock(return_value=REVISION)
-            mock_svc.get_configuration = AsyncMock(
-                return_value={**CONFIGURATION, "type": "classify"}
-            )
+            mock_svc.get_configuration = AsyncMock(return_value=CONFIGURATION)
             mock_supabase.get_document = AsyncMock(
                 return_value={"id": DOCUMENT_ID, "tenant_id": TENANT_ID}
             )
@@ -164,6 +162,21 @@ class TestCreateJob:
         assert resp.status_code == 201
         assert resp.json()["data"]["job_id"] == JOB_ID
         mock_get_job.assert_awaited_once_with(JOB_ID)
+
+    def test_extract_configuration_requires_dedicated_entry(self, user_client):
+        with patch("api.routes.jobs.configuration_service") as mock_svc, \
+             patch("api.routes.jobs.create_job", new_callable=AsyncMock) as mock_create:
+            mock_svc.get_revision = AsyncMock(return_value=REVISION)
+            mock_svc.get_configuration = AsyncMock(
+                return_value={**CONFIGURATION, "type": "extract"}
+            )
+            resp = user_client.post(
+                "/api/jobs",
+                json={"configuration_revision_id": REVISION_ID, "document_ids": [DOCUMENT_ID]},
+            )
+        assert resp.status_code == 409
+        assert "extract" in resp.json()["error"].lower()
+        mock_create.assert_not_awaited()
 
     def test_document_from_other_tenant_returns_404(self, user_client):
         with patch("api.routes.jobs.configuration_service") as mock_svc, \
@@ -326,3 +339,36 @@ class TestListJobs:
 
         assert resp.status_code == 200
         assert mock_list.await_args.kwargs["tenant_id"] is None
+
+    def test_capability_extract_collects_revision_ids(self, user_client):
+        with patch(
+            "api.routes.jobs.list_jobs",
+            new_callable=AsyncMock,
+            return_value=[JOB],
+        ) as mock_list, patch(
+            "api.routes.jobs.configuration_service"
+        ) as mock_svc:
+            mock_svc.list_configurations = AsyncMock(
+                return_value=[{"id": "cfg-1"}, {"id": "cfg-2"}]
+            )
+            mock_svc.list_revision_ids = AsyncMock(return_value=["rev-1", "rev-2"])
+
+            resp = user_client.get("/api/jobs?capability=extract")
+
+        assert resp.status_code == 200
+        assert mock_list.await_args.kwargs["capability"] == "extract"
+        assert mock_list.await_args.kwargs["capability_revision_ids"] == ["rev-1", "rev-2"]
+        mock_svc.list_revision_ids.assert_awaited_once_with(["cfg-1", "cfg-2"])
+
+    def test_capability_extract_db_error_not_disguised_as_empty(self, user_client):
+        with patch(
+            "api.routes.jobs.list_jobs",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "api.routes.jobs.configuration_service"
+        ) as mock_svc:
+            mock_svc.list_configurations = AsyncMock(side_effect=RuntimeError("db down"))
+
+            with pytest.raises(RuntimeError):
+                user_client.get("/api/jobs?capability=extract")

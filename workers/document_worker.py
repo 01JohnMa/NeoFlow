@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from api.jobs import claim_next_job, update_job
+from api.jobs import claim_next_job, update_job_if_owned
 from config.settings import settings
 from services.job_runner import job_runner
 from services.supabase_service import supabase_service
@@ -39,8 +39,23 @@ async def poll_once(worker_id: str) -> bool:
         await execute_job(job)
     except Exception as exc:
         logger.opt(exception=exc).error(f"[worker={worker_id}] 任务执行异常: {job.get('job_id')}")
-        await update_job(str(job.get("job_id")), "failed", error=str(exc))
+        await _fail_job_if_owned(job, str(exc))
     return True
+
+
+async def _fail_job_if_owned(job: Dict[str, Any], error: str) -> None:
+    """异常兜底：仅在仍持有认领时写失败终态；无令牌时绝不覆盖 Job 状态。"""
+    job_id = str(job.get("job_id") or "")
+    worker_id = job.get("locked_by")
+    attempts = int(job.get("attempts") or 0)
+    if not job_id or not worker_id or attempts <= 0:
+        logger.error(
+            f"任务缺少认领信息，不写终态: job_id={job_id} worker={worker_id} attempts={attempts}"
+        )
+        return
+    updated = await update_job_if_owned(job_id, worker_id, attempts, "failed", error=error)
+    if not updated:
+        logger.warning(f"认领已失效，不写终态（可能已由新 attempt 接管）: job_id={job_id}")
 
 
 async def run_forever(worker_id: Optional[str] = None) -> None:
