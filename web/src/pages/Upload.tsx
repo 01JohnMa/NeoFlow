@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProfile } from '@/hooks/useProfile'
-import { useUploadDocument, useProcessDocument } from '@/hooks/useDocuments'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { useUploadDocument } from '@/hooks/useDocuments'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn, formatFileSize } from '@/lib/utils'
 import {
@@ -29,30 +29,12 @@ export function Upload() {
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadMutation = useUploadDocument()
-  const processMutation = useProcessDocument()
-  const { tenantName, tenantCode, templates, profile, isLoading: profileLoading, fetchProfile, fetchTemplates } = useProfile()
+  const { tenantCode, profile, isLoading: profileLoading, fetchProfile } = useProfile()
 
-  const availableTemplates = useMemo(
-    () => templates.filter(template => template.is_active !== false),
-    [templates],
-  )
-
-  const [requestedTemplateId, setRequestedTemplateId] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
-  const [processError, setProcessError] = useState<string | null>(null)
-
-  const selectedTemplateId = useMemo(() => {
-    if (requestedTemplateId && availableTemplates.some(template => template.id === requestedTemplateId)) {
-      return requestedTemplateId
-    }
-    if (availableTemplates.length === 1) {
-      return availableTemplates[0].id
-    }
-    return null
-  }, [requestedTemplateId, availableTemplates])
 
   const validateFile = (file: File): string | null => {
     if (!ACCEPTED_TYPES.includes(file.type)) {
@@ -107,16 +89,11 @@ export function Upload() {
   }
 
   const handleUpload = async () => {
-    if (!selectedFile || !selectedTemplateId) return
+    if (!selectedFile) return
 
     try {
       setUploadError(null)
-      setProcessError(null)
-      const result = await uploadMutation.mutateAsync({
-        file: selectedFile,
-        templateId: selectedTemplateId,
-      })
-      try { await processMutation.mutateAsync({ documentId: result.document_id }) } catch (error) { setProcessError(error instanceof Error ? error.message : '文档识别失败，请稍后重试'); return }
+      const result = await uploadMutation.mutateAsync(selectedFile)
       navigate(`/documents/${result.document_id}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : '文件上传失败，请重试'
@@ -128,14 +105,13 @@ export function Upload() {
     setSelectedFile(null)
     setPreview(null)
     setUploadError(null)
-    setProcessError(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }
 
-  const isUploading = uploadMutation.isPending || processMutation.isPending
-  const canUpload = Boolean(selectedFile && selectedTemplateId) && !isUploading
+  const isUploading = uploadMutation.isPending
+  const canUpload = Boolean(selectedFile) && !isUploading
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-8 animate-fadeIn">
@@ -147,8 +123,8 @@ export function Upload() {
         </p>
       </div>
 
-      {profileLoading && <Card><CardContent className="py-8 text-center text-text-secondary">正在加载部门与模板信息...</CardContent></Card>}
-      {!profileLoading && !profile && <Card className="border-error-500/50"><CardContent className="pt-6"><div className="flex items-center justify-between gap-3 text-error-500"><span>部门信息加载失败，请重试。</span><Button variant="outline" onClick={() => { void fetchProfile(); void fetchTemplates() }}>重新加载</Button></div></CardContent></Card>}
+      {profileLoading && <Card><CardContent className="py-8 text-center text-text-secondary">正在加载部门信息...</CardContent></Card>}
+      {!profileLoading && !profile && <Card className="border-error-500/50"><CardContent className="pt-6"><div className="flex items-center justify-between gap-3 text-error-500"><span>部门信息加载失败，请重试。</span><Button variant="outline" onClick={() => { void fetchProfile() }}>重新加载</Button></div></CardContent></Card>}
       {!tenantCode && !profileLoading && profile && (
         <Card className="border-warning-500/50">
           <CardContent className="pt-6">
@@ -165,55 +141,7 @@ export function Upload() {
         </Card>
       )}
 
-      {tenantCode && !profileLoading && availableTemplates.length === 0 && (
-        <Card className="border-warning-500/50">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3 text-warning-500">
-              <AlertTriangle className="h-6 w-6 flex-shrink-0" />
-              <div>
-                <p className="font-medium">当前部门暂无可用模板</p>
-                <p className="text-sm text-text-muted mt-1">
-                  请先在后台配置文档模板后再试。
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {tenantCode && availableTemplates.length > 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">选择文档类型</CardTitle>
-            <CardDescription>
-              {tenantName && `${tenantName} - `}请选择本次上传的文档类型
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {availableTemplates.map(template => (
-                <button
-                  key={template.id}
-                  type="button"
-                  onClick={() => setRequestedTemplateId(template.id)}
-                  aria-pressed={selectedTemplateId === template.id}
-                  disabled={isUploading}
-                  className={cn(
-                    'px-4 py-2 rounded-lg border text-sm transition-colors',
-                    selectedTemplateId === template.id
-                      ? 'border-primary-500 bg-primary-500/10 text-primary-400'
-                      : 'border-border-default hover:border-primary-500/50 text-text-secondary',
-                  )}
-                >
-                  {template.name}
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {tenantCode && selectedTemplateId && !selectedFile && (
+      {tenantCode && !selectedFile && (
         <Card>
           <CardContent className="pt-6">
             <div
@@ -248,10 +176,7 @@ export function Upload() {
 
       {selectedFile && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">已选择文件</CardTitle>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             <div className="flex items-start gap-4">
               <div className="w-24 h-24 rounded-lg bg-bg-secondary flex items-center justify-center overflow-hidden flex-shrink-0">
                 {preview ? (
@@ -280,7 +205,6 @@ export function Upload() {
               )}
             </div>
 
-            {processError && <div role="alert" className="mt-4 p-3 rounded-lg bg-warning-500/10 text-warning-500 text-sm">文件已上传，但识别失败：{processError}</div>}
             {uploadError && (
               <div role="alert" className="mt-4 flex items-center gap-2 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-error-500 text-sm">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -298,7 +222,7 @@ export function Upload() {
                 ) : (
                   <>
                     <UploadIcon className="h-4 w-4 mr-2" />
-                    上传并识别
+                    上传
                   </>
                 )}
               </Button>
@@ -333,9 +257,7 @@ export function Upload() {
             <li className="flex items-start gap-2">
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />
               <span>
-                {tenantCode
-                  ? '选择文档类型后上传，系统将自动提取关键信息'
-                  : '请先选择所属部门'}
+                {tenantCode ? '上传后可在文档列表中查看文件' : '请先选择所属部门'}
               </span>
             </li>
           </ul>

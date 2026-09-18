@@ -23,7 +23,7 @@ class SupabaseClientMixin:
         return await loop.run_in_executor(None, partial(fn, *args, **kwargs))
 
 
-EXTRACTION_PROMPT_TEMPLATE = """你是一个专业的数据提取助手，专门处理{doc_type}的OCR识别文本。请从用户提供的文本中精准提取以下字段。
+EXTRACTION_PROMPT_TEMPLATE = """你是一个专业的数据提取助手，专门处理{doc_type}的解析文本。请从用户提供的文本中精准提取以下字段。
 
 **目标字段：**
 {field_list}
@@ -39,8 +39,8 @@ EXTRACTION_PROMPT_TEMPLATE = """你是一个专业的数据提取助手，专门
 - 仅输出扁平的 JSON 对象，只包含上述目标字段，禁止添加任何其他字段
 - 不要包含任何解释、引言或 Markdown 代码块标记
 
-现在，请处理用户提供的OCR文本：
-{ocr_text}"""
+现在，请处理用户提供的解析文本：
+{markdown}"""
 
 
 def build_field_table(fields: List[Dict[str, Any]]) -> str:
@@ -73,33 +73,22 @@ def build_field_table(fields: List[Dict[str, Any]]) -> str:
     )
 
 
-def build_extraction_prompt(config: Dict[str, Any], ocr_text: str) -> str:
+def build_extraction_prompt(config: Dict[str, Any], markdown: str) -> str:
     """
     根据 Extraction Configuration 构建 LLM 提取 Prompt。
 
     Args:
         config: 归一化后的抽取配置（name / fields / extraction_prompt）
-        ocr_text: OCR 识别文本
+        markdown: ParseResult 的解析文本
     """
     custom_prompt = config.get("extraction_prompt")
     if custom_prompt:
-        return custom_prompt.replace("{ocr_text}", ocr_text)
+        return custom_prompt.replace("{markdown}", markdown)
 
     return EXTRACTION_PROMPT_TEMPLATE.format(
         doc_type=config.get("name", "文档"),
         field_list=build_field_table(config.get("fields") or []),
-        ocr_text=ocr_text,
+        markdown=markdown,
     )
-
-
-def build_field_mapping(config: Dict[str, Any]) -> Dict[str, str]:
-    """构建字段到飞书列名的映射：{field_key: feishu_column}。"""
-    mapping: Dict[str, str] = {}
-    for field in config.get("fields") or []:
-        field_key = field.get("field_key")
-        feishu_column = field.get("feishu_column")
-        if field_key and feishu_column:
-            mapping[field_key] = feishu_column
-    return mapping
 
 

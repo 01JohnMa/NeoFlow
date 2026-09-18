@@ -21,7 +21,6 @@ def _configuration(**overrides):
         "id": "config-1",
         "name": "检测报告",
         "code": "inspection_report",
-        "extraction_mode": "ocr_llm",
     }
     config.update(overrides)
     return config

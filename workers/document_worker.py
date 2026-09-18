@@ -34,7 +34,7 @@ async def poll_once(worker_id: str) -> bool:
     if not job:
         return False
 
-    logger.info(f"[worker={worker_id}] 认领任务: {job.get('job_id')} type={job.get('job_type')}")
+    logger.info(f"[worker={worker_id}] 认领任务: {job.get('job_id')}")
     try:
         await execute_job(job)
     except Exception as exc:

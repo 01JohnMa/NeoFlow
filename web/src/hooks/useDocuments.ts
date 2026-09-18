@@ -11,7 +11,6 @@ export const documentKeys = {
   details: () => [...documentKeys.all, 'detail'] as const,
   detail: (id: string) => [...documentKeys.details(), id] as const,
   status: (id: string) => [...documentKeys.all, 'status', id] as const,
-  result: (id: string) => [...documentKeys.all, 'result', id] as const,
 }
 
 // List documents hook
@@ -45,27 +44,12 @@ export function useDocumentStatus(documentId: string, enabled: boolean = true) {
     staleTime: 30000,
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      // 终态停止轮询（pending_review 只会在人工审核后变化）
-      if (
-        status === 'pending_review' ||
-        status === 'completed' ||
-        status === 'failed'
-      ) {
+      // 终态停止轮询
+      if (status === 'completed' || status === 'failed') {
         return false
       }
       return 2000 // Poll every 2 seconds
     },
-  })
-}
-
-// Extraction result hook（结果就绪后短期复用缓存；404 表示还没结果，直接交给页面按状态决定是否等待）
-export function useExtractionResult(documentId: string, enabled: boolean = true) {
-  return useQuery({
-    queryKey: documentKeys.result(documentId),
-    queryFn: () => documentsService.getResult(documentId),
-    enabled: enabled && !!documentId,
-    staleTime: 60000,
-    retry: false,
   })
 }
 
@@ -75,14 +59,12 @@ export function useUploadDocument() {
   const { setUploadProgress, removeUploadProgress } = useUploadStore()
 
   return useMutation({
-    mutationFn: async ({ file, templateId, customPushName }: { file: File; templateId?: string; customPushName?: string }) => {
+    mutationFn: async (file: File) => {
       const tempId = `upload-${Date.now()}`
       setUploadProgress(tempId, 0)
 
       try {
         const result = await documentsService.upload(file, {
-          templateId,
-          customPushName,
           onProgress: (progress) => setUploadProgress(tempId, progress)
         })
         removeUploadProgress(tempId)
@@ -93,34 +75,6 @@ export function useUploadDocument() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
-
-// Process document mutation
-export function useProcessDocument() {
-  const queryClient = useQueryClient()
-  const { addProcessingDocument, removeProcessingDocument } = useUploadStore()
-
-  return useMutation({
-    mutationFn: async ({ documentId, sync = false }: { documentId: string; sync?: boolean }) => {
-      addProcessingDocument(documentId)
-      try {
-        const result = await documentsService.process(documentId, sync)
-        if (!sync) {
-          // Don't remove from processing for async - let status polling handle it
-        } else {
-          removeProcessingDocument(documentId)
-        }
-        return result
-      } catch (error) {
-        removeProcessingDocument(documentId)
-        throw error
-      }
-    },
-    onSuccess: (_, { documentId }) => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.status(documentId) })
       queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
     },
   })
@@ -165,46 +119,6 @@ export function useDeleteDocument() {
     },
     onSettled: () => {
       // 无论成功还是失败，都重新获取最新数据以确保同步
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
-
-// Validate document mutation
-export function useValidateDocument() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      documentId,
-      documentType,
-      data,
-      validationNotes,
-    }: {
-      documentId: string
-      documentType: string
-      data: Record<string, unknown>
-      validationNotes?: string
-    }) => {
-      return documentsService.validate(documentId, documentType, data, validationNotes)
-    },
-    onSuccess: (_, { documentId }) => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.result(documentId) })
-      queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
-    },
-  })
-}
-
-// Reject document mutation
-export function useRejectDocument() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({ documentId, reason }: { documentId: string; reason: string }) => {
-      return documentsService.reject(documentId, reason)
-    },
-    onSuccess: (_, { documentId }) => {
-      queryClient.invalidateQueries({ queryKey: documentKeys.status(documentId) })
       queryClient.invalidateQueries({ queryKey: documentKeys.lists() })
     },
   })

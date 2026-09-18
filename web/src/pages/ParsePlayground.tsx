@@ -256,7 +256,7 @@ function HistoryDrawer({
   if (!open) return null
 
   const jobs = (historyQuery.data || []).filter(
-    (job) => job.execution_spec?.capability === 'parse' || job.job_type === 'parse',
+    (job) => job.execution_spec?.capability === 'parse',
   )
 
   return (

@@ -19,7 +19,6 @@ from api.routes.configurations import router as configurations_router
 from api.routes.jobs import router as jobs_router
 from api.routes.parse import router as parse_router
 from api.routes.sdk import router as sdk_router
-from api.routes.crm import router as crm_router
 
 
 # 配置日志
@@ -127,7 +126,6 @@ app.include_router(configurations_router, prefix="/api", tags=["配置管理"])
 app.include_router(jobs_router, prefix="/api", tags=["任务与结果"])
 app.include_router(parse_router, prefix="/api", tags=["解析能力"])
 app.include_router(sdk_router, prefix="/api", tags=["AI模板生成"])
-app.include_router(crm_router, prefix="/api", tags=["CRM集成"])
 
 
 @app.exception_handler(AppException)
@@ -189,9 +187,9 @@ async def root():
         "health": "/api/health",
         "endpoints": {
             "upload": "POST /api/documents/upload",
-            "process": "POST /api/documents/{document_id}/process",
             "status": "GET /api/documents/{document_id}/status",
-            "result": "GET /api/documents/{document_id}/result"
+            "parse": "POST /api/parse/jobs",
+            "parse_result": "GET /api/documents/{document_id}/parse-result"
         }
     }
 

@@ -4,9 +4,9 @@
 调用方（worker / API）只需调用 JobRunner.run(job)：
 1. 若 job 固定了 configuration_revision_id，加载 Revision 与其 Configuration；
 2. 按 Configuration.type 选择 handler；
-3. 没有 Revision 的历史 job 走 extract handler（兼容旧文档处理流程）。
+3. 两者都无：fail-closed 拒绝。
 
-新增能力（如 #8 的 parse）只需注册一个 handler，不需要改路由或 worker。
+新增能力只需注册一个 handler，不需要改路由或 worker。
 """
 
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -44,36 +44,15 @@ async def handle_extract_job(
     revision: Optional[Dict[str, Any]] = None,
     configuration: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """extract handler：沿用现有文档抽取流程（Result + 旧业务表镜像）。"""
+    """Extract 执行能力在 2.0 清场后下线，执行契约由 Extract 轮重建。
+
+    保留注册仅为维持配置创建/发布的 handler 校验；收到任务时明确失败。
+    """
     from api.jobs import update_job
-    from api.routes.documents.process import process_document_task
-    from services.supabase_service import supabase_service
 
     job_id = str(job.get("job_id"))
-    document_ids = job.get("document_ids") or []
-    if not document_ids:
-        await update_job(job_id, "failed", error="任务缺少 document_ids")
-        return None
-
-    document_id = document_ids[0]
-    document = await supabase_service.get_document(document_id)
-    if not document:
-        await update_job(job_id, "failed", error=f"文档不存在: {document_id}")
-        return None
-
-    task_kwargs = {
-        "document_id": document_id,
-        "file_path": document.get("file_path", ""),
-        "template_id": document.get("template_id"),
-        "tenant_id": document.get("tenant_id") or job.get("tenant_id"),
-        "custom_push_name": document.get("custom_push_name"),
-        "job_id": job_id,
-        "configuration_revision_id": job.get("configuration_revision_id"),
-    }
-    if job.get("job_type") == "crm":
-        task_kwargs["force_pending_review"] = True
-
-    return await process_document_task(**task_kwargs)
+    await update_job(job_id, "failed", error="Extract 执行能力未上线（Extract 轮实现）")
+    return None
 
 
 async def _handle_parse_result_capability(
@@ -122,7 +101,6 @@ async def _handle_parse_result_capability(
             data=result,
             job_id=job_id,
             config_revision_id=job.get("configuration_revision_id"),
-            field_meta={},
         )
         stored = await result_service.create_result(row)
         if not stored:

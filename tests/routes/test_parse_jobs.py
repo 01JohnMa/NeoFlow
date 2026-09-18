@@ -53,6 +53,11 @@ class TestCreateParseJobs:
                     "document_ids": [OTHER_DOCUMENT_ID, DOCUMENT_ID],
                     "parse_mode": "vlm",
                     "page_ranges": {"target_pages": "3,1-2"},
+                    "language": "en",
+                    "enable_formula": False,
+                    "enable_table": True,
+                    "remove_watermark": True,
+                    "watermark_keywords": ["COPY", "COPY"],
                 },
             )
 
@@ -69,6 +74,34 @@ class TestCreateParseJobs:
         assert kwargs["parse_mode"] == "vlm"
         assert kwargs["target_pages"] == [1, 2, 3]
         assert kwargs["idempotency_key"] == "K1"
+        assert kwargs["options"] == {
+            "language": "en",
+            "enable_formula": False,
+            "enable_table": True,
+            "remove_watermark": True,
+            "watermark_keywords": ["COPY"],
+        }
+
+    def test_omitted_options_are_not_injected(self, client):
+        with _patch_service() as mock_svc:
+            mock_svc.admit = AsyncMock(return_value=_ok_response())
+            resp = client.post(
+                "/api/parse/jobs", json={"document_ids": [DOCUMENT_ID]}
+            )
+
+        assert resp.status_code == 201
+        assert mock_svc.admit.await_args.kwargs["options"] == {}
+
+    def test_unsupported_language_rejected_before_admission(self, client):
+        with _patch_service() as mock_svc:
+            mock_svc.admit = AsyncMock(return_value=_ok_response())
+            resp = client.post(
+                "/api/parse/jobs",
+                json={"document_ids": [DOCUMENT_ID], "language": "klingon"},
+            )
+
+        assert resp.status_code == 422
+        mock_svc.admit.assert_not_awaited()
 
     def test_idempotent_replay_maps_to_200(self, client):
         with _patch_service() as mock_svc:

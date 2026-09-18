@@ -21,16 +21,7 @@ class DetectedField(BaseModel):
     field_label: str
     field_type: str = "text"
     extraction_hint: str = ""
-    review_enforced: bool = False
-    review_allowed_values: Optional[List[str]] = None
     sample_value: Optional[str] = None
-
-
-class ExcelTemplatePlaceholder(BaseModel):
-    sheet_name: str
-    coordinate: str
-    field_key: str
-    raw_value: str
 
 
 class DocumentAnalysis(BaseModel):
@@ -96,9 +87,6 @@ class SDKSession(BaseModel):
     parse_job_id: str
     parse_mode: str = "pipeline"
     parse_error: Optional[str] = None
-    excel_template_file_name: Optional[str] = None
-    excel_template_path: Optional[str] = None
-    excel_placeholders: List[ExcelTemplatePlaceholder] = Field(default_factory=list)
     user_id: str
     state: SDKSessionState
     created_at: float
@@ -122,8 +110,6 @@ class SDKSessionResponse(BaseModel):
     parse_error: Optional[str] = None
     parse_progress: Optional[int] = None
     state: SDKSessionState
-    excel_template_file_name: Optional[str] = None
-    excel_placeholders: List[ExcelTemplatePlaceholder] = Field(default_factory=list)
     analysis: Optional[DocumentAnalysis] = None
     confirmed_template: Optional[ConfirmTemplateRequest] = None
     prompt: Optional[str] = None

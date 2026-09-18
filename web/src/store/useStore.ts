@@ -52,12 +52,8 @@ interface UIState {
 
 interface UploadState {
   uploadProgress: Record<string, number>
-  processingDocuments: Set<string>
   setUploadProgress: (id: string, progress: number) => void
   removeUploadProgress: (id: string) => void
-  addProcessingDocument: (id: string) => void
-  removeProcessingDocument: (id: string) => void
-  isProcessing: (id: string) => boolean
 }
 
 // Auth Store
@@ -108,9 +104,8 @@ export const useUIStore = create<UIState>()(
 )
 
 // Upload Store
-export const useUploadStore = create<UploadState>()((set, get) => ({
+export const useUploadStore = create<UploadState>()((set) => ({
   uploadProgress: {},
-  processingDocuments: new Set(),
   setUploadProgress: (id, progress) =>
     set((state) => ({
       uploadProgress: { ...state.uploadProgress, [id]: progress },
@@ -121,18 +116,5 @@ export const useUploadStore = create<UploadState>()((set, get) => ({
       delete uploadProgress[id]
       return { uploadProgress }
     }),
-  addProcessingDocument: (id) =>
-    set((state) => {
-      const newSet = new Set(state.processingDocuments)
-      newSet.add(id)
-      return { processingDocuments: newSet }
-    }),
-  removeProcessingDocument: (id) =>
-    set((state) => {
-      const newSet = new Set(state.processingDocuments)
-      newSet.delete(id)
-      return { processingDocuments: newSet }
-    }),
-  isProcessing: (id) => get().processingDocuments.has(id),
 }))
 

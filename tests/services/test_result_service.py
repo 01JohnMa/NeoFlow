@@ -1,5 +1,5 @@
 # tests/services/test_result_service.py
-"""ResultService 测试 — JSONB round-trip、逐字段 field_meta、逐样品写入。"""
+"""ResultService 测试 — JSONB round-trip、按租户/Job/文档过滤、Parse 单行写入。"""
 
 import pytest
 
@@ -7,8 +7,6 @@ from services.result_service import (
     DEFAULT_SAMPLE_KEY,
     PARSE_SAMPLE_KEY,
     ResultService,
-    build_field_meta,
-    result_to_extraction_data,
 )
 from tests.services.test_configuration_service import FakePostgrestClient
 
@@ -29,27 +27,11 @@ def service():
     instance._client = original_client
 
 
-class TestFieldMeta:
-    def test_build_field_meta_covers_each_field_with_null_confidence(self):
-        meta = build_field_meta({"sample_name": "LED灯", "qty": 3}, source="ocr_llm")
-
-        assert set(meta.keys()) == {"sample_name", "qty"}
-        assert meta["sample_name"] == {
-            "source": "ocr_llm",
-            "confidence": None,
-            "review_state": "pending",
-        }
-
-    def test_build_field_meta_is_empty_for_empty_data(self):
-        assert build_field_meta({}) == {}
-
-
 class TestRoundTrip:
     @pytest.mark.asyncio
     async def test_create_and_get_result_round_trip(self, service):
         svc, _ = service
         data = {"sample_name": "LED灯", "report_date": "2026-01-01"}
-        field_meta = build_field_meta(data, source="vlm")
 
         created = await svc.create_result({
             "tenant_id": TENANT_ID,
@@ -58,28 +40,25 @@ class TestRoundTrip:
             "config_revision_id": REVISION_ID,
             "sample_key": "default",
             "data": data,
-            "field_meta": field_meta,
-            "review_state": "pending",
         })
 
-        fetched = await svc.get_result(created["id"])
-        assert fetched["data"] == data
-        assert fetched["field_meta"] == field_meta
-        assert fetched["review_state"] == "pending"
-        assert fetched["tenant_id"] == TENANT_ID
-        assert fetched["job_id"] == JOB_ID
-        assert fetched["config_revision_id"] == REVISION_ID
+        fetched = await svc.list_results(job_id=JOB_ID)
+        assert fetched[0]["data"] == data
+        assert fetched[0]["tenant_id"] == TENANT_ID
+        assert fetched[0]["job_id"] == JOB_ID
+        assert fetched[0]["config_revision_id"] == REVISION_ID
+        assert fetched[0]["id"] == created["id"]
 
     @pytest.mark.asyncio
     async def test_list_filters_by_tenant_job_and_document(self, service):
         svc, _ = service
         await svc.create_result({
             "tenant_id": TENANT_ID, "job_id": JOB_ID, "document_id": DOCUMENT_ID,
-            "sample_key": DEFAULT_SAMPLE_KEY, "data": {"a": 1}, "field_meta": {},
+            "sample_key": DEFAULT_SAMPLE_KEY, "data": {"a": 1},
         })
         await svc.create_result({
             "tenant_id": OTHER_TENANT_ID, "job_id": "other-job", "document_id": "other-doc",
-            "sample_key": DEFAULT_SAMPLE_KEY, "data": {"a": 2}, "field_meta": {},
+            "sample_key": DEFAULT_SAMPLE_KEY, "data": {"a": 2},
         })
 
         own = await svc.list_results(tenant_id=TENANT_ID)
@@ -95,76 +74,23 @@ class TestRoundTrip:
         assert [r["data"] for r in other] == [{"a": 2}]
 
     @pytest.mark.asyncio
-    async def test_get_missing_result_returns_none(self, service):
+    async def test_list_results_excludes_sample_key(self, service):
         svc, _ = service
-        assert await svc.get_result("nope") is None
+        await svc.create_result({
+            "tenant_id": TENANT_ID, "document_id": DOCUMENT_ID,
+            "sample_key": DEFAULT_SAMPLE_KEY, "data": {"a": 1},
+        })
+        await svc.create_result({
+            "tenant_id": TENANT_ID, "document_id": DOCUMENT_ID,
+            "sample_key": PARSE_SAMPLE_KEY, "data": {"markdown": "x"},
+        })
 
-
-class TestRecordExtractionResult:
-    @pytest.mark.asyncio
-    async def test_single_sample_writes_one_result_with_default_key(self, service):
-        svc, fake = service
-        result = {
-            "document_type": "inspection_report",
-            "extraction_data": {"sample_name": "LED灯"},
-        }
-
-        created = await svc.record_extraction_result(
+        rows = await svc.list_results(
             tenant_id=TENANT_ID,
             document_id=DOCUMENT_ID,
-            result=result,
-            job_id=JOB_ID,
-            config_revision_id=REVISION_ID,
-            source="ocr_llm",
+            exclude_sample_key=PARSE_SAMPLE_KEY,
         )
-
-        assert len(created) == 1
-        row = fake.tables["results"][0]
-        assert row["sample_key"] == DEFAULT_SAMPLE_KEY
-        assert row["data"] == {"sample_name": "LED灯"}
-        assert row["field_meta"]["sample_name"]["source"] == "ocr_llm"
-        assert row["field_meta"]["sample_name"]["confidence"] is None
-        assert row["review_state"] == "pending"
-        assert row["job_id"] == JOB_ID
-        assert row["config_revision_id"] == REVISION_ID
-        assert row["document_id"] == DOCUMENT_ID
-
-    @pytest.mark.asyncio
-    async def test_legacy_sample_array_is_ignored_and_writes_one_default_result(self, service):
-        svc, fake = service
-        result = {
-            "document_type": "inspection_report",
-            "extraction_data": {"sample_name": "第一页"},
-            "extraction_results": [
-                {"sample_index": 1, "data": {"sample_name": "第一页"}},
-                {"sample_index": 2, "data": {"sample_name": "第二页"}},
-            ],
-        }
-
-        created = await svc.record_extraction_result(
-            tenant_id=TENANT_ID,
-            document_id=DOCUMENT_ID,
-            result=result,
-            source="vlm",
-        )
-
-        assert len(created) == 1
-        rows = fake.tables["results"]
-        assert [r["sample_key"] for r in rows] == [DEFAULT_SAMPLE_KEY]
-        assert [r["data"]["sample_name"] for r in rows] == ["第一页"]
-        assert rows[0]["field_meta"]["sample_name"]["source"] == "vlm"
-
-    @pytest.mark.asyncio
-    async def test_missing_tenant_skips_result_write(self, service):
-        svc, fake = service
-        created = await svc.record_extraction_result(
-            tenant_id=None,
-            document_id=DOCUMENT_ID,
-            result={"extraction_data": {"a": 1}},
-        )
-
-        assert created == []
-        assert fake.tables.get("results", []) == []
+        assert [r["data"] for r in rows] == [{"a": 1}]
 
 
 class TestRecordParseResult:
@@ -190,8 +116,6 @@ class TestRecordParseResult:
         row = fake.tables["results"][0]
         assert row["sample_key"] == PARSE_SAMPLE_KEY
         assert row["data"] == parse_data
-        assert row["field_meta"] == {}
-        assert row["review_state"] == "pending"
         assert row["job_id"] == JOB_ID
         assert row["config_revision_id"] == REVISION_ID
 
@@ -208,151 +132,23 @@ class TestRecordParseResult:
         assert created is None
         assert fake.tables.get("results", []) == []
 
-
-def _result_row(result_id, *, job_id=None, sample_key=DEFAULT_SAMPLE_KEY, data=None,
-                review_state="pending", created_at="2026-01-01T00:00:00+00:00",
-                field_meta=None):
-    return {
-        "id": result_id,
-        "tenant_id": TENANT_ID,
-        "document_id": DOCUMENT_ID,
-        "job_id": job_id,
-        "sample_key": sample_key,
-        "data": data or {},
-        "field_meta": field_meta or {},
-        "review_state": review_state,
-        "created_at": created_at,
-    }
-
-
-class TestGetDocumentResult:
     @pytest.mark.asyncio
-    async def test_returns_latest_extraction_result_by_created_at(self, service):
-        svc, fake = service
-        fake.tables["results"] = [
-            _result_row("old", job_id="job-old", data={"a": 1},
-                        created_at="2026-01-01T00:00:00+00:00"),
-            _result_row("new-2", job_id="job-new", sample_key="2", data={"a": 22},
-                        created_at="2026-01-02T00:00:02+00:00"),
-            _result_row("new-1", job_id="job-new", sample_key="1", data={"a": 21},
-                        created_at="2026-01-02T00:00:01+00:00"),
-        ]
-
-        row = await svc.get_document_result(DOCUMENT_ID, tenant_id=TENANT_ID)
-
-        assert row["id"] == "new-2"
-        assert row["data"] == {"a": 22}
-
-    @pytest.mark.asyncio
-    async def test_excludes_parse_rows(self, service):
-        svc, fake = service
-        fake.tables["results"] = [
-            _result_row("parse-row", sample_key=PARSE_SAMPLE_KEY,
-                        data={"pages": []}, created_at="2026-01-02T00:00:00+00:00"),
-            _result_row("extract-row", data={"sample_name": "LED灯"},
-                        created_at="2026-01-01T00:00:00+00:00"),
-        ]
-
-        row = await svc.get_document_result(DOCUMENT_ID)
-
-        assert row["id"] == "extract-row"
-
-    @pytest.mark.asyncio
-    async def test_no_job_id_uses_time_window_and_first_sample(self, service):
-        svc, fake = service
-        fake.tables["results"] = [
-            _result_row("previous", data={"a": 0},
-                        created_at="2026-01-01T00:00:00+00:00"),
-            _result_row("page-2", sample_key="2", data={"a": 22},
-                        created_at="2026-01-02T00:00:02+00:00"),
-            _result_row("page-1", sample_key="1", data={"a": 21},
-                        created_at="2026-01-02T00:00:01+00:00"),
-        ]
-
-        row = await svc.get_document_result(DOCUMENT_ID)
-
-        assert row["id"] == "page-2"
-
-    @pytest.mark.asyncio
-    async def test_missing_document_result_returns_none(self, service):
+    async def test_get_document_parse_result_returns_latest_parse_row(self, service):
         svc, _ = service
-
-        assert await svc.get_document_result(DOCUMENT_ID) is None
-
-
-class TestUpdateResultReview:
-    @pytest.mark.asyncio
-    async def test_merges_corrections_and_updates_field_meta(self, service):
-        svc, fake = service
-        fake.tables["results"] = [
-            _result_row(
-                "r-1",
-                data={"sample_name": "原值", "qty": 3},
-                field_meta={"sample_name": {"source": "ocr_llm", "confidence": None,
-                                            "review_state": "pending"}},
-            ),
-        ]
-
-        updated = await svc.update_result_review(
-            document_id=DOCUMENT_ID,
-            review_state="approved",
-            data={"sample_name": "修正值"},
+        await svc.create_result({
+            "tenant_id": TENANT_ID, "document_id": DOCUMENT_ID,
+            "sample_key": DEFAULT_SAMPLE_KEY, "data": {"a": 1},
+        })
+        created = await svc.record_parse_result(
             tenant_id=TENANT_ID,
-        )
-
-        assert updated["data"] == {"sample_name": "修正值", "qty": 3}
-        assert updated["review_state"] == "approved"
-        assert updated["field_meta"]["sample_name"] == {
-            "source": "ocr_llm",
-            "confidence": None,
-            "review_state": "approved",
-        }
-        assert updated["field_meta"]["qty"]["review_state"] == "approved"
-        assert fake.tables["results"][0]["review_state"] == "approved"
-
-    @pytest.mark.asyncio
-    async def test_reject_keeps_data_and_marks_review_state(self, service):
-        svc, fake = service
-        fake.tables["results"] = [_result_row("r-1", data={"sample_name": "原值"})]
-
-        updated = await svc.update_result_review(
             document_id=DOCUMENT_ID,
-            review_state="rejected",
+            parse_data={"markdown": "old"},
         )
 
-        assert updated["data"] == {"sample_name": "原值"}
-        assert updated["review_state"] == "rejected"
-        assert updated["field_meta"]["sample_name"]["review_state"] == "rejected"
+        found = await svc.get_document_parse_result(DOCUMENT_ID, tenant_id=TENANT_ID)
 
-    @pytest.mark.asyncio
-    async def test_missing_result_returns_none_without_update(self, service):
-        svc, fake = service
-
-        updated = await svc.update_result_review(
-            document_id=DOCUMENT_ID,
-            review_state="approved",
-        )
-
-        assert updated is None
-        assert fake.tables.get("results", []) == []
-
-
-class TestResultExtractionDataAdapter:
-    def test_adapter_keeps_legacy_row_shape(self):
-        row = _result_row("r-1", data={"sample_name": "LED灯"}, review_state="approved")
-
-        adapted = result_to_extraction_data(row, DOCUMENT_ID)
-
-        assert adapted["sample_name"] == "LED灯"
-        assert adapted["document_id"] == DOCUMENT_ID
-        assert adapted["is_validated"] is True
-
-    def test_adapter_marks_pending_result_as_not_validated(self):
-        row = _result_row("r-1", data={"sample_name": "LED灯"}, review_state="pending")
-
-        adapted = result_to_extraction_data(row, DOCUMENT_ID)
-
-        assert adapted["is_validated"] is False
+        assert found is not None
+        assert found["id"] == created["id"]
 
 
 class TestFilterBeforeLimit:
@@ -366,7 +162,6 @@ class TestFilterBeforeLimit:
             document_id=DOCUMENT_ID,
             data={"markdown": "old-parse"},
             sample_key=PARSE_SAMPLE_KEY,
-            field_meta={},
         ))
         for index in range(55):
             await svc.create_result(svc.build_result_row(
@@ -396,10 +191,13 @@ class TestFilterBeforeLimit:
                 document_id=DOCUMENT_ID,
                 data={"markdown": f"parse-{index}"},
                 sample_key=PARSE_SAMPLE_KEY,
-                field_meta={},
             ))
 
-        found = await svc.get_document_result(DOCUMENT_ID, tenant_id=TENANT_ID)
+        found_rows = await svc.list_results(
+            tenant_id=TENANT_ID,
+            document_id=DOCUMENT_ID,
+            exclude_sample_key=PARSE_SAMPLE_KEY,
+            limit=1,
+        )
 
-        assert found is not None
-        assert found["id"] == extraction_row["id"]
+        assert found_rows[0]["id"] == extraction_row["id"]

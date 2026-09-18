@@ -25,7 +25,6 @@ import { documentsService } from '@/services/documents'
 export function Documents() {
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string>('')
-  const [typeFilter, setTypeFilter] = useState<string>('')
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const limit = 10
@@ -34,25 +33,17 @@ export function Documents() {
     page,
     limit,
     status: statusFilter as DocumentStatus || undefined,
-    document_type: typeFilter || undefined,
   })
 
   const deleteMutation = useDeleteDocument()
   const queryClient = useQueryClient()
 
   // 悬停时预取详情数据，点击进入详情页不再等第一跳
-  const prefetchDocument = (doc: { id: string; status: DocumentStatus }) => {
+  const prefetchDocument = (doc: { id: string }) => {
     void queryClient.prefetchQuery({
       queryKey: documentKeys.status(doc.id),
       queryFn: () => documentsService.getStatus(doc.id),
     })
-    if (doc.status === 'completed' || doc.status === 'pending_review') {
-      void queryClient.prefetchQuery({
-        queryKey: documentKeys.result(doc.id),
-        queryFn: () => documentsService.getResult(doc.id),
-        staleTime: 60000,
-      })
-    }
   }
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -128,22 +119,8 @@ export function Documents() {
               <option value="uploaded">已上传</option>
               <option value="queued">排队中</option>
               <option value="processing">处理中</option>
-              <option value="pending_review">待审核</option>
               <option value="completed">已完成</option>
               <option value="failed">失败</option>
-            </Select>
-            <Select
-              value={typeFilter}
-              onChange={(e) => {
-                setTypeFilter(e.target.value)
-                setPage(1)
-              }}
-              className="w-36"
-            >
-              <option value="">全部类型</option>
-              <option value="检测报告">检测报告</option>
-              <option value="快递单">快递单</option>
-              <option value="抽样单">抽样单</option>
             </Select>
           </div>
         </CardContent>
@@ -172,10 +149,10 @@ export function Documents() {
           ) : data?.items.length === 0 ? (
             <div className="text-center py-12">
               <FileText className="h-12 w-12 text-text-muted mx-auto mb-4" />
-              {statusFilter || typeFilter ? (
+              {statusFilter ? (
                 <>
                   <p className="text-text-secondary">没有符合当前筛选条件的文档</p>
-                  <Button variant="outline" size="sm" className="mt-4" onClick={() => { setStatusFilter(''); setTypeFilter(''); setPage(1) }}>清除筛选</Button>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => { setStatusFilter(''); setPage(1) }}>清除筛选</Button>
                 </>
               ) : (
                 <>

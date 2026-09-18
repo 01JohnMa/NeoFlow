@@ -1,9 +1,7 @@
 // ============ Configuration Types ============
 
-export type ConfigurationType = 'parse' | 'extract' | 'classify' | 'split' | 'composite'
+export type ConfigurationType = 'extract' | 'classify' | 'split' | 'composite'
 export type ConfigurationStatus = 'draft' | 'published' | 'archived'
-export type ExtractionMode = 'ocr_llm' | 'vlm'
-export type OutputMode = 'bitable' | 'excel_template' | 'both'
 export type FieldType = 'text' | 'date' | 'number' | 'boolean'
 
 export interface ConfigurationField {
@@ -11,24 +9,10 @@ export interface ConfigurationField {
   field_label: string
   field_type: FieldType
   extraction_hint: string
-  feishu_column: string
   sort_order: number
-  review_enforced: boolean
-  review_allowed_values: string[] | null
   is_required: boolean
   default_value: string | null
   source_doc_type: string | null
-}
-
-export interface FeishuOutputConfig {
-  bitable_token: string | null
-  table_id: string | null
-}
-
-export interface ExcelOutputConfig {
-  file_name: string | null
-  path: string | null
-  placeholders: SDKExcelPlaceholder[]
 }
 
 export interface ConfigurationParseSection {
@@ -44,12 +28,6 @@ export interface ConfigurationParseSection {
 export interface ConfigurationDefinition {
   fields: ConfigurationField[]
   extraction_prompt: string | null
-  extraction_mode: ExtractionMode
-  output_mode: OutputMode
-  push_attachment: boolean
-  auto_approve: boolean
-  feishu: FeishuOutputConfig
-  excel: ExcelOutputConfig
   parse?: ConfigurationParseSection
 }
 
@@ -102,10 +80,7 @@ export interface ConfigurationFieldPayload {
   field_label: string
   field_type: FieldType
   extraction_hint?: string
-  feishu_column?: string
   sort_order?: number
-  review_enforced?: boolean
-  review_allowed_values?: string[] | null
 }
 
 // ============ AI Template SDK types ============
@@ -124,16 +99,7 @@ export interface SDKDetectedField {
   field_label: string
   field_type: 'text' | 'date' | 'number'
   extraction_hint: string
-  review_enforced: boolean
-  review_allowed_values: string[] | null
   sample_value?: string | null
-}
-
-export interface SDKExcelPlaceholder {
-  sheet_name: string
-  coordinate: string
-  field_key: string
-  raw_value: string
 }
 
 export interface SDKDocumentAnalysis {
@@ -168,8 +134,6 @@ export interface SDKSession {
   parse_error: string | null
   parse_progress: number | null
   state: SDKSessionState
-  excel_template_file_name: string | null
-  excel_placeholders: SDKExcelPlaceholder[]
   analysis: SDKDocumentAnalysis | null
   confirmed_template: SDKConfirmTemplatePayload | null
   prompt: string | null
@@ -193,15 +157,13 @@ export interface Document {
   mime_type: string | null
   document_type: string | null
   status: DocumentStatus
-  ocr_text: string | null
-  ocr_confidence: number | null
   error_message: string | null
   created_at: string
   updated_at: string
   processed_at: string | null
 }
 
-export type DocumentStatus = 'pending' | 'uploaded' | 'queued' | 'processing' | 'pending_review' | 'completed' | 'failed'
+export type DocumentStatus = 'pending' | 'uploaded' | 'queued' | 'processing' | 'completed' | 'failed'
 
 // API Response types
 export interface UploadResponse {
@@ -214,57 +176,12 @@ export interface UploadResponse {
   created_at: string
 }
 
-export interface ProcessResponse {
-  document_id: string
-  job_id?: string
-  status: string
-  message: string
-  estimated_time?: string
-  success?: boolean
-  document_type?: string
-  extraction_data?: Record<string, unknown>
-  ocr_confidence?: number
-  processing_time?: number
-  error?: string
-}
-
 export interface DocumentListResponse {
   items: Document[]
   total: number
   page: number
   limit: number
   has_more: boolean
-}
-
-export interface ReviewHintField {
-  field_key: string
-  field_label: string
-  allowed_values: string[]
-}
-
-/** 后端 result 接口白名单字段，供详情页由 Configuration 驱动渲染 */
-export interface ConfigurationFieldForDetail {
-  field_key: string
-  field_label: string
-  field_type: 'text' | 'date' | 'number'
-  is_required: boolean
-  sort_order: number
-  review_enforced: boolean
-  review_allowed_values: string[] | null
-  extraction_hint?: string
-}
-
-export interface ExtractionResultResponse {
-  document_id: string
-  document_type: string
-  configuration_id?: string | null
-  extraction_data: Record<string, unknown>
-  ocr_text: string
-  ocr_confidence: number | null
-  created_at: string
-  is_validated: boolean
-  review_hint_fields?: ReviewHintField[]
-  fields: ConfigurationFieldForDetail[]
 }
 
 // ============ Parse Result / Job types ============
@@ -331,7 +248,6 @@ export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed'
 
 export interface ProcessingJob {
   job_id: string
-  job_type: string
   status: JobStatus | string
   stage: string
   progress: number

@@ -1,9 +1,7 @@
 # services/parse_service.py
-"""Parse Job handler：解析文档并落 Result。
+"""Parse Job handler：解析文档并落 Result（参数化执行规格，ADR-0007）。
 
-两条路径（ADR-0007）：
-- 参数化（execution_spec）：单文件、冻结参数、心跳续租、commit_parse_job 原子交卷
-- 历史 Revision：从 Revision definition.parse 取参数，逐文档写 Result 并推进 Job 状态
+- execution_spec：单文件、冻结参数、心跳续租、commit_parse_job 原子交卷
 """
 
 import asyncio
@@ -19,7 +17,6 @@ from services.parser_adapter import get_parser_adapter
 from services.result_service import result_service
 
 
-SYSTEM_PARSE_CONFIG_CODE = "__system_parse__"
 SUPPORTED_PARSE_MODES = ("pipeline", "vlm")
 
 
@@ -62,63 +59,6 @@ def build_parse_params(
     if isinstance(section, dict):
         params.update(section)
     return params
-
-
-async def ensure_parse_revision(
-    tenant_id: str,
-    parse_mode: Optional[str] = None,
-    created_by: Optional[str] = None,
-) -> Dict[str, Any]:
-    """确保租户存在匹配解析模式的系统解析 Configuration Revision。
-
-    草拟会话的 Parse Job 必须固定一个 Revision。这里按需自动创建
-    「系统解析」配置，并按所选模式发布新 Revision（快速/高精度）。
-    """
-    from services.configuration_service import configuration_service
-
-    mode = normalize_parse_mode(parse_mode)
-    configurations = await configuration_service.list_configurations(
-        tenant_id=tenant_id,
-        type="parse",
-    )
-    configuration = next(
-        (item for item in configurations if item.get("code") == SYSTEM_PARSE_CONFIG_CODE),
-        None,
-    )
-
-    if not configuration:
-        configuration = await configuration_service.create_configuration(
-            {
-                "tenant_id": tenant_id,
-                "name": "系统解析",
-                "code": SYSTEM_PARSE_CONFIG_CODE,
-                "description": "配置草拟使用的系统解析配置（自动创建）",
-                "type": "parse",
-                "definition": {"parse": {**PARSE_DEFAULTS, "model_version": mode}},
-            },
-            created_by=created_by,
-        )
-        published = await configuration_service.publish_configuration(
-            configuration["id"],
-            created_by=created_by,
-        )
-        return published.get("revision") or {}
-
-    detail = await configuration_service.get_configuration_detail(configuration["id"])
-    current = (detail or {}).get("current_revision") or {}
-    current_mode = ((current.get("definition") or {}).get("parse") or {}).get("model_version")
-    if current.get("id") and current_mode == mode:
-        return current
-
-    await configuration_service.update_configuration(
-        configuration["id"],
-        {"definition": {"parse": {**PARSE_DEFAULTS, "model_version": mode}}},
-    )
-    published = await configuration_service.publish_configuration(
-        configuration["id"],
-        created_by=created_by,
-    )
-    return published.get("revision") or {}
 
 
 async def ensure_parse_result(
@@ -311,65 +251,13 @@ async def handle_parse_job(
     revision: Optional[Dict[str, Any]] = None,
     configuration: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """JobRunner 的 parse handler。
-
-    - execution_spec 存在：参数化 Parse（单文件、冻结参数、原子交卷）
-    - 否则：历史 Revision 路径（系统解析配置，逐文档写 Result）
-    """
+    """JobRunner 的 parse handler（仅参数化路径，ADR-0007）。"""
     spec = job.get("execution_spec")
     if isinstance(spec, dict) and spec:
         return await _handle_parameterized_parse_job(job, spec)
 
     from api.jobs import update_job
-    from services.supabase_service import supabase_service
 
     job_id = str(job.get("job_id"))
-    document_ids = job.get("document_ids") or []
-    if not document_ids:
-        await update_job(job_id, "failed", error="任务缺少 document_ids")
-        return None
-
-    documents = []
-    for document_id in document_ids:
-        document = await supabase_service.get_document(document_id)
-        if not document:
-            await update_job(job_id, "failed", error=f"文档不存在: {document_id}")
-            return None
-        if not document.get("file_path"):
-            await update_job(job_id, "failed", error=f"文档缺少 file_path: {document_id}")
-            return None
-        documents.append((document_id, document))
-
-    params = build_parse_params(configuration, revision)
-    await update_job(job_id, "parsing")
-
-    adapter = get_parser_adapter(params)
-    last_result = None
-    for document_id, document in documents:
-        file_path = document.get("file_path") or ""
-        try:
-            result = await adapter.parse(file_path, params)
-        except Exception as exc:
-            logger.opt(exception=exc).error(
-                f"Parse job 失败: job_id={job_id}, document_id={document_id}"
-            )
-            await update_job(job_id, "failed", error=str(exc))
-            return None
-
-        apply_parse_postprocess(result, params)
-
-        await update_job(job_id, "saving")
-        stored = await result_service.record_parse_result(
-            tenant_id=document.get("tenant_id") or job.get("tenant_id"),
-            document_id=document_id,
-            parse_data=result.to_dict(),
-            job_id=job_id,
-            config_revision_id=job.get("configuration_revision_id"),
-        )
-        if not stored:
-            await update_job(job_id, "failed", error="ParseResult 写入失败")
-            return None
-        last_result = result
-
-    await update_job(job_id, "completed")
-    return last_result
+    await update_job(job_id, "failed", error="Parse Job 缺少执行规格（execution_spec）")
+    return None

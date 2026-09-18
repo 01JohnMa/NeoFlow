@@ -5,7 +5,6 @@ from sdk.agents.orchestrator import SDKOrchestrator
 from sdk.models import (
     ConfirmTemplateRequest,
     DocumentAnalysis,
-    ExcelTemplatePlaceholder,
     SDKModelProfile,
     SDKSession,
     SDKSessionState,
@@ -88,22 +87,10 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
 
     session = _build_session(
         parse_mode="vlm",
-        excel_template_file_name="template.xlsx",
-        excel_template_path="/tmp/template.xlsx",
-        excel_placeholders=[
-            ExcelTemplatePlaceholder(
-                sheet_name="Report",
-                coordinate="B1",
-                field_key="order_no",
-                raw_value="{{order_no}}",
-            )
-        ],
         state=SDKSessionState.TEMPLATE_CONFIRMED,
         confirmed_template=ConfirmTemplateRequest(
             template_name="出货单",
             template_code="shipment_report",
-            tenant_id="tenant-1",
-            extraction_mode="vlm",
             fields=[
                 {
                     "field_key": "order_no",
@@ -113,14 +100,8 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
                     "sample_value": "NOZS0311046",
                 }
             ],
-            examples=[
-                {
-                    "example_input": "订单号：NOZS0311046",
-                    "example_output": {"order_no": "NOZS0311046"},
-                }
-            ],
         ),
-        prompt="抽取订单号 {ocr_text}",
+        prompt="抽取订单号 {markdown}",
     )
 
     result = await SDKOrchestrator().commit(session)
@@ -134,33 +115,24 @@ async def test_commit_creates_and_publishes_configuration(monkeypatch):
     assert captured_publish["configuration_id"] == "config-1"
     assert captured_publish["created_by"] == session.user_id
 
-    definition = normalize_definition(payload["definition"])
-    assert definition["extraction_prompt"] == "抽取订单号 {ocr_text}"
+    raw_definition = payload["definition"]
+    assert "output_mode" not in raw_definition
+    assert "excel" not in raw_definition
+    assert "push_attachment" not in raw_definition
+    assert "auto_approve" not in raw_definition
+    assert "feishu" not in raw_definition
+
+    definition = normalize_definition(raw_definition)
+    assert definition["extraction_prompt"] == "抽取订单号 {markdown}"
     assert definition["parse"]["model_version"] == "vlm"
     assert "per_page_extraction" not in definition
-    assert definition["output_mode"] == "both"
-    assert definition["excel"] == {
-        "file_name": "template.xlsx",
-        "path": "/tmp/template.xlsx",
-        "placeholders": [
-            {
-                "sheet_name": "Report",
-                "coordinate": "B1",
-                "field_key": "order_no",
-                "raw_value": "{{order_no}}",
-            }
-        ],
-    }
     assert definition["fields"] == [
         {
             "field_key": "order_no",
             "field_label": "订单号",
             "field_type": "text",
             "extraction_hint": "从订单号标签后提取",
-            "feishu_column": "",
             "sort_order": 0,
-            "review_enforced": False,
-            "review_allowed_values": None,
             "is_required": False,
             "default_value": None,
             "source_doc_type": None,
@@ -202,7 +174,6 @@ async def test_commit_uses_fallback_prompt_when_missing(monkeypatch):
         confirmed_template=ConfirmTemplateRequest(
             template_name="检测报告",
             template_code="inspection_report",
-            tenant_id="tenant-1",
             fields=[
                 {"field_key": "sample_name", "field_label": "样品名称"},
             ],
@@ -211,13 +182,9 @@ async def test_commit_uses_fallback_prompt_when_missing(monkeypatch):
 
     result = await SDKOrchestrator().commit(session)
 
-    assert captured_payload["definition"]["output_mode"] == "bitable"
     assert "sample_name" in captured_payload["definition"]["extraction_prompt"]
-    assert captured_payload["definition"]["excel"] == {
-        "file_name": None,
-        "path": None,
-        "placeholders": [],
-    }
+    assert "output_mode" not in captured_payload["definition"]
+    assert "excel" not in captured_payload["definition"]
     assert result.revision_id == "rev-2"
 
 
@@ -269,7 +236,7 @@ async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
     async def fake_run_prompt_agent(confirmed, *, model_profile):
         captured["confirmed"] = confirmed
         captured["model_profile"] = model_profile
-        return "请提取字段：sample_name\n{ocr_text}"
+        return "请提取字段：sample_name\n{markdown}"
 
     monkeypatch.setattr(
         "sdk.agents.orchestrator.run_prompt_agent",
@@ -282,7 +249,6 @@ async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
         confirmed_template=ConfirmTemplateRequest(
             template_name="检测报告",
             template_code="inspection_report",
-            tenant_id="tenant-1",
             fields=[],
         ),
     )
@@ -299,7 +265,7 @@ async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
         model_profile=model_profile,
     )
 
-    assert result == "请提取字段：sample_name\n{ocr_text}"
+    assert result == "请提取字段：sample_name\n{markdown}"
     assert captured["confirmed"] is session.confirmed_template
     assert captured["model_profile"] is model_profile
 
@@ -320,7 +286,6 @@ async def test_generate_prompt_does_not_fallback_when_model_profile_is_used(monk
         confirmed_template=ConfirmTemplateRequest(
             template_name="检测报告",
             template_code="inspection_report",
-            tenant_id="tenant-1",
             fields=[
                 {
                     "field_key": "sample_name",
@@ -360,7 +325,6 @@ async def test_generate_prompt_keeps_fallback_without_model_profile(monkeypatch)
         confirmed_template=ConfirmTemplateRequest(
             template_name="检测报告",
             template_code="inspection_report",
-            tenant_id="tenant-1",
             fields=[
                 {
                     "field_key": "sample_name",
@@ -374,5 +338,5 @@ async def test_generate_prompt_keeps_fallback_without_model_profile(monkeypatch)
 
     result = await SDKOrchestrator().generate_prompt(session)
 
-    assert "OCR文本" in result
-    assert "{ocr_text}" in result
+    assert "解析文本" in result
+    assert "{markdown}" in result

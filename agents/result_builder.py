@@ -4,9 +4,6 @@
 from typing import Any, Dict, Optional
 
 
-_OCR_TEXT_PREVIEW_LEN = 500
-
-
 def build_error(
     document_id: str,
     error: str,
@@ -36,22 +33,16 @@ def build_single_success(
     document_id: str,
     document_type: str,
     extraction_data: dict,
-    ocr_text: str,
-    ocr_confidence: float,
     processing_time: float,
     template_id: Optional[str] = None,
     template_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """构造单文档处理成功结果
 
-    适用于 process() 和 process_with_template()。
-
     Args:
         document_id: 文档ID
         document_type: 文档类型
         extraction_data: 提取的字段字典
-        ocr_text: OCR 原始文本（会截断到前 500 字符）
-        ocr_confidence: OCR 置信度
         processing_time: 处理耗时（秒）
         template_id: 模板ID（可选）
         template_name: 模板名称（可选）
@@ -59,19 +50,11 @@ def build_single_success(
     Returns:
         统一格式的成功结果字典
     """
-    ocr_preview = (
-        ocr_text[:_OCR_TEXT_PREVIEW_LEN] + "..."
-        if len(ocr_text) > _OCR_TEXT_PREVIEW_LEN
-        else ocr_text
-    )
-
     result: Dict[str, Any] = {
         "success": True,
         "document_id": document_id,
         "document_type": document_type,
         "extraction_data": extraction_data,
-        "ocr_text": ocr_preview,
-        "ocr_confidence": ocr_confidence,
         "processing_time": processing_time,
         "step": "completed",
         "error": None,

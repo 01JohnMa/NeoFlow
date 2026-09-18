@@ -41,21 +41,11 @@ const steps = [
   { key: 'commit', label: '发布配置' },
 ]
 
-const parseAllowedValues = (value: string): string[] | null => {
-  const values = value
-    .split(/[,，\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-  return values.length > 0 ? values : null
-}
-
 const createEmptyField = (index: number): SDKDetectedField => ({
   field_key: `field_${index + 1}`,
   field_label: '新字段',
   field_type: 'text',
   extraction_hint: '',
-  review_enforced: false,
-  review_allowed_values: null,
   sample_value: null,
 })
 
@@ -67,7 +57,6 @@ export function AiTemplateWizard({
   onCommitted,
 }: AiTemplateWizardProps) {
   const [file, setFile] = useState<File | null>(null)
-  const [excelTemplateFile, setExcelTemplateFile] = useState<File | null>(null)
   const [session, setSession] = useState<SDKSession | null>(null)
   const [analysis, setAnalysis] = useState<SDKDocumentAnalysis | null>(null)
   const [fields, setFields] = useState<SDKDetectedField[]>([])
@@ -138,7 +127,7 @@ export function AiTemplateWizard({
   const handleCreateSession = () => {
     if (!file || !templateName.trim() || !templateCode.trim()) return
     void runAction('upload', async () => {
-      const created = await sdkApi.createSDKSession(file, excelTemplateFile, {
+      const created = await sdkApi.createSDKSession(file, {
         tenantId,
         templateName: templateName.trim(),
         templateCode: templateCode.trim(),
@@ -218,7 +207,6 @@ export function AiTemplateWizard({
       field_key: field.field_key.trim(),
       field_label: field.field_label.trim(),
       extraction_hint: field.extraction_hint.trim(),
-      review_allowed_values: field.review_allowed_values?.length ? field.review_allowed_values : null,
     })),
   })
 
@@ -388,27 +376,6 @@ export function AiTemplateWizard({
                 resetAnalysisState()
               }}
             />
-            <div className="mt-4 rounded-lg border border-border-default bg-bg-card p-3">
-              <Label>空 Excel 填报模板（可选）</Label>
-              <p className="mb-2 mt-1 text-xs leading-relaxed text-text-muted">
-                模板只放 <span className="font-mono">{'{{field_key}}'}</span> 槽位；系统会扫描槽位，再把上方文件的解析结果填进去。
-              </p>
-              <Input
-                type="file"
-                accept=".xlsx,.xlsm"
-                onChange={(event) => {
-                  setExcelTemplateFile(event.target.files?.[0] ?? null)
-                  setSession(null)
-                  onSessionChange?.(null)
-                  resetAnalysisState()
-                }}
-              />
-              {excelTemplateFile && (
-                <p className="mt-2 text-xs text-text-muted">
-                  已选择：{excelTemplateFile.name}
-                </p>
-              )}
-            </div>
             <Button
               className="mt-3"
               size="sm"
@@ -467,28 +434,6 @@ export function AiTemplateWizard({
                 </div>
               )}
 
-              {session.excel_template_file_name && (
-                <div className="mt-3 rounded-lg border border-border-default bg-bg-card p-3">
-                  <p className="text-xs font-medium text-text-primary">
-                    Excel 空模板：{session.excel_template_file_name}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {session.excel_placeholders.map((placeholder) => (
-                      <span
-                        key={`${placeholder.sheet_name}-${placeholder.coordinate}-${placeholder.field_key}`}
-                        className="rounded-full border border-primary-500/30 bg-primary-500/10 px-2 py-1 font-mono text-xs text-primary-300"
-                      >
-                        {placeholder.field_key}
-                      </span>
-                    ))}
-                  </div>
-                  {session.excel_placeholders.length === 0 && (
-                    <p className="mt-2 text-xs text-warning-400">
-                      未扫描到 {'{{field_key}}'} 槽位，请检查空模板。
-                    </p>
-                  )}
-                </div>
-              )}
               <Button
                 className="mt-3"
                 size="sm"
@@ -628,24 +573,6 @@ export function AiTemplateWizard({
                             className="mt-1"
                             value={field.extraction_hint}
                             onChange={(e) => updateField(index, { extraction_hint: e.target.value })}
-                          />
-                        </div>
-                        <label className="flex items-center gap-2 text-sm text-text-secondary">
-                          <input
-                            type="checkbox"
-                            checked={field.review_enforced}
-                            onChange={(e) => updateField(index, { review_enforced: e.target.checked })}
-                          />
-                          审核必填
-                        </label>
-                        <div className="md:col-span-2">
-                          <Label>允许值</Label>
-                          <Input
-                            className="mt-1"
-                            value={(field.review_allowed_values ?? []).join(', ')}
-                            onChange={(e) => (
-                              updateField(index, { review_allowed_values: parseAllowedValues(e.target.value) })
-                            )}
                           />
                         </div>
                       </div>

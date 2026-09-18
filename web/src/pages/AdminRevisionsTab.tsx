@@ -52,7 +52,6 @@ export function RevisionsTab({
             <p className="mt-2 text-xs text-text-muted">
               {definition?.fields?.length ?? 0} 个字段
               {definition?.extraction_prompt ? ' · 含提取 Prompt' : ''}
-              {definition?.excel?.file_name ? ` · Excel 模板 ${definition.excel.file_name}` : ''}
             </p>
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-primary-400 hover:text-primary-300">

@@ -2,7 +2,7 @@
 """应用配置管理"""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, List
+from typing import List
 import os
 
 
@@ -22,10 +22,7 @@ class Settings(BaseSettings):
     PORT: int = 8080
 
     # ============ 安全配置 ============
-    SECRET_KEY: str = "your-secret-key"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    CRM_API_TOKEN: str = ""
 
     # ============ Supabase配置 (本地部署) ============
     SUPABASE_URL: str = "http://localhost:8000"
@@ -37,7 +34,6 @@ class Settings(BaseSettings):
     # Supabase 云项目 JWKS 地址（如 https://<project>.supabase.co/auth/v1/.well-known/jwks.json）。
     # 配置后支持 ES256/RS256 非对称 token；与 JWT_SECRET 按 token alg 自动选择。
     JWKS_URL: str = ""
-    DATABASE_URL: Optional[str] = None
 
     # ============ LLM配置 ============
     LLM_MODEL_ID: str = "deepseek-v4-flash"
@@ -63,15 +59,6 @@ class Settings(BaseSettings):
     # ============ CORS配置 ============
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://localhost:8080"
     ALLOWED_HOSTS: str = "localhost,127.0.0.1"
-
-    # ============ 飞书配置 ============
-    FEISHU_APP_ID: str = ""
-    FEISHU_APP_SECRET: str = ""
-    # 以下两项已废弃，运行时推送目标统一从 Configuration definition
-    # 的 feishu.bitable_token / feishu.table_id 读取，不再使用环境变量。
-    FEISHU_BITABLE_APP_TOKEN: str = ""  # 已废弃，保留供参考
-    FEISHU_BITABLE_TABLE_ID: str = ""   # 已废弃，保留供参考
-    FEISHU_PUSH_ENABLED: bool = False
 
     # ============ 文档处理并发控制 ============
     DOC_PROCESS_MAX_CONCURRENCY: int = 2

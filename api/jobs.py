@@ -1,9 +1,7 @@
 # api/jobs.py
 """持久化 Job 管理器 - 用于跟踪异步处理任务状态与防重记录"""
 
-import hashlib
 import inspect
-import json
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -31,10 +29,6 @@ def _utc_now_iso() -> str:
 
 def _job_table():
     return supabase_service.client.table("processing_jobs")
-
-
-def _push_record_table():
-    return supabase_service.client.table("feishu_push_records")
 
 
 async def _run_db(fn):
@@ -90,7 +84,6 @@ async def list_jobs(
 
 async def create_job(
     *,
-    job_type: str = "batch",
     created_by: Optional[str] = None,
     related_document_ids: Optional[list[str]] = None,
     tenant_id: Optional[str] = None,
@@ -98,13 +91,12 @@ async def create_job(
 ) -> str:
     """创建持久化 Job，返回 job_id。
 
-    configuration_revision_id 用于固定创建时选定的 Configuration Revision；
-    历史调用不传时为 NULL，worker 仍按旧文档处理流程执行。
+    configuration_revision_id 固定创建时选定的 Configuration Revision；
+    参数化能力（execution_spec）由受理命令写入。
     """
     job_id = str(uuid.uuid4())
     payload: Dict[str, Any] = {
         "job_id": job_id,
-        "job_type": job_type,
         "status": "queued",
         "stage": "queued",
         "progress": STAGE_PROGRESS["queued"],
@@ -250,31 +242,3 @@ async def claim_next_job(worker_id: str, stale_after_seconds: int = 1800) -> Opt
     else:
         row = data[0] if data else None
     return _normalize_job_record(row)
-
-
-async def has_feishu_push_record(dedupe_key: str) -> bool:
-    """检查飞书推送是否已记录。"""
-    result = await _run_db(
-        lambda: _push_record_table().select("dedupe_key").eq("dedupe_key", dedupe_key).limit(1).execute()
-    )
-    return bool(result.data)
-
-
-async def record_feishu_push(dedupe_key: str, document_id: str, template_id: Optional[str] = None) -> None:
-    """记录飞书推送成功，供幂等防重使用。"""
-    payload = {
-        "dedupe_key": dedupe_key,
-        "document_id": document_id,
-        "template_id": template_id,
-        "created_at": _utc_now_iso(),
-    }
-    await _run_db(
-        lambda: _push_record_table().insert(payload).execute()
-    )
-
-
-def build_feishu_push_dedupe_key(document_id: str, template_id: Optional[str], extraction_data: dict) -> str:
-    """构建飞书推送去重键。"""
-    serialized = json.dumps(extraction_data or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
-    return f"feishu:{document_id}:{template_id or 'none'}:{digest}"

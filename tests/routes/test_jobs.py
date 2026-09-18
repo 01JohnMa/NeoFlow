@@ -38,9 +38,8 @@ RESULT = {
     "tenant_id": TENANT_ID,
     "job_id": JOB_ID,
     "document_id": DOCUMENT_ID,
+    "sample_key": "parse",
     "data": {"sample_name": "LED灯"},
-    "field_meta": {},
-    "review_state": "pending",
 }
 
 
@@ -220,62 +219,6 @@ class TestGetJob:
     def test_missing_job_returns_404(self, user_client):
         with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=None):
             resp = user_client.get(f"/api/jobs/{JOB_ID}")
-        assert resp.status_code == 404
-
-
-class TestJobResults:
-    def test_list_job_results(self, user_client):
-        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=JOB), \
-             patch("api.routes.jobs.supabase_service") as mock_supabase, \
-             patch("api.routes.jobs.result_service") as mock_results:
-            mock_supabase.get_document = AsyncMock(return_value={**JOB_DOCUMENT})
-            mock_results.list_results = AsyncMock(return_value=[RESULT])
-            resp = user_client.get(f"/api/jobs/{JOB_ID}/results")
-
-        assert resp.status_code == 200
-        assert resp.json() == [RESULT]
-        assert mock_results.list_results.await_args.kwargs["job_id"] == JOB_ID
-        assert mock_results.list_results.await_args.kwargs["tenant_id"] == TENANT_ID
-
-    def test_cross_tenant_job_results_hidden(self, user_client):
-        job = {**JOB, "tenant_id": OTHER_TENANT_ID}
-        with patch("api.routes.jobs.get_job", new_callable=AsyncMock, return_value=job), \
-             patch("api.routes.jobs.result_service") as mock_results:
-            resp = user_client.get(f"/api/jobs/{JOB_ID}/results")
-
-        assert resp.status_code == 404
-        mock_results.list_results.assert_not_called()
-
-
-class TestGetResult:
-    def test_owner_can_read_result(self, user_client):
-        with patch("api.routes.jobs.result_service") as mock_results, \
-             patch("api.routes.jobs.supabase_service") as mock_supabase:
-            mock_results.get_result = AsyncMock(return_value=RESULT)
-            mock_supabase.get_document = AsyncMock(return_value={
-                "id": DOCUMENT_ID,
-                "tenant_id": TENANT_ID,
-                "user_id": USER_ID,
-            })
-            resp = user_client.get(f"/api/results/{RESULT_ID}")
-
-        assert resp.status_code == 200
-        assert resp.json()["id"] == RESULT_ID
-
-    def test_cross_tenant_result_hidden(self, user_client):
-        with patch("api.routes.jobs.result_service") as mock_results:
-            mock_results.get_result = AsyncMock(
-                return_value={**RESULT, "tenant_id": OTHER_TENANT_ID}
-            )
-            resp = user_client.get(f"/api/results/{RESULT_ID}")
-
-        assert resp.status_code == 404
-
-    def test_missing_result_returns_404(self, user_client):
-        with patch("api.routes.jobs.result_service") as mock_results:
-            mock_results.get_result = AsyncMock(return_value=None)
-            resp = user_client.get(f"/api/results/{RESULT_ID}")
-
         assert resp.status_code == 404
 
 

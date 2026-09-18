@@ -64,21 +64,6 @@ export async function archiveConfiguration(configurationId: string): Promise<Con
   return data.data
 }
 
-export async function appendFieldExample(
-  configurationId: string,
-  fieldKey: string,
-  example: string,
-): Promise<{ configuration: Configuration; revision: ConfigurationRevision | null }> {
-  const { data } = await api.post<{
-    success: boolean
-    data: { configuration: Configuration; revision: ConfigurationRevision | null }
-  }>(
-    `/admin/configurations/${configurationId}/fields/${encodeURIComponent(fieldKey)}/examples`,
-    { example },
-  )
-  return data.data
-}
-
 export async function listRevisions(configurationId: string): Promise<ConfigurationRevision[]> {
   const { data } = await api.get<ConfigurationRevision[]>(
     `/admin/configurations/${configurationId}/revisions`,

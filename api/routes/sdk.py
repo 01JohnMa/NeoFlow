@@ -1,7 +1,6 @@
 """AI template generation SDK routes."""
 
 import os
-import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,13 +17,10 @@ from services.parse_service import normalize_parse_mode
 from services.result_service import result_service
 from services.supabase_service import supabase_service
 from sdk.agents.orchestrator import orchestrator
-from sdk.excel_template import scan_excel_placeholders
 from sdk.models import (
     CommitSessionRequest,
     ConfirmTemplateRequest,
-    DetectedField,
     DocumentAnalysis,
-    ExcelTemplatePlaceholder,
     ParseRetryRequest,
     SDKModelProfileRequest,
     SDKSession,
@@ -98,7 +94,6 @@ async def _rebuild_session(session_id: str, user: CurrentUser):
             state = SDKSessionState.PARSE_FAILED
             parse_error = "解析结果缺失，请重试"
 
-    excel_name, excel_path, excel_placeholders = _recover_excel_template(str(document_ids[0]))
     created_at = time.time()
     raw_created = job.get("created_at")
     if isinstance(raw_created, str):
@@ -119,9 +114,6 @@ async def _rebuild_session(session_id: str, user: CurrentUser):
         parse_job_id=session_id,
         parse_mode=parse_mode,
         parse_error=parse_error,
-        excel_template_file_name=excel_name,
-        excel_template_path=excel_path,
-        excel_placeholders=excel_placeholders,
         user_id=document.get("user_id") or job.get("created_by") or user.user_id,
         state=state,
         created_at=created_at,
@@ -159,47 +151,11 @@ def _response(session, job=None) -> SDKSessionResponse:
         parse_error=session.parse_error,
         parse_progress=parse_progress,
         state=session.state,
-        excel_template_file_name=session.excel_template_file_name,
-        excel_placeholders=session.excel_placeholders,
         analysis=session.analysis,
         confirmed_template=session.confirmed_template,
         prompt=session.prompt,
         commit_result=session.commit_result,
     )
-
-
-def _safe_file_name(file_name: str) -> str:
-    base_name = Path(file_name).name
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", base_name) or "upload.bin"
-
-
-async def _save_excel_template(file: UploadFile, document_id: str) -> str:
-    """Excel 模板按「文档 id + 原名」落盘，便于服务重启后重建会话时找回。"""
-    upload_dir = Path(settings.UPLOAD_FOLDER) / "sdk_sessions"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / f"{document_id}__{_safe_file_name(file.filename or 'template.xlsx')}"
-    async with aiofiles.open(file_path, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
-            await out.write(chunk)
-    return str(file_path)
-
-
-def _recover_excel_template(document_id: str) -> tuple[str | None, str | None, list]:
-    """按命名约定找回样例的 Excel 模板（服务重启后重建会话用）。"""
-    upload_dir = Path(settings.UPLOAD_FOLDER) / "sdk_sessions"
-    matches = sorted(upload_dir.glob(f"{document_id}__*")) if upload_dir.exists() else []
-    if not matches:
-        return None, None, []
-    path = matches[0]
-    name = path.name.split("__", 1)[1] if "__" in path.name else path.name
-    try:
-        placeholders = [
-            ExcelTemplatePlaceholder(**placeholder.__dict__)
-            for placeholder in scan_excel_placeholders(str(path))
-        ]
-    except Exception:
-        placeholders = []
-    return name, str(path), placeholders
 
 
 async def _save_document_file(file: UploadFile, document_id: str) -> tuple[str, int]:
@@ -299,7 +255,6 @@ async def _sync_parse_state(session, job=None):
 @router.post("/sessions", response_model=SDKSessionResponse, status_code=201)
 async def create_session(
     file: UploadFile = File(...),
-    excel_template: UploadFile | None = File(default=None),
     template_name: str | None = Form(default=None),
     template_code: str | None = Form(default=None),
     parse_mode: str | None = Form(default=None),
@@ -327,16 +282,7 @@ async def create_session(
     mode = normalize_parse_mode(parse_mode)
     document_id = str(uuid4())
     file_path, file_size = await _save_document_file(file, document_id)
-    excel_template_path = None
-    excel_placeholders: list[ExcelTemplatePlaceholder] = []
     try:
-        if excel_template and excel_template.filename:
-            excel_template_path = await _save_excel_template(excel_template, document_id)
-            excel_placeholders = [
-                ExcelTemplatePlaceholder(**placeholder.__dict__)
-                for placeholder in scan_excel_placeholders(excel_template_path)
-            ]
-
         stored_name = Path(file_path).name
         await supabase_service.create_document(
             {
@@ -356,8 +302,6 @@ async def create_session(
     except Exception:
         if os.path.exists(file_path):
             os.remove(file_path)
-        if excel_template_path and os.path.exists(excel_template_path):
-            os.remove(excel_template_path)
         raise
 
     job_id = await _create_parse_job(
@@ -378,9 +322,6 @@ async def create_session(
         parse_job_id=job_id,
         parse_mode=mode,
         state=SDKSessionState.PARSING,
-        excel_template_file_name=excel_template.filename if excel_template else None,
-        excel_template_path=excel_template_path,
-        excel_placeholders=excel_placeholders,
         user_id=user.user_id,
     )
     return _response(session, {"job_id": job_id, "status": "queued", "progress": 0})
@@ -466,7 +407,6 @@ async def analyze_session(
     )
     if not isinstance(analysis, DocumentAnalysis):
         analysis = DocumentAnalysis.model_validate(analysis)
-    _merge_excel_placeholder_fields(analysis, session.excel_placeholders)
     session.analysis = analysis
     session.state = SDKSessionState.ANALYZED
     session_store.save(session)
@@ -529,32 +469,7 @@ async def delete_session(
     user: CurrentUser = Depends(get_current_user),
 ):
     _require_admin(user)
-    session = await _load_session_or_404(session_id, user)
-    # 样例文档本身保留（它是一条普通 Document），只清理会话级的 Excel 模板文件
-    if session.excel_template_path and os.path.exists(session.excel_template_path):
-        os.remove(session.excel_template_path)
+    # 样例文档本身保留（它是一条普通 Document）
+    await _load_session_or_404(session_id, user)
     deleted = session_store.delete(session_id)
     return {"success": deleted}
-
-
-def _merge_excel_placeholder_fields(
-    analysis: DocumentAnalysis,
-    placeholders: list[ExcelTemplatePlaceholder],
-) -> None:
-    existing_keys = {field.field_key for field in analysis.detected_fields}
-    for placeholder in placeholders:
-        if placeholder.field_key in existing_keys:
-            continue
-        analysis.detected_fields.append(
-            DetectedField(
-                field_key=placeholder.field_key,
-                field_label=placeholder.field_key,
-                field_type="text",
-                extraction_hint=(
-                    f"从待识别图片/文档中提取 {placeholder.field_key}，"
-                    f"并填入 Excel 模板槽位 {{{{{placeholder.field_key}}}}}。"
-                ),
-                review_enforced=True,
-            )
-        )
-        existing_keys.add(placeholder.field_key)

@@ -27,7 +27,6 @@ class CreateJobRequest(BaseModel):
 
     configuration_revision_id: str
     document_ids: List[str] = Field(default_factory=list)
-    job_type: str = "batch"
 
 
 # ============ 权限辅助 ============
@@ -104,7 +103,6 @@ async def create_job_endpoint(
             raise HTTPException(status_code=404, detail=f"文档不存在: {document_id}")
 
     job_id = await create_job(
-        job_type=request.job_type,
         created_by=user.user_id,
         related_document_ids=request.document_ids,
         tenant_id=configuration["tenant_id"],
@@ -159,26 +157,6 @@ async def get_job_status(
     if not job or not await _can_access_job(job, user):
         raise HTTPException(status_code=404, detail="任务不存在")
     return job
-
-
-@router.get("/jobs/{job_id}/results")
-async def list_job_results(
-    job_id: str,
-    user: CurrentUser = Depends(get_current_user),
-):
-    """读取某个 Job 产生的全部 Result（新→旧）。"""
-    job = await get_job(job_id)
-    if not job or not await _can_access_job(job, user):
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    results = await result_service.list_results(
-        job_id=job_id,
-        tenant_id=job.get("tenant_id"),
-    )
-    if not user.is_tenant_admin():
-        # 脱链结果（文档已删除）仅管理员可读
-        results = [row for row in results if row.get("document_id")]
-    return results
 
 
 @router.get("/jobs/{job_id}/parse-result")
@@ -242,24 +220,3 @@ def _can_access_document(document: Dict[str, Any], user: CurrentUser) -> bool:
         return False
     return not user.tenant_id or document.get("tenant_id") == user.tenant_id
 
-
-@router.get("/results/{result_id}")
-async def get_result(
-    result_id: str,
-    user: CurrentUser = Depends(get_current_user),
-):
-    """读取单条 Result：继承文档授权；脱链结果仅管理员可读。"""
-    result = await result_service.get_result(result_id)
-    if not result or not user.can_access_tenant(result.get("tenant_id")):
-        raise HTTPException(status_code=404, detail="结果不存在")
-
-    document_id = result.get("document_id")
-    if not document_id:
-        if not user.is_tenant_admin():
-            raise HTTPException(status_code=404, detail="结果不存在")
-        return result
-
-    document = await supabase_service.get_document(str(document_id))
-    if not document or not _can_access_document(document, user):
-        raise HTTPException(status_code=404, detail="结果不存在")
-    return result

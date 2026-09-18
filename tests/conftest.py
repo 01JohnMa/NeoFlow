@@ -17,17 +17,6 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 USER_ID = "11111111-1111-4111-8111-111111111111"
 TENANT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 DOCUMENT_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
-TEMPLATE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-
-MOCK_DOCUMENT = {
-    "id": DOCUMENT_ID,
-    "user_id": USER_ID,
-    "tenant_id": TENANT_ID,
-    "status": "uploaded",
-    "file_path": "/tmp/test.pdf",
-    "template_id": TEMPLATE_ID,
-    "custom_push_name": None,
-}
 
 
 @pytest.fixture(autouse=True)
@@ -52,11 +41,10 @@ async def _mock_current_user():
 
 @pytest.fixture
 def client():
-    from api.dependencies.auth import get_current_user, get_crm_current_user
+    from api.dependencies.auth import get_current_user
     from api.main import app
 
     app.dependency_overrides[get_current_user] = _mock_current_user
-    app.dependency_overrides[get_crm_current_user] = _mock_current_user
     try:
         with TestClient(app) as test_client:
             yield test_client

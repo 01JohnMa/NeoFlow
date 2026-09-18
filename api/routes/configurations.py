@@ -4,11 +4,10 @@
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from services.configuration_service import (
     configuration_service,
-    ConfigurationFieldNotFound,
     ConfigurationNotFound,
     ConfigurationStateError,
 )
@@ -17,9 +16,7 @@ from api.exceptions import AuthorizationError
 
 router = APIRouter(prefix="/admin/configurations", tags=["配置管理"])
 
-ConfigurationType = Literal["parse", "extract", "classify", "split", "composite"]
-ExtractionMode = Literal["ocr_llm", "vlm"]
-OutputMode = Literal["bitable", "excel_template", "both"]
+ConfigurationType = Literal["extract", "classify", "split", "composite"]
 
 
 # ============ 请求体模型 ============
@@ -31,28 +28,10 @@ class ConfigurationFieldModel(BaseModel):
     field_label: str
     field_type: Literal["text", "date", "number", "boolean"] = "text"
     extraction_hint: str = ""
-    feishu_column: str = ""
     sort_order: int = 0
-    review_enforced: bool = False
-    review_allowed_values: Optional[List[str]] = None
     is_required: bool = False
     default_value: Optional[str] = None
     source_doc_type: Optional[str] = None
-
-
-class FeishuOutputModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    bitable_token: Optional[str] = None
-    table_id: Optional[str] = None
-
-
-class ExcelOutputModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    file_name: Optional[str] = None
-    path: Optional[str] = None
-    placeholders: List[Any] = Field(default_factory=list)
 
 
 class ConfigurationDefinitionModel(BaseModel):
@@ -60,12 +39,6 @@ class ConfigurationDefinitionModel(BaseModel):
 
     fields: List[ConfigurationFieldModel] = Field(default_factory=list)
     extraction_prompt: Optional[str] = None
-    extraction_mode: ExtractionMode = "ocr_llm"
-    output_mode: OutputMode = "bitable"
-    push_attachment: bool = True
-    auto_approve: bool = False
-    feishu: FeishuOutputModel = Field(default_factory=FeishuOutputModel)
-    excel: ExcelOutputModel = Field(default_factory=ExcelOutputModel)
     classify: Dict[str, Any] = Field(default_factory=dict)
     split: Dict[str, Any] = Field(default_factory=dict)
 
@@ -86,18 +59,6 @@ class UpdateConfigurationRequest(BaseModel):
     description: Optional[str] = None
     type: Optional[ConfigurationType] = None
     definition: Optional[ConfigurationDefinitionModel] = None
-
-
-class AppendFieldExampleRequest(BaseModel):
-    example: str = Field(min_length=1, max_length=500)
-
-    @field_validator("example")
-    @classmethod
-    def _strip_example(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("示例内容不能为空")
-        return stripped
 
 
 # ============ 权限辅助 ============
@@ -253,40 +214,6 @@ async def archive_configuration(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     return {"success": True, "data": configuration}
-
-
-# ============ 字段示例（从已审核结果写回 few-shot） ============
-
-@router.post("/{configuration_id}/fields/{field_key}/examples")
-async def append_field_example(
-    configuration_id: str,
-    field_key: str,
-    request: AppendFieldExampleRequest,
-    user: CurrentUser = Depends(get_current_user),
-):
-    """
-    把经验证的片段追加到字段描述，并以新 Revision 保存。
-
-    已发布 Revision 不被就地修改：定义先落入 draft，随即发布生成新 Revision。
-    """
-    _require_admin(user)
-    await _require_configuration_access(configuration_id, user)
-
-    try:
-        result = await configuration_service.append_field_example(
-            configuration_id,
-            field_key,
-            request.example,
-            created_by=user.user_id,
-        )
-    except ConfigurationNotFound:
-        raise HTTPException(status_code=404, detail="配置不存在")
-    except ConfigurationFieldNotFound:
-        raise HTTPException(status_code=404, detail="字段不存在")
-    except ConfigurationStateError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-    return {"success": True, "data": result}
 
 
 # ============ Revision（只读） ============

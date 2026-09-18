@@ -46,12 +46,6 @@ export function getStatusText(status?: string | null): string {
       return '已完成'
     case 'failed':
       return '处理失败'
-    case 'pending_review':
-      return '待审核'
-    case 'validated':
-      return '已确认'
-    case 'rejected':
-      return '已驳回'
     default:
       return status || '-'
   }
@@ -60,32 +54,15 @@ export function getStatusText(status?: string | null): string {
 export function getStatusColor(status?: string | null): string {
   switch (status) {
     case 'completed':
-    case 'validated':
       return 'bg-success-500/10 text-success-500 border border-success-500/20'
     case 'queued':
     case 'processing':
     case 'pending':
     case 'uploaded':
       return 'bg-accent-400/10 text-accent-400 border border-accent-400/20'
-    case 'pending_review':
-      return 'bg-warning-500/10 text-warning-500 border border-warning-500/20'
     case 'failed':
-    case 'rejected':
       return 'bg-error-500/10 text-error-500 border border-error-500/20'
     default:
       return 'bg-bg-hover text-text-secondary border border-border-default'
-  }
-}
-
-export function getDocumentTypeText(documentType?: string | null): string {
-  switch (documentType) {
-    case 'inspection_report':
-      return '检测报告'
-    case 'express':
-      return '快递面单'
-    case 'sampling':
-      return '抽样单'
-    default:
-      return documentType || '-'
   }
 }

@@ -3,10 +3,17 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Upload } from '@/pages/Upload'
 
 const profileState = vi.hoisted(() => ({
-  tenantName: '测试部门' as string | null,
   tenantCode: 'quality' as string | null,
-  templates: [] as Array<{ id: string; name: string; code: string; is_active?: boolean }>,
+  profile: {
+    user_id: 'user-1',
+    tenant_id: 'tenant-1',
+    tenant_name: '测试部门',
+    tenant_code: 'quality',
+    role: 'user' as const,
+    display_name: null,
+  } as null | { user_id: string; tenant_id: string; tenant_name: string | null; tenant_code: string | null; role: 'user'; display_name: string | null },
   isLoading: false,
+  fetchProfile: vi.fn(),
 }))
 
 vi.mock('@/hooks/useProfile', () => ({
@@ -15,7 +22,6 @@ vi.mock('@/hooks/useProfile', () => ({
 
 vi.mock('@/hooks/useDocuments', () => ({
   useUploadDocument: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useProcessDocument: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
 vi.mock('react-router-dom', () => ({
@@ -23,27 +29,29 @@ vi.mock('react-router-dom', () => ({
 }))
 
 describe('Upload page', () => {
-  it('只提供单文档上传入口', () => {
-    profileState.tenantName = '测试部门'
+  it('只提供纯上传入口，不展示模板选择', () => {
     profileState.tenantCode = 'quality'
-    profileState.templates = [
-      { id: 'tpl-inspection', name: '检测报告', code: 'inspection_report' },
-      { id: 'tpl-express', name: '快递单', code: 'express' },
-    ]
+    profileState.profile = {
+      user_id: 'user-1',
+      tenant_id: 'tenant-1',
+      tenant_name: '测试部门',
+      tenant_code: 'quality',
+      role: 'user',
+      display_name: null,
+    }
 
     const html = renderToStaticMarkup(<Upload />)
 
-    expect(html).toContain('选择文档类型')
-    expect(html).toContain('检测报告')
-    expect(html).toContain('快递单')
-    expect(html).not.toContain('批量')
-    expect(html).not.toContain('配对')
+    expect(html).toContain('拖拽文件到此处或点击选择')
+    expect(html).not.toContain('选择文档类型')
+    expect(html).not.toContain('检测报告')
+    expect(html).not.toContain('快递单')
+    expect(html).not.toContain('上传并识别')
   })
 
   it('未选择部门时提示先选择部门', () => {
-    profileState.tenantName = null
     profileState.tenantCode = null
-    profileState.templates = []
+    profileState.profile = null
 
     const html = renderToStaticMarkup(<Upload />)
 

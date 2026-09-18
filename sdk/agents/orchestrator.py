@@ -27,8 +27,6 @@ def build_configuration_definition(
             "field_label": field.field_label,
             "field_type": field.field_type,
             "extraction_hint": field.extraction_hint,
-            "review_enforced": field.review_enforced,
-            "review_allowed_values": field.review_allowed_values,
             "sort_order": index,
         }
         for index, field in enumerate(confirmed.fields)
@@ -37,14 +35,6 @@ def build_configuration_definition(
         "fields": fields,
         "extraction_prompt": prompt,
         "parse": {"model_version": session.parse_mode},
-        "output_mode": "both" if session.excel_template_path else "bitable",
-        "excel": {
-            "file_name": session.excel_template_file_name,
-            "path": session.excel_template_path,
-            "placeholders": [
-                placeholder.model_dump() for placeholder in session.excel_placeholders
-            ],
-        },
     }
 
 

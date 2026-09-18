@@ -1,5 +1,5 @@
 # tests/services/test_supabase_service.py
-"""SupabaseService 单元测试 — 纯逻辑方法（日期清洗、显示名生成等）"""
+"""SupabaseService 单元测试 — 异常日志稳定性、异步卸载、卡死文档重置。"""
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
@@ -52,59 +52,6 @@ class TestAsyncOffloading:
 
         assert result == {"id": "doc-1"}
         mock_run_sync.assert_awaited_once()
-
-# ============ generate_display_name ============
-
-class TestGenerateDisplayName:
-    """文档显示名称生成"""
-
-    def test_inspection_report_with_sample(self, svc):
-        """检测报告：报告_{样品名称}_{规格型号}_{日期}"""
-        data = {
-            "sample_name": "LED灯泡",
-            "specification_model": "E27-10W",
-            "sampling_date": "2025-03-16",
-        }
-        name = svc.generate_display_name("inspection_report", data)
-        assert name.startswith("报告_")
-        assert "LED灯泡" in name
-        assert "E27-10W" in name
-
-    def test_inspection_report_chinese_type(self, svc):
-        """检测报告（中文类型名）"""
-        data = {"sample_name": "灯管"}
-        name = svc.generate_display_name("检测报告", data)
-        assert "报告" in name
-        assert "灯管" in name
-
-    def test_express_with_tracking(self, svc):
-        """快递单：快递_{快递单号}_{收件人}"""
-        data = {"tracking_number": "SF1234567890", "recipient": "张三"}
-        name = svc.generate_display_name("express", data)
-        assert "快递" in name
-
-    def test_sampling_form(self, svc):
-        """抽样单：抽样_{产品名称}_{省份城市}"""
-        data = {"product_name": "LED灯", "province_city": "广东深圳"}
-        name = svc.generate_display_name("sampling_form", data)
-        assert "抽样" in name
-
-    def test_unknown_type_fallback(self, svc):
-        """未知类型使用时间戳兜底"""
-        name = svc.generate_display_name("unknown_type", {})
-        assert "文档_" in name
-
-    def test_empty_extraction_data(self, svc):
-        """提取数据为空时使用兜底"""
-        name = svc.generate_display_name("inspection_report", {})
-        # 没有 sample_name，走兜底逻辑
-        assert "报告" in name or "文档" in name
-
-    def test_exception_returns_fallback(self, svc):
-        """异常时返回兜底名称"""
-        name = svc.generate_display_name("inspection_report", None)
-        assert "文档_" in name
-
 
 class TestResetStuckProcessing:
     @pytest.mark.asyncio

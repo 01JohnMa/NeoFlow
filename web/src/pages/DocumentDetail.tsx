@@ -1,52 +1,30 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   useDocumentStatus,
-  useExtractionResult,
-  useValidateDocument,
   useDeleteDocument,
-  useProcessDocument,
   useRenameDocument,
 } from '@/hooks/useDocuments'
-import { useProfile } from '@/hooks/useProfile'
-import { appendFieldExample } from '@/services/configurations'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import { Spinner, PageLoader } from '@/components/ui/spinner'
+import { PageLoader } from '@/components/ui/spinner'
 import { Modal } from '@/components/ui/modal'
-import { cn, getStatusColor, getStatusText, formatDate, getDocumentTypeText } from '@/lib/utils'
+import { cn, getStatusColor, getStatusText, formatDate } from '@/lib/utils'
 import { documentsService } from '@/services/documents'
 import { shouldHideDownloadForType } from '@/config/features'
-import {
-  type ConfigurationFieldForDetail,
-  type ReviewHintField,
-} from '@/types'
 import {
   ArrowLeft,
   Download,
   Trash2,
-  Edit,
-  Save,
   X,
-  CheckCircle,
   AlertTriangle,
-  RefreshCw,
   FileText,
-  Eye,
+  RefreshCw,
   Pencil,
   Check,
-  Lightbulb,
 } from 'lucide-react'
-
-function getConfidenceColor(confidence: number): string {
-  if (confidence > 0.8) return 'text-success-500'
-  if (confidence > 0.6) return 'text-warning-500'
-  return 'text-error-500'
-}
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
   const err = error as { response?: { data?: { detail?: string; error?: string } } }
@@ -54,156 +32,15 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
   return typeof detail === 'string' && detail.trim() ? detail : fallback
 }
 
-const EXAMPLE_PREFIX = '示例：'
-
-function AppendExampleModal({
-  open,
-  field,
-  fieldValue,
-  sourceText,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean
-  field: ConfigurationFieldForDetail | null
-  fieldValue: string
-  sourceText: string
-  onClose: () => void
-  onSubmit: (example: string) => Promise<void>
-}) {
-  const [example, setExample] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (open) {
-      setExample(fieldValue.trim())
-      setError('')
-      setSubmitting(false)
-    }
-  }, [open, fieldValue])
-
-  const trimmed = example.trim()
-  const currentHint = field?.extraction_hint?.trim() ?? ''
-  const exampleLine = trimmed ? `${EXAMPLE_PREFIX}${trimmed}` : ''
-  const nextHint = exampleLine
-    ? currentHint.includes(exampleLine)
-      ? currentHint
-      : currentHint
-        ? `${currentHint}；${exampleLine}`
-        : exampleLine
-    : currentHint
-
-  const handleSubmit = async () => {
-    if (!trimmed) {
-      setError('示例内容不能为空')
-      return
-    }
-    setSubmitting(true)
-    setError('')
-    try {
-      await onSubmit(trimmed)
-    } catch (err) {
-      setError(getApiErrorMessage(err, '补示例失败，请稍后重试'))
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  if (!field) return null
-
-  return (
-    <Modal
-      open={open}
-      title={`补示例：${field.field_label}`}
-      onClose={onClose}
-      onConfirm={handleSubmit}
-      confirmText={submitting ? '保存中...' : '保存'}
-    >
-      <div className="mt-4 max-h-[60vh] space-y-4 overflow-y-auto pr-1 text-sm">
-        <p className="text-text-muted">
-          把经验证的片段追加到字段描述，作为后续抽取的 few-shot；保存会发布一个新的配置 Revision。
-        </p>
-
-        <div>
-          <div className="flex items-center justify-between">
-            <Label>真实抽取结果</Label>
-            <button
-              type="button"
-              className="text-xs text-primary-400 hover:underline disabled:opacity-40"
-              disabled={!fieldValue.trim()}
-              onClick={() => setExample(fieldValue.trim())}
-            >
-              用此值
-            </button>
-          </div>
-          <p className="mt-1 rounded-lg bg-bg-secondary p-2 text-text-primary">
-            {fieldValue || '未识别'}
-          </p>
-        </div>
-
-        {sourceText && (
-          <div>
-            <div className="flex items-center justify-between">
-              <Label>解析片段</Label>
-              <button
-                type="button"
-                className="text-xs text-primary-400 hover:underline"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  const selection = window.getSelection()?.toString().trim()
-                  if (selection) setExample(selection)
-                }}
-              >
-                用选中片段
-              </button>
-            </div>
-            <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-secondary p-2 text-xs text-text-secondary">
-              {sourceText}
-            </pre>
-          </div>
-        )}
-
-        <div>
-          <Label htmlFor="field-example">示例内容</Label>
-          <Textarea
-            id="field-example"
-            className="mt-1"
-            rows={2}
-            value={example}
-            onChange={(e) => setExample(e.target.value)}
-            placeholder="代表性片段或一句话描述"
-          />
-        </div>
-
-        <div>
-          <Label>更新后的字段描述</Label>
-          <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-bg-secondary p-2 text-xs text-text-secondary">
-            {nextHint || '（空）'}
-          </pre>
-        </div>
-
-        {error && <p className="text-error-500">{error}</p>}
-      </div>
-    </Modal>
-  )
-}
-
 export function DocumentDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  const [isEditing, setIsEditing] = useState(false)
-  const [editedData, setEditedData] = useState<Record<string, unknown>>({})
-  const [validationNotes, setValidationNotes] = useState('')
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [modalMessage, setModalMessage] = useState('')
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  
-  // 重命名相关状态
   const [isRenaming, setIsRenaming] = useState(false)
   const [newDisplayName, setNewDisplayName] = useState('')
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [modalMessage, setModalMessage] = useState('')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const {
     data: status,
@@ -212,99 +49,9 @@ export function DocumentDetail() {
     error: statusError,
     refetch: refetchStatus,
   } = useDocumentStatus(id!, !!id)
-  const statusTerminal = status?.status === 'completed' || status?.status === 'pending_review'
-  // 与 status 并行拉取，缩短首屏等待；未就绪时在状态进入终态后自动重试一次
-  const {
-    data: result,
-    isLoading: resultLoading,
-    isFetching: resultFetching,
-    refetch: refetchResult,
-  } = useExtractionResult(id!, !!id)
-  const resultRetried = useRef(false)
 
-  useEffect(() => {
-    if (!statusTerminal) {
-      resultRetried.current = false
-      return
-    }
-    if (!result && !resultFetching && !resultRetried.current) {
-      resultRetried.current = true
-      void refetchResult()
-    }
-  }, [statusTerminal, result, resultFetching, refetchResult])
-
-  const validateMutation = useValidateDocument()
   const deleteMutation = useDeleteDocument()
-  const processMutation = useProcessDocument()
   const renameMutation = useRenameDocument()
-  const { isTenantAdmin } = useProfile()
-
-  const [exampleField, setExampleField] = useState<ConfigurationFieldForDetail | null>(null)
-
-  // Initialize edit data when result loads
-  useEffect(() => {
-    if (result?.extraction_data) {
-      // The API result arrives after the editable form mounts.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setEditedData(result.extraction_data as unknown as Record<string, unknown>)
-    }
-  }, [result])
-
-  const fields: ConfigurationFieldForDetail[] = result?.fields ?? []
-  const hideDownload = shouldHideDownloadForType(status?.document_type || result?.document_type)
-  const canAppendExample = isTenantAdmin && result?.is_validated === true && !!result?.configuration_id
-
-  // Handle field change
-  const handleFieldChange = (key: string, value: string) => {
-    setEditedData((prev) => ({ ...prev, [key]: value }))
-  }
-
-  // Actual save — called after confirmation (or directly when no hint fields)
-  const handleSave = async () => {
-    setShowSaveConfirm(false)
-    const documentType = status?.document_type || result?.document_type
-    if (!id || !documentType) return
-
-    try {
-      await validateMutation.mutateAsync({
-        documentId: id,
-        documentType: documentType,
-        data: editedData,
-        validationNotes,
-      })
-      setIsEditing(false)
-      refetchResult()
-      refetchStatus()
-    } catch (err) {
-      const error = err as { response?: { data?: { detail?: string } } }
-      const detail = error?.response?.data?.detail
-      const message = typeof detail === 'string' && detail.trim()
-        ? detail
-        : '审核失败，请检查字段后重试'
-      setModalMessage(message)
-      setIsModalOpen(true)
-      console.error('Save failed:', err)
-    }
-  }
-
-  // Show confirmation modal when hint fields exist, otherwise save directly
-  const handleSaveClick = () => {
-    const hintFields: ReviewHintField[] = result?.review_hint_fields ?? []
-    if (hintFields.length > 0) {
-      setShowSaveConfirm(true)
-    } else {
-      handleSave()
-    }
-  }
-
-  // Cancel editing
-  const handleCancel = () => {
-    if (result?.extraction_data) {
-      setEditedData(result.extraction_data as unknown as Record<string, unknown>)
-    }
-    setValidationNotes('')
-    setIsEditing(false)
-  }
 
   // Delete document
   const handleDelete = async () => {
@@ -312,33 +59,6 @@ export function DocumentDetail() {
     await deleteMutation.mutateAsync(id)
     navigate('/documents')
   }
-
-  // Reprocess document
-  const handleReprocess = async () => {
-    if (!id) return
-    try {
-      await processMutation.mutateAsync({ documentId: id })
-    } catch (err) {
-      setModalMessage(getApiErrorMessage(err, '重新处理失败，请稍后重试'))
-      setIsModalOpen(true)
-    }
-  }
-
-  // 把已审核结果的代表片段追加到字段描述（发布为新 Revision）
-  const handleAppendExample = async (example: string) => {
-    if (!result?.configuration_id || !exampleField) return
-    await appendFieldExample(result.configuration_id, exampleField.field_key, example)
-    setExampleField(null)
-    setModalMessage('示例已追加到字段描述并发布为新 Revision，后续抽取将使用更新后的描述。')
-    setIsModalOpen(true)
-    refetchResult()
-  }
-
-  const exampleFieldValue = (() => {
-    if (!exampleField) return ''
-    const raw = editedData[exampleField.field_key]
-    return Array.isArray(raw) ? raw.join('\n') : String(raw ?? '')
-  })()
 
   // 开始重命名
   const startRenaming = () => {
@@ -400,12 +120,9 @@ export function DocumentDetail() {
 
   const isUploaded = status.status === 'uploaded'
   const isQueued = status.status === 'queued'
-  const isProcessing = status.status === 'processing' || processMutation.isPending
-  const isPendingReview = status.status === 'pending_review'
-  const isCompleted = status.status === 'completed'
+  const isProcessing = status.status === 'processing'
   const isFailed = status.status === 'failed'
-  // 待审核和已完成状态都可以显示提取结果
-  const hasExtractionResult = isPendingReview || isCompleted
+  const hideDownload = shouldHideDownloadForType(status.document_type)
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -481,17 +198,6 @@ export function DocumentDetail() {
               下载
             </Button>
           )}
-          {isFailed && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleReprocess}
-              disabled={processMutation.isPending}
-            >
-              <RefreshCw className={cn('h-4 w-4 mr-2', processMutation.isPending && 'animate-spin')} />
-              重新处理
-            </Button>
-          )}
           <Button
             variant="destructive"
             size="sm"
@@ -517,7 +223,7 @@ export function DocumentDetail() {
             <div>
               <p className="text-sm text-text-muted">文档类型</p>
               <p className="mt-1 font-medium text-text-primary">
-                {status.document_type ? getDocumentTypeText(status.document_type) : '-'}
+                {status.document_type || '-'}
               </p>
             </div>
             <div>
@@ -550,8 +256,8 @@ export function DocumentDetail() {
               <div className="flex items-start gap-3">
                 <FileText className="h-5 w-5 text-accent-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium text-accent-400">文档已上传，等待处理</p>
-                  <p className="text-sm text-text-secondary mt-1">如果长时间停留在该状态，可手动点击“重新处理”。</p>
+                  <p className="font-medium text-accent-400">文档已上传</p>
+                  <p className="text-sm text-text-secondary mt-1">可在 Parse 页面对该文档发起解析。</p>
                 </div>
               </div>
             </div>
@@ -583,246 +289,9 @@ export function DocumentDetail() {
         </CardContent>
       </Card>
 
-      {/* Processing Status */}
-      {(isQueued || isProcessing) && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Spinner size="lg" className="mx-auto" />
-            <p className="mt-4 text-text-primary font-medium">{isQueued ? '任务正在排队...' : '正在处理文档...'}</p>
-            <p className="text-sm text-text-muted mt-1">
-              {isQueued
-                ? '系统会在前序任务完成后自动开始处理，请勿重复提交'
-                : '系统正在进行识别和字段提取，高峰期可能需要 2-5 分钟，请勿重复提交'}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Extraction Result */}
-      {hasExtractionResult && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>提取结果</CardTitle>
-              <CardDescription>
-                {result?.is_validated ? (
-                  <span className="flex items-center gap-1 text-success-500">
-                    <CheckCircle className="h-4 w-4" />
-                    已审核通过
-                  </span>
-                ) : (
-                  <span className="text-text-muted">等待人工审核</span>
-                )}
-              </CardDescription>
-            </div>
-            {!isEditing ? (
-              <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-                <Edit className="h-4 w-4 mr-2" />
-                编辑审核
-              </Button>
-            ) : (
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={handleSaveClick}
-                  loading={validateMutation.isPending}
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  保存
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleCancel}>
-                  <X className="h-4 w-4 mr-2" />
-                  取消
-                </Button>
-              </div>
-            )}
-          </CardHeader>
-          <CardContent>
-            {resultLoading ? (
-              <div className="flex justify-center py-8">
-                <Spinner />
-              </div>
-            ) : fields.length === 0 ? (
-              <div className="text-center py-8">
-                <FileText className="h-12 w-12 text-text-muted mx-auto mb-4" />
-                <p className="text-text-secondary">
-                  {result ? '模板字段未配置，请联系管理员' : '暂无提取结果'}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {fields.map((field) => {
-                  const rawValue = editedData[field.field_key]
-                  const value = Array.isArray(rawValue)
-                    ? rawValue.join('\n')
-                    : (rawValue as string) || ''
-                  const rawOriginal = result?.extraction_data?.[field.field_key]
-                  const originalValue = Array.isArray(rawOriginal)
-                    ? rawOriginal.join('\n')
-                    : (rawOriginal as string) || ''
-                  const isChanged = isEditing && value !== originalValue
-
-                  // 高亮：由模板规则驱动 — review_enforced 或有 review_allowed_values
-                  const needsHighlight = status?.status === 'pending_review'
-                    && (field.review_enforced || (field.review_allowed_values?.length ?? 0) > 0)
-
-                  return (
-                    <div key={field.field_key}>
-                      <div className="flex items-center justify-between gap-2">
-                        <Label
-                          htmlFor={`field-${field.field_key}`}
-                          className={cn(
-                            isChanged && 'text-warning-500',
-                            needsHighlight && 'text-orange-500 font-semibold'
-                          )}
-                        >
-                          {field.field_label}
-                          {field.is_required && <span className="ml-1 text-error-500">*</span>}
-                          {isChanged && <span className="ml-2 text-xs">(已修改)</span>}
-                          {needsHighlight && <span className="ml-2 text-xs animate-pulse">(待审核确认)</span>}
-                        </Label>
-                        {canAppendExample && (
-                          <button
-                            type="button"
-                            title="把已审核的代表片段追加到字段描述"
-                            onClick={() => setExampleField(field)}
-                            className="inline-flex flex-shrink-0 items-center gap-1 text-xs text-primary-400 hover:underline"
-                          >
-                            <Lightbulb className="h-3.5 w-3.5" />
-                            补示例
-                          </button>
-                        )}
-                      </div>
-                      {isEditing ? (
-                        <Input
-                          id={`field-${field.field_key}`}
-                          type={
-                            field.field_type === 'date' ? 'date'
-                            : field.field_type === 'number' ? 'number'
-                            : 'text'
-                          }
-                          value={value}
-                          onChange={(e) => handleFieldChange(field.field_key, e.target.value)}
-                          className={cn('mt-1', isChanged && 'border-warning-500', needsHighlight && 'border-orange-500 border-2')}
-                        />
-                      ) : (
-                        <p className={cn(
-                          'mt-1 p-2 rounded-lg bg-bg-secondary text-text-primary min-h-[40px]',
-                          !value && 'text-text-muted italic',
-                          needsHighlight && 'border-2 border-orange-500 bg-orange-500/10 font-semibold'
-                        )}>
-                          {value || '未识别'}
-                        </p>
-                      )}
-                    </div>
-                  )
-                })}
-
-                {/* Validation Notes */}
-                {isEditing && (
-                  <div className="md:col-span-2">
-                    <Label htmlFor="validation-notes">审核备注</Label>
-                    <Textarea
-                      id="validation-notes"
-                      value={validationNotes}
-                      onChange={(e) => setValidationNotes(e.target.value)}
-                      placeholder="添加审核备注（可选）"
-                      className="mt-1"
-                      rows={2}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Confidence Score */}
-            {result?.ocr_confidence !== null && result?.ocr_confidence !== undefined && (
-              <div className="mt-6 pt-6 border-t border-border-default">
-                <p className="text-sm text-text-muted">
-                  OCR 置信度: 
-                  <span className={cn(
-                    'ml-2 font-medium',
-                    getConfidenceColor(result.ocr_confidence)
-                  )}>
-                    {(result.ocr_confidence * 100).toFixed(1)}%
-                  </span>
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* OCR Raw Text */}
-      {hasExtractionResult && result?.ocr_text && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Eye className="h-5 w-5" />
-              OCR 原始文本
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="p-4 rounded-lg bg-bg-secondary text-sm text-text-secondary whitespace-pre-wrap font-mono overflow-x-auto max-h-64 overflow-y-auto">
-              {result.ocr_text}
-            </pre>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Save confirmation modal — shows review_hint_fields before actual submit */}
-      <Modal
-        open={showSaveConfirm}
-        title="审核结果确认"
-        confirmText="确认保存"
-        onClose={() => setShowSaveConfirm(false)}
-        onConfirm={handleSave}
-      >
-        <p className="mt-3 text-sm text-text-secondary">
-          以下字段有审核规范要求，请确认当前填写值后再保存：
-        </p>
-        <ul className="mt-3 space-y-3">
-          {(result?.review_hint_fields ?? []).map((hint) => {
-            const currentVal = String(editedData[hint.field_key] ?? '').trim()
-            const isMatch = hint.allowed_values
-              .map((v) => v.trim().toLowerCase())
-              .includes(currentVal.toLowerCase())
-            return (
-              <li key={hint.field_key} className="rounded-lg border border-border-default p-3 text-sm">
-                <p className="font-medium text-text-primary">{hint.field_label}</p>
-                <p className="mt-1">
-                  <span className="text-text-muted">当前值：</span>
-                  <span className={cn(
-                    'font-semibold ml-1',
-                    isMatch ? 'text-success-500' : 'text-warning-500'
-                  )}>
-                    {currentVal || '（未填写）'}
-                  </span>
-                </p>
-                <p className="mt-0.5 text-text-muted">
-                  允许值：
-                  <span className="ml-1 text-text-secondary">
-                    {hint.allowed_values.join(' / ')}
-                  </span>
-                </p>
-              </li>
-            )
-          })}
-        </ul>
-      </Modal>
-
-      <AppendExampleModal
-        open={exampleField !== null}
-        field={exampleField}
-        fieldValue={exampleFieldValue}
-        sourceText={result?.ocr_text ?? ''}
-        onClose={() => setExampleField(null)}
-        onSubmit={handleAppendExample}
-      />
-
       <Modal
         open={isModalOpen}
-        title="审核提示"
+        title="提示"
         message={modalMessage}
         onClose={() => setIsModalOpen(false)}
       />

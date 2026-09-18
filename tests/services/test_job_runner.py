@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import DOCUMENT_ID, TEMPLATE_ID, TENANT_ID
+from tests.conftest import DOCUMENT_ID, TENANT_ID
 
 REVISION_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 CONFIG_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
@@ -14,7 +14,6 @@ CONFIG_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 def _job(**overrides):
     job = {
         "job_id": "job-1",
-        "job_type": "batch",
         "document_ids": [DOCUMENT_ID],
         "configuration_revision_id": REVISION_ID,
         "tenant_id": TENANT_ID,
@@ -188,85 +187,20 @@ class TestDefaultHandlers:
 
 class TestExtractHandler:
     @pytest.mark.asyncio
-    async def test_builds_legacy_task_kwargs_with_pinned_revision(self):
+    async def test_extract_handler_fails_closed(self):
+        """Extract 执行能力未上线：handler 标记 Job 失败并返回 None。"""
         from services.job_runner import handle_extract_job
 
-        document = {
-            "id": DOCUMENT_ID,
-            "file_path": "/tmp/test.pdf",
-            "template_id": TEMPLATE_ID,
-            "tenant_id": TENANT_ID,
-            "custom_push_name": "推送名",
-        }
-
-        with patch("services.supabase_service.supabase_service") as mock_supabase, \
-             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task, \
-             patch("api.jobs.update_job", new_callable=AsyncMock):
-            mock_supabase.get_document = AsyncMock(return_value=document)
-
-            await handle_extract_job(
+        with patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+            result = await handle_extract_job(
                 job=_job(),
                 revision={"id": REVISION_ID},
                 configuration={"type": "extract"},
             )
 
-        mock_task.assert_awaited_once_with(
-            document_id=DOCUMENT_ID,
-            file_path="/tmp/test.pdf",
-            template_id=TEMPLATE_ID,
-            tenant_id=TENANT_ID,
-            custom_push_name="推送名",
-            job_id="job-1",
-            configuration_revision_id=REVISION_ID,
+        assert result is None
+        mock_update.assert_awaited_once_with(
+            "job-1",
+            "failed",
+            error="Extract 执行能力未上线（Extract 轮实现）",
         )
-
-    @pytest.mark.asyncio
-    async def test_crm_job_waits_for_crm_review(self):
-        from services.job_runner import handle_extract_job
-
-        document = {
-            "id": DOCUMENT_ID,
-            "file_path": "/tmp/test.pdf",
-            "template_id": TEMPLATE_ID,
-            "tenant_id": TENANT_ID,
-            "custom_push_name": "CRM推送名",
-        }
-
-        with patch("services.supabase_service.supabase_service") as mock_supabase, \
-             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task, \
-             patch("api.jobs.update_job", new_callable=AsyncMock):
-            mock_supabase.get_document = AsyncMock(return_value=document)
-
-            await handle_extract_job(job=_job(job_type="crm"))
-
-        assert mock_task.await_args.kwargs["force_pending_review"] is True
-
-    @pytest.mark.asyncio
-    async def test_missing_document_marks_job_failed(self):
-        from services.job_runner import handle_extract_job
-
-        with patch("services.supabase_service.supabase_service") as mock_supabase, \
-             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task, \
-             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
-            mock_supabase.get_document = AsyncMock(return_value=None)
-
-            result = await handle_extract_job(job=_job())
-
-        assert result is None
-        mock_update.assert_awaited_once()
-        assert mock_update.await_args.args[1] == "failed"
-        mock_task.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_missing_document_ids_marks_job_failed(self):
-        from services.job_runner import handle_extract_job
-
-        with patch("services.supabase_service.supabase_service") as mock_supabase, \
-             patch("api.routes.documents.process.process_document_task", new_callable=AsyncMock) as mock_task, \
-             patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
-            result = await handle_extract_job(job=_job(document_ids=[]))
-
-        assert result is None
-        mock_update.assert_awaited_once()
-        mock_supabase.get_document.assert_not_called()
-        mock_task.assert_not_awaited()

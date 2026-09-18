@@ -14,9 +14,8 @@ async def test_execute_job_delegates_to_job_runner():
 
     job = {
         "job_id": "job-single",
-        "job_type": "template",
         "document_ids": [DOCUMENT_ID],
-        "configuration_revision_id": None,
+        "execution_spec": {"capability": "parse", "spec_version": "1"},
     }
 
     with patch("workers.document_worker.job_runner") as mock_runner:
@@ -32,7 +31,7 @@ async def test_poll_once_claims_and_executes_one_job():
     """worker 单轮轮询应认领一个 job 并执行它。"""
     from workers.document_worker import poll_once
 
-    job = {"job_id": "job-single", "job_type": "template", "document_ids": [DOCUMENT_ID]}
+    job = {"job_id": "job-single", "document_ids": [DOCUMENT_ID]}
 
     with patch("workers.document_worker.claim_next_job", new_callable=AsyncMock, return_value=job) as mock_claim, \
          patch("workers.document_worker.execute_job", new_callable=AsyncMock) as mock_execute:

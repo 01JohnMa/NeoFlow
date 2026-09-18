@@ -10,7 +10,7 @@ from loguru import logger
 
 from services.base import SupabaseClientMixin
 
-CONFIGURATION_TYPES = ("parse", "extract", "classify", "split", "composite")
+CONFIGURATION_TYPES = ("extract", "classify", "split", "composite")
 
 DEFAULT_PROJECT_NAME = "默认项目"
 
@@ -18,10 +18,7 @@ FIELD_DEFAULTS: Dict[str, Any] = {
     "field_label": "",
     "field_type": "text",
     "extraction_hint": "",
-    "feishu_column": "",
     "sort_order": 0,
-    "review_enforced": False,
-    "review_allowed_values": None,
     "is_required": False,
     "default_value": None,
     "source_doc_type": None,
@@ -63,22 +60,12 @@ SPLIT_DEFAULTS: Dict[str, Any] = {
 DEFAULT_DEFINITION: Dict[str, Any] = {
     "fields": [],
     "extraction_prompt": None,
-    "extraction_mode": "ocr_llm",
-    "output_mode": "bitable",
-    "push_attachment": True,
-    "auto_approve": False,
-    "feishu": {"bitable_token": None, "table_id": None},
-    "excel": {"file_name": None, "path": None, "placeholders": []},
     "parse": deepcopy(PARSE_DEFAULTS),
     "classify": deepcopy(CLASSIFY_DEFAULTS),
     "split": deepcopy(SPLIT_DEFAULTS),
 }
 
-SECTION_KEYS = ("feishu", "excel", "parse", "classify", "split")
-
-# 字段示例（few-shot）追加前缀：单行写入 extraction_hint，保持 prompt 字段表行完整
-FIELD_EXAMPLE_PREFIX = "示例："
-FIELD_EXAMPLE_SEPARATOR = "；"
+SECTION_KEYS = ("parse", "classify", "split")
 
 
 class ConfigurationError(Exception):
@@ -93,10 +80,6 @@ class ConfigurationStateError(ConfigurationError):
     """配置生命周期状态不允许当前操作"""
 
 
-class ConfigurationFieldNotFound(ConfigurationError):
-    """配置 definition 中不存在指定字段"""
-
-
 def normalize_field(field: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """补齐单个字段的默认键，保留额外键。"""
     field = field or {}
@@ -109,9 +92,9 @@ def normalize_definition(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]
     """
     归一化 Configuration definition：
     - 补齐已知键的默认值
-    - fields 逐项归一化；历史 Revision 的 examples 键安全忽略
-    - feishu / excel 子对象合并而非整体替换
-    - 保留未知键（供后续 parse/classify 等类型扩展）
+    - fields 逐项归一化；历史 Revision 的死键安全忽略
+    - parse / classify / split 子对象合并而非整体替换
+    - 保留未知键（供后续能力扩展）
     """
     base = deepcopy(DEFAULT_DEFINITION)
     for key, value in (definition or {}).items():
@@ -135,7 +118,7 @@ def merge_definition(
     """
     将补丁合并进已有 definition：
     - fields 为整体替换
-    - feishu / excel 为子对象合并
+    - parse / classify / split 为子对象合并
     - 其余键直接覆盖（含显式 None，用于清空可空字段）
     """
     merged = normalize_definition(base)
@@ -159,10 +142,9 @@ def build_extraction_config(
     definition: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    把 Configuration + 选定 Revision definition 组装成抽取执行视图。
+    把 Configuration + 选定 Revision definition 组装成执行视图。
 
-    这是工作流/审核/推送/CRM 读取配置的唯一形态：字段、prompt、
-    提取模式与飞书/Excel 输出参数都在这里归一化。
+    这是工作流读取配置的唯一形态：字段、prompt 与各能力参数都在这里归一化。
     """
     definition = normalize_definition(
         definition if definition is not None else configuration.get("draft_definition")
@@ -179,15 +161,9 @@ def build_extraction_config(
         "revision_id": configuration.get("current_revision_id"),
         "fields": definition["fields"],
         "extraction_prompt": definition["extraction_prompt"],
-        "extraction_mode": definition["extraction_mode"],
         "parse": definition["parse"],
         "classify": definition["classify"],
         "split": definition["split"],
-        "output_mode": definition["output_mode"],
-        "push_attachment": definition["push_attachment"],
-        "auto_approve": definition["auto_approve"],
-        "feishu": definition["feishu"],
-        "excel": definition["excel"],
     }
 
 
@@ -311,7 +287,7 @@ class ConfigurationService(SupabaseClientMixin):
         detail["current_revision"] = revision
         return detail
 
-    # ============ 抽取执行视图（工作流/审核/推送/CRM 的统一读取入口） ============
+    # ============ 抽取执行视图（工作流读取配置的统一入口） ============
 
     _UUID_RE = re.compile(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -393,8 +369,7 @@ class ConfigurationService(SupabaseClientMixin):
         """
         按租户解析一个抽取配置引用。
 
-        key 依次尝试：Configuration ID、legacy_template_id（历史文档的
-        documents.template_id）、code、name。
+        key 依次尝试：Configuration ID、code、name。
         """
         if not tenant_id or not key:
             return None
@@ -404,12 +379,6 @@ class ConfigurationService(SupabaseClientMixin):
             candidate = await self.get_configuration(str(key))
             if candidate and candidate.get("tenant_id") == tenant_id:
                 configuration = candidate
-            if not configuration:
-                candidate = await self._get_extract_configuration_by_field(
-                    tenant_id, "legacy_template_id", str(key)
-                )
-                if candidate:
-                    configuration = candidate
 
         if not configuration:
             configuration = await self._get_extract_configuration_by_field(
@@ -591,51 +560,6 @@ class ConfigurationService(SupabaseClientMixin):
             "current_revision_id": revision.get("id"),
         }
         return {"configuration": updated, "revision": revision}
-
-    async def append_field_example(
-        self,
-        configuration_id: str,
-        field_key: str,
-        example: str,
-        created_by: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        把一条经验证的示例追加到字段描述，并以新 Revision 发布。
-
-        - 只改 draft_definition，再走发布流程，历史 Revision 永不被修改
-        - 示例以「示例：<内容>」单行追加，重复内容幂等（不产生新 Revision）
-        - 后续抽取经 get_extraction_configuration 读取更新后的描述
-        """
-        configuration = await self.get_configuration(configuration_id)
-        if not configuration:
-            raise ConfigurationNotFound("配置不存在")
-        if configuration["status"] == "archived":
-            raise ConfigurationStateError("已归档的配置不可修改")
-
-        definition = normalize_definition(configuration.get("draft_definition"))
-        target = next(
-            (f for f in definition["fields"] if f.get("field_key") == field_key),
-            None,
-        )
-        if target is None:
-            raise ConfigurationFieldNotFound(f"字段不存在: {field_key}")
-
-        example_line = f"{FIELD_EXAMPLE_PREFIX}{example.strip()}"
-        hint = (target.get("extraction_hint") or "").strip()
-        if example_line in hint:
-            revision = None
-            if configuration.get("current_revision_id"):
-                revision = await self.get_revision(configuration["current_revision_id"])
-            return {"configuration": configuration, "revision": revision}
-
-        target["extraction_hint"] = (
-            f"{hint}{FIELD_EXAMPLE_SEPARATOR}{example_line}" if hint else example_line
-        )
-        await self.update_configuration(
-            configuration_id,
-            {"definition": {"fields": definition["fields"]}},
-        )
-        return await self.publish_configuration(configuration_id, created_by=created_by)
 
     async def archive_configuration(self, configuration_id: str) -> Dict[str, Any]:
         """归档配置（幂等）；归档后不可再修改或发布。"""

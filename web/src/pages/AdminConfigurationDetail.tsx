@@ -17,11 +17,10 @@ import {
   CONFIGURATION_TYPE_LABELS,
   configurationStatusVariant,
 } from '@/lib/configuration'
-import { FeishuConfigTab } from './AdminFeishuTab'
 import { FieldsTab } from './AdminFieldsTab'
 import { RevisionsTab } from './AdminRevisionsTab'
 
-type Tab = 'fields' | 'output' | 'revisions'
+type Tab = 'fields' | 'revisions'
 
 export function ConfigurationDetail({
   configurationId,
@@ -138,7 +137,6 @@ export function ConfigurationDetail({
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'fields', label: `识别字段 (${fieldsCount})` },
-    { key: 'output', label: '解析与输出配置' },
     { key: 'revisions', label: `修订历史 (${revisions.length})` },
   ]
 
@@ -233,9 +231,6 @@ export function ConfigurationDetail({
 
         {activeTab === 'fields' && (
           <FieldsTab configuration={configuration} onUpdated={handleUpdated} />
-        )}
-        {activeTab === 'output' && (
-          <FeishuConfigTab configuration={configuration} onUpdated={handleUpdated} />
         )}
         {activeTab === 'revisions' && (
           <RevisionsTab

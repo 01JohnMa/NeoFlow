@@ -7,10 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from services.base import build_extraction_prompt
 from services.configuration_service import (
-    ConfigurationFieldNotFound,
-    ConfigurationNotFound,
     ConfigurationService,
     ConfigurationStateError,
     build_extraction_config,
@@ -171,7 +168,8 @@ class TestCreateConfiguration:
 
         assert created["status"] == "draft"
         assert created["current_revision_id"] is None
-        assert created["draft_definition"]["extraction_mode"] == "ocr_llm"
+        assert created["draft_definition"]["fields"] == []
+        assert created["draft_definition"]["parse"]["backend"] == "mineru-api"
         assert fake.tables.get("configuration_revisions", []) == []
 
     @pytest.mark.asyncio
@@ -201,38 +199,19 @@ class TestCreateConfiguration:
     async def test_create_normalizes_definition_fields(self, service):
         svc, _ = service
         created = await svc.create_configuration(_create(
-            svc,
             definition={
                 "fields": [{"field_key": "sample_name", "field_label": "样品名称"}],
                 "extraction_prompt": "抽取字段",
-                "extraction_mode": "vlm",
-                "per_page_extraction": True,
+                "parse": {"model_version": "vlm"},
             },
         ))
 
         definition = created["draft_definition"]
         assert definition["extraction_prompt"] == "抽取字段"
-        assert definition["extraction_mode"] == "vlm"
-        assert definition["per_page_extraction"] is True
+        assert definition["parse"]["model_version"] == "vlm"
+        assert definition["parse"]["backend"] == "mineru-api"
         assert definition["fields"][0]["field_type"] == "text"
         assert definition["fields"][0]["sort_order"] == 0
-
-    @pytest.mark.asyncio
-    async def test_parse_configuration_merges_parse_defaults_and_publishes(self, service):
-        svc, _ = service
-        created = await svc.create_configuration(_create(
-            type="parse",
-            definition={"parse": {"model_version": "vlm", "method": "ocr"}},
-        ))
-
-        parse_section = created["draft_definition"]["parse"]
-        assert parse_section["model_version"] == "vlm"
-        assert parse_section["method"] == "ocr"
-        assert parse_section["backend"] == "mineru-api"
-        assert parse_section["effort"] == "medium"
-
-        published = await svc.publish_configuration(created["id"], created_by=USER_ID)
-        assert published["revision"]["definition"]["parse"]["model_version"] == "vlm"
 
 
 class TestPublishLifecycle:
@@ -315,104 +294,20 @@ class TestPublishLifecycle:
     async def test_definition_merge_keeps_untouched_sections(self, service):
         svc, _ = service
         created = await svc.create_configuration(_create(
-            svc,
             definition={
                 "fields": [{"field_key": "a", "field_label": "A", "sort_order": 1}],
-                "feishu": {"bitable_token": "token-1", "table_id": "table-1"},
+                "parse": {"model_version": "pipeline", "method": "auto"},
             },
         ))
         updated = await svc.update_configuration(created["id"], {
-            "definition": {"feishu": {"table_id": "table-2"}, "auto_approve": True},
+            "definition": {"parse": {"method": "ocr"}, "extraction_prompt": "抽取字段"},
         })
 
         definition = updated["draft_definition"]
         assert definition["fields"][0]["field_key"] == "a"
-        assert definition["feishu"] == {"bitable_token": "token-1", "table_id": "table-2"}
-        assert definition["auto_approve"] is True
-
-
-class TestFieldExamples:
-    async def _published(self, svc, hint="位于样品名称标签后"):
-        created = await svc.create_configuration(_create(definition={
-            "fields": [{
-                "field_key": "sample_name",
-                "field_label": "样品名称",
-                "extraction_hint": hint,
-            }],
-            "extraction_prompt": None,
-        }))
-        return await svc.publish_configuration(created["id"], created_by=USER_ID)
-
-    @pytest.mark.asyncio
-    async def test_append_example_creates_new_revision_keeping_old(self, service):
-        svc, _ = service
-        published = await self._published(svc)
-        configuration_id = published["configuration"]["id"]
-
-        result = await svc.append_field_example(
-            configuration_id, "sample_name", "LED 灯", created_by=USER_ID,
-        )
-
-        revision = result["revision"]
-        assert revision["revision_number"] == 2
-        assert result["configuration"]["status"] == "published"
-        assert result["configuration"]["current_revision_id"] == revision["id"]
-        assert "示例：LED 灯" in revision["definition"]["fields"][0]["extraction_hint"]
-
-        old = await svc.get_revision(published["revision"]["id"])
-        assert "示例" not in old["definition"]["fields"][0]["extraction_hint"]
-
-    @pytest.mark.asyncio
-    async def test_updated_hint_reaches_extraction_prompt(self, service):
-        svc, _ = service
-        published = await self._published(svc)
-        configuration_id = published["configuration"]["id"]
-
-        appended = await svc.append_field_example(configuration_id, "sample_name", "LED 灯")
-
-        config = await svc.get_extraction_configuration(configuration_id)
-        assert config["revision_id"] == appended["revision"]["id"]
-        assert "示例：LED 灯" in config["fields"][0]["extraction_hint"]
-
-        prompt = build_extraction_prompt(config, "样品名称：LED 灯")
-        assert "示例：LED 灯" in prompt
-
-    @pytest.mark.asyncio
-    async def test_append_same_example_is_idempotent(self, service):
-        svc, _ = service
-        published = await self._published(svc)
-        configuration_id = published["configuration"]["id"]
-
-        first = await svc.append_field_example(configuration_id, "sample_name", "LED 灯")
-        second = await svc.append_field_example(configuration_id, "sample_name", "  LED 灯  ")
-
-        assert second["revision"]["id"] == first["revision"]["id"]
-        assert len(await svc.list_revisions(configuration_id)) == 2
-
-    @pytest.mark.asyncio
-    async def test_append_example_missing_field_rejected(self, service):
-        svc, _ = service
-        published = await self._published(svc)
-        with pytest.raises(ConfigurationFieldNotFound):
-            await svc.append_field_example(
-                published["configuration"]["id"], "unknown_field", "x",
-            )
-
-    @pytest.mark.asyncio
-    async def test_append_example_archived_rejected(self, service):
-        svc, _ = service
-        published = await self._published(svc)
-        configuration_id = published["configuration"]["id"]
-        await svc.archive_configuration(configuration_id)
-
-        with pytest.raises(ConfigurationStateError):
-            await svc.append_field_example(configuration_id, "sample_name", "LED 灯")
-
-    @pytest.mark.asyncio
-    async def test_append_example_unknown_configuration(self, service):
-        svc, _ = service
-        with pytest.raises(ConfigurationNotFound):
-            await svc.append_field_example("missing-config", "sample_name", "LED 灯")
+        assert definition["parse"]["model_version"] == "pipeline"
+        assert definition["parse"]["method"] == "ocr"
+        assert definition["extraction_prompt"] == "抽取字段"
 
 
 class TestArchive:
@@ -518,17 +413,10 @@ class TestExtractionConfig:
                 "fields": [{"field_key": "a", "field_label": "A"}],
                 "examples": [{"example_input": "输入", "example_output": {"a": 1}}],
                 "extraction_prompt": "请抽取字段",
-                "extraction_mode": "vlm",
+                "parse": {"model_version": "vlm", "method": "ocr"},
+                "classify": {"rules": ["invoice"]},
+                "split": {"categories": ["contract"]},
                 "per_page_extraction": True,
-                "output_mode": "both",
-                "push_attachment": False,
-                "auto_approve": True,
-                "feishu": {"bitable_token": "app-token", "table_id": "tbl-1"},
-                "excel": {
-                    "file_name": "模板.xlsx",
-                    "path": "/uploads/template.xlsx",
-                    "placeholders": [{"field_key": "a"}],
-                },
             },
         }
 
@@ -540,22 +428,22 @@ class TestExtractionConfig:
         assert config["fields"][0]["field_type"] == "text"
         assert "examples" not in config
         assert config["extraction_prompt"] == "请抽取字段"
-        assert config["extraction_mode"] == "vlm"
         assert "per_page_extraction" not in config
-        assert config["push_attachment"] is False
-        assert config["auto_approve"] is True
-        assert config["feishu"] == {"bitable_token": "app-token", "table_id": "tbl-1"}
-        assert config["excel"]["path"] == "/uploads/template.xlsx"
+        assert config["parse"]["model_version"] == "vlm"
+        assert config["parse"]["method"] == "ocr"
+        assert config["parse"]["backend"] == "mineru-api"
+        assert config["classify"]["rules"] == ["invoice"]
+        assert config["split"]["categories"] == ["contract"]
         assert "cleaner_module" not in config
 
     def test_build_extraction_config_empty_uses_defaults(self):
         config = build_extraction_config({"id": "c-1", "draft_definition": {}})
         assert config["fields"] == []
         assert "examples" not in config
-        assert config["extraction_mode"] == "ocr_llm"
-        assert config["output_mode"] == "bitable"
+        assert config["parse"]["backend"] == "mineru-api"
+        assert config["classify"]["rules"] == []
+        assert config["split"]["categories"] == []
         assert "cleaner_module" not in config
-        assert config["push_attachment"] is True
 
     @pytest.mark.asyncio
     async def test_get_extraction_configuration_prefers_published_revision(self, service):
@@ -600,17 +488,12 @@ class TestExtractionConfig:
         assert await svc.resolve_extraction_configuration(OTHER_TENANT_ID, created["id"]) is None
 
     @pytest.mark.asyncio
-    async def test_resolve_by_legacy_template_id_and_list_published(self, service):
-        svc, fake = service
-        legacy_id = "b0000000-0000-0000-0000-000000000001"
+    async def test_list_published_extract_configurations(self, service):
+        svc, _ = service
         created = await svc.create_configuration(_create(name="检测报告", code="inspection_report"))
         await svc.publish_configuration(created["id"])
-        fake.tables["configurations"][0]["legacy_template_id"] = legacy_id
 
         draft = await svc.create_configuration(_create(name="草稿配置", code="draft_only"))
-
-        resolved = await svc.resolve_extraction_configuration(TENANT_ID, legacy_id)
-        assert resolved["id"] == created["id"]
 
         published_configs = await svc.list_published_extract_configurations(TENANT_ID)
         ids = [c["id"] for c in published_configs]

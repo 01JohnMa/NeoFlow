@@ -12,7 +12,7 @@ class PromptOutput(BaseModel):
 
 PROMPT_AGENT_INSTRUCTIONS = """你是 NeoFlow 文档提取 Prompt 生成助手。
 基于已确认的模板字段（含字段描述），生成一个完整 extraction prompt。
-输出必须保留 {ocr_text} 占位符，要求模型仅输出扁平 JSON，不输出 Markdown。"""
+输出必须保留 {markdown} 占位符，要求模型仅输出扁平 JSON，不输出 Markdown。"""
 
 
 def build_fallback_prompt(confirmed: ConfirmTemplateRequest) -> str:
@@ -21,7 +21,7 @@ def build_fallback_prompt(confirmed: ConfirmTemplateRequest) -> str:
         hint = f"；提示：{field.extraction_hint}" if field.extraction_hint else ""
         field_lines.append(f"{index}. {field.field_label} -> {field.field_key} ({field.field_type}){hint}")
 
-    return f"""你是一个专业的数据提取助手，专门处理{confirmed.template_name}的OCR识别文本。请从用户提供的文本中精准提取以下字段。
+    return f"""你是一个专业的数据提取助手，专门处理{confirmed.template_name}的解析文本。请从用户提供的文本中精准提取以下字段。
 
 目标字段：
 {chr(10).join(field_lines)}
@@ -31,8 +31,8 @@ def build_fallback_prompt(confirmed: ConfirmTemplateRequest) -> str:
 - 缺失字段值设为空字符串 ""
 - 不要包含解释、引言或 Markdown 代码块
 
-OCR文本：
-{{ocr_text}}"""
+解析文本：
+{{markdown}}"""
 
 
 async def generate_prompt(
@@ -53,6 +53,6 @@ async def generate_prompt(
         model_profile=model_profile,
     )
     output = result if isinstance(result, PromptOutput) else PromptOutput.model_validate(result)
-    if "{ocr_text}" not in output.prompt:
-        raise ValueError("生成的 prompt 缺少 {ocr_text} 占位符")
+    if "{markdown}" not in output.prompt:
+        raise ValueError("生成的 prompt 缺少 {markdown} 占位符")
     return output.prompt

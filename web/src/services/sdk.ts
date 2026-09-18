@@ -16,14 +16,10 @@ export interface SDKCreateSessionOptions {
 
 export async function createSDKSession(
   file: File,
-  excelTemplate: File | null | undefined,
   options: SDKCreateSessionOptions,
 ): Promise<SDKSession> {
   const formData = new FormData()
   formData.append('file', file)
-  if (excelTemplate) {
-    formData.append('excel_template', excelTemplate)
-  }
   formData.append('tenant_id', options.tenantId)
   formData.append('template_name', options.templateName)
   formData.append('template_code', options.templateCode)

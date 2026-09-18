@@ -6,10 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from services.configuration_service import (
-    ConfigurationFieldNotFound,
-    ConfigurationStateError,
-)
+from services.configuration_service import ConfigurationStateError
 from tests.conftest import TENANT_ID, USER_ID
 
 OTHER_TENANT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -239,81 +236,6 @@ class TestUpdatePublishArchive:
 
         assert resp.status_code == 200
         assert resp.json()["data"]["status"] == "archived"
-
-
-class TestFieldExamples:
-    """从已审核结果补字段描述示例：权限、租户隔离与写回结果。"""
-
-    EXAMPLES_URL = f"/api/admin/configurations/{CONFIG_ID}/fields/sample_name/examples"
-
-    def test_viewer_cannot_append_example(self, client):
-        resp = client.post(self.EXAMPLES_URL, json={"example": "LED 灯"})
-        assert resp.status_code == 403
-
-    def test_unauthenticated_rejected(self, unauth_client):
-        resp = unauth_client.post(self.EXAMPLES_URL, json={"example": "LED 灯"})
-        assert resp.status_code == 401
-
-    def test_cross_tenant_configuration_forbidden(self, admin_client):
-        with _patch_service() as mock_svc:
-            mock_svc.get_configuration = AsyncMock(
-                return_value={**OWN_CONFIG, "tenant_id": OTHER_TENANT_ID}
-            )
-            resp = admin_client.post(self.EXAMPLES_URL, json={"example": "LED 灯"})
-
-        assert resp.status_code == 403
-        mock_svc.append_field_example.assert_not_called()
-
-    def test_missing_configuration_returns_404(self, admin_client):
-        with _patch_service() as mock_svc:
-            mock_svc.get_configuration = AsyncMock(return_value=None)
-            resp = admin_client.post(self.EXAMPLES_URL, json={"example": "LED 灯"})
-
-        assert resp.status_code == 404
-
-    def test_admin_appends_example_publishes_new_revision(self, admin_client):
-        revision = {"id": REVISION_ID, "revision_number": 2, "definition": {}}
-        with _patch_service() as mock_svc:
-            mock_svc.get_configuration = AsyncMock(return_value=OWN_CONFIG)
-            mock_svc.append_field_example = AsyncMock(return_value={
-                "configuration": {**OWN_CONFIG, "status": "published"},
-                "revision": revision,
-            })
-            resp = admin_client.post(self.EXAMPLES_URL, json={"example": "  LED 灯  "})
-
-        assert resp.status_code == 200
-        assert resp.json()["data"]["revision"]["revision_number"] == 2
-        mock_svc.append_field_example.assert_awaited_once_with(
-            CONFIG_ID, "sample_name", "LED 灯", created_by=USER_ID
-        )
-
-    def test_missing_field_returns_404(self, admin_client):
-        with _patch_service() as mock_svc:
-            mock_svc.get_configuration = AsyncMock(return_value=OWN_CONFIG)
-            mock_svc.append_field_example = AsyncMock(
-                side_effect=ConfigurationFieldNotFound("字段不存在: sample_name")
-            )
-            resp = admin_client.post(self.EXAMPLES_URL, json={"example": "LED 灯"})
-
-        assert resp.status_code == 404
-
-    def test_archived_configuration_conflict(self, admin_client):
-        with _patch_service() as mock_svc:
-            mock_svc.get_configuration = AsyncMock(return_value=OWN_CONFIG)
-            mock_svc.append_field_example = AsyncMock(
-                side_effect=ConfigurationStateError("已归档的配置不可修改")
-            )
-            resp = admin_client.post(self.EXAMPLES_URL, json={"example": "LED 灯"})
-
-        assert resp.status_code == 409
-
-    def test_blank_example_rejected(self, admin_client):
-        with _patch_service() as mock_svc:
-            mock_svc.get_configuration = AsyncMock(return_value=OWN_CONFIG)
-            resp = admin_client.post(self.EXAMPLES_URL, json={"example": "   "})
-
-        assert resp.status_code == 422
-        mock_svc.append_field_example.assert_not_called()
 
 
 class TestRevisions:

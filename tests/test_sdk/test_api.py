@@ -1,9 +1,7 @@
 from pathlib import Path
-from io import BytesIO
 import importlib.util
 
 import pytest
-from openpyxl import Workbook
 from fastapi import FastAPI
 from unittest.mock import AsyncMock
 
@@ -81,19 +79,6 @@ def client():
             yield test_client
     finally:
         test_app.dependency_overrides.clear()
-
-
-def _excel_template_bytes() -> bytes:
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Report"
-    sheet["A1"] = "订单号"
-    sheet["B1"] = "{{order_no}}"
-    sheet["A2"] = "数量"
-    sheet["B2"] = "{{quantity}} 件"
-    output = BytesIO()
-    workbook.save(output)
-    return output.getvalue()
 
 
 def _parse_result_row(markdown: str = PARSE_MARKDOWN, model_version: str = "pipeline"):
@@ -275,8 +260,6 @@ def test_analyze_uses_parse_markdown(admin_client, monkeypatch, tmp_path):
                     "field_label": "样品名称",
                     "field_type": "text",
                     "extraction_hint": "位于样品名称标签后",
-                    "review_enforced": False,
-                    "review_allowed_values": None,
                     "sample_value": "小型断路器",
                 }
             ],
@@ -300,84 +283,6 @@ def test_analyze_rejects_while_parsing(admin_client, monkeypatch, tmp_path):
     assert response.status_code == 409
 
 
-def test_create_session_accepts_excel_template_and_returns_slots(
-    admin_client,
-    monkeypatch,
-    tmp_path,
-):
-    _patch_parse_env(monkeypatch, tmp_path)
-
-    response = _create_session(
-        admin_client,
-        files={
-            "file": ("scan.jpg", b"image bytes", "image/jpeg"),
-            "excel_template": (
-                "template.xlsx",
-                _excel_template_bytes(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-        },
-    )
-
-    assert response.status_code == 201
-    data = response.json()
-    assert data["file_name"] == "scan.jpg"
-    assert data["excel_template_file_name"] == "template.xlsx"
-    assert [
-        (item["sheet_name"], item["coordinate"], item["field_key"])
-        for item in data["excel_placeholders"]
-    ] == [
-        ("Report", "B1", "order_no"),
-        ("Report", "B2", "quantity"),
-    ]
-
-
-def test_analyze_adds_excel_slots_to_field_draft(admin_client, monkeypatch, tmp_path):
-    mocks = _patch_parse_env(monkeypatch, tmp_path)
-    mocks["get_job"].return_value = {"status": "completed", "progress": 100}
-    mocks["get_document_parse_result"].return_value = _parse_result_row()
-
-    analysis_payload = {
-        "detected_fields": [
-            {
-                "field_key": "order_no",
-                "field_label": "订单号",
-                "field_type": "text",
-                "extraction_hint": "从订单号标签后提取",
-                "review_enforced": False,
-                "review_allowed_values": None,
-                "sample_value": "NOZS0311046",
-            }
-        ],
-    }
-
-    async def fake_analyze(session, parse_text, **kwargs):
-        return analysis_payload
-
-    monkeypatch.setattr(sdk_route.orchestrator, "analyze_document", fake_analyze)
-
-    create_response = _create_session(
-        admin_client,
-        files={
-            "file": ("scan.jpg", b"image bytes", "image/jpeg"),
-            "excel_template": (
-                "template.xlsx",
-                _excel_template_bytes(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-        },
-    )
-
-    session_id = create_response.json()["id"]
-    analyze_response = admin_client.post(f"/api/sdk/sessions/{session_id}/analyze")
-
-    assert analyze_response.status_code == 200
-    fields = analyze_response.json()["analysis"]["detected_fields"]
-    assert [field["field_key"] for field in fields] == ["order_no", "quantity"]
-    assert fields[1]["field_label"] == "quantity"
-    assert "Excel" in fields[1]["extraction_hint"]
-
-
 def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, tmp_path):
     mocks = _patch_parse_env(monkeypatch, tmp_path)
     mocks["get_job"].return_value = {"status": "completed", "progress": 100}
@@ -390,8 +295,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
                 "field_label": "样品名称",
                 "field_type": "text",
                 "extraction_hint": "位于样品名称标签后",
-                "review_enforced": False,
-                "review_allowed_values": None,
                 "sample_value": "小型断路器",
             }
         ],
@@ -401,7 +304,7 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
         return analysis_payload
 
     async def fake_generate_prompt(session, **kwargs):
-        return "请提取字段：sample_name\n{ocr_text}"
+        return "请提取字段：sample_name\n{markdown}"
 
     commit_session_payload = {}
 
@@ -432,7 +335,6 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
             "template_name": "检测报告",
             "template_code": "inspection_report",
             "description": "AI 生成模板",
-            "per_page_extraction": False,
             "fields": analysis_payload["detected_fields"],
         },
     )
@@ -440,19 +342,19 @@ def test_sdk_session_flow_analyze_prompt_and_commit(admin_client, monkeypatch, t
 
     prompt_response = admin_client.post(f"/api/sdk/sessions/{session_id}/prompt")
     assert prompt_response.status_code == 200
-    assert "{ocr_text}" in prompt_response.json()["prompt"]
+    assert "{markdown}" in prompt_response.json()["prompt"]
 
     commit_response = admin_client.post(
         f"/api/sdk/sessions/{session_id}/commit",
         json={
-            "prompt": "管理员最终确认的 prompt\n{ocr_text}",
+            "prompt": "管理员最终确认的 prompt\n{markdown}",
         },
     )
     assert commit_response.status_code == 200
     assert commit_response.json()["commit_result"]["configuration_id"] == "config-1"
     assert commit_response.json()["commit_result"]["revision_id"] == "revision-1"
     assert commit_session_payload == {
-        "prompt": "管理员最终确认的 prompt\n{ocr_text}",
+        "prompt": "管理员最终确认的 prompt\n{markdown}",
     }
 
 
@@ -468,8 +370,6 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
                 "field_label": "样品名称",
                 "field_type": "text",
                 "extraction_hint": "位于样品名称标签后",
-                "review_enforced": False,
-                "review_allowed_values": None,
                 "sample_value": "小型断路器",
             }
         ],
@@ -489,7 +389,7 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
 
     async def fake_generate_prompt(session, *, model_profile):
         captured_profiles["prompt"] = model_profile
-        return "请提取字段：sample_name\n{ocr_text}"
+        return "请提取字段：sample_name\n{markdown}"
 
     mocks = _patch_parse_env(monkeypatch, tmp_path)
     mocks["get_job"].return_value = {"status": "completed", "progress": 100}
@@ -521,7 +421,6 @@ def test_llm_routes_pass_request_model_profile_without_returning_key(
             "template_name": "检测报告",
             "template_code": "inspection_report",
             "description": "AI 生成模板",
-            "per_page_extraction": False,
             "fields": analysis_payload["detected_fields"],
         },
     )
@@ -664,65 +563,17 @@ def test_get_session_rebuild_rejects_other_tenant(admin_client, monkeypatch, tmp
     assert response.status_code == 404
 
 
-def test_get_session_recovers_excel_template_after_restart(
-    admin_client,
-    monkeypatch,
-    tmp_path,
-):
-    mocks = _patch_parse_env(monkeypatch, tmp_path)
-    created = _create_session(
-        admin_client,
-        files={
-            "file": ("scan.jpg", b"image bytes", "image/jpeg"),
-            "excel_template": (
-                "template.xlsx",
-                _excel_template_bytes(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-        },
-    ).json()
-    session_id = created["id"]
-    document_id = created["document_id"]
-
-    sdk_route.session_store.delete(session_id)
-    mocks["get_job"].return_value = _completed_job(document_id)
-    mocks["get_document"].return_value = _document_row(document_id)
-    mocks["get_document_parse_result"].return_value = _parse_result_row()
-    _stub_revision(monkeypatch, "pipeline")
-
-    response = admin_client.get(f"/api/sdk/sessions/{session_id}")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["excel_template_file_name"] == "template.xlsx"
-    assert [
-        (item["sheet_name"], item["coordinate"], item["field_key"])
-        for item in payload["excel_placeholders"]
-    ] == [
-        ("Report", "B1", "order_no"),
-        ("Report", "B2", "quantity"),
-    ]
-
-
 def test_delete_session_keeps_sample_document_file(admin_client, monkeypatch, tmp_path):
     _patch_parse_env(monkeypatch, tmp_path)
     created = _create_session(
         admin_client,
-        files={
-            "file": ("scan.jpg", b"image bytes", "image/jpeg"),
-            "excel_template": (
-                "template.xlsx",
-                _excel_template_bytes(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-        },
+        files={"file": ("scan.jpg", b"image bytes", "image/jpeg")},
     ).json()
 
     response = admin_client.delete(f"/api/sdk/sessions/{created['id']}")
 
     assert response.status_code == 200
     assert list(tmp_path.glob("*.jpg")), "样例文档文件应保留"
-    assert not list((tmp_path / "sdk_sessions").glob("*")), "Excel 模板文件应被清理"
 
 
 def test_create_session_requires_document_kind(admin_client, monkeypatch, tmp_path):

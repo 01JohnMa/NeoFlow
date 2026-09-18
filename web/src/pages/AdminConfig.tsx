@@ -28,7 +28,6 @@ import { ConfigurationDetail } from './AdminConfigurationDetail'
 type View = 'list' | 'detail' | 'ai'
 
 const CONFIGURATION_TYPES: ConfigurationType[] = [
-  'parse',
   'extract',
   'classify',
   'split',
@@ -168,7 +167,7 @@ export function AdminConfig() {
         <div>
           <h1 className="text-xl font-semibold text-text-primary">系统配置</h1>
           <p className="text-sm text-text-muted">
-            管理文档处理配置、识别字段、输出策略与不可变修订
+            管理文档处理配置、识别字段与不可变修订
           </p>
         </div>
       </div>

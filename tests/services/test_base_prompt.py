@@ -44,5 +44,5 @@ def test_legacy_examples_key_is_ignored_when_building_prompt():
     prompt = build_extraction_prompt(config, "样品名称：小型断路器")
 
     assert "examples" not in config
-    assert "小型断路器" not in prompt.split("现在，请处理用户提供的OCR文本")[0]
+    assert "小型断路器" not in prompt.split("现在，请处理用户提供的解析文本")[0]
     assert "参考示例" not in prompt

@@ -84,27 +84,6 @@ describe('configurations service', () => {
     expect(result.status).toBe('archived')
   })
 
-  it('补字段示例并解包 configuration/revision', async () => {
-    apiMock.post.mockResolvedValue({
-      data: {
-        success: true,
-        data: {
-          configuration: { id: 'config-1', status: 'published' },
-          revision: { id: 'revision-2', revision_number: 2 },
-        },
-      },
-    })
-
-    const result = await configurationsApi.appendFieldExample('config-1', 'sample_name', 'LED 灯')
-
-    expect(apiMock.post).toHaveBeenCalledWith(
-      '/admin/configurations/config-1/fields/sample_name/examples',
-      { example: 'LED 灯' },
-    )
-    expect(result.configuration.status).toBe('published')
-    expect(result.revision?.revision_number).toBe(2)
-  })
-
   it('列出与读取修订', async () => {
     apiMock.get.mockResolvedValueOnce({ data: [{ id: 'revision-1' }] })
     const revisions = await configurationsApi.listRevisions('config-1')

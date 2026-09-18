@@ -15,54 +15,11 @@ import {
   ArrowRight,
   TrendingUp,
   Building2,
-  ClipboardList,
-  Package,
-  TestTube,
 } from 'lucide-react'
-
-// 辅助函数：获取模板图标
-function getTemplateIcon(code: string) {
-  const iconClass = "h-5 w-5"
-  switch (code) {
-    case 'inspection_report':
-      return <TestTube className={`${iconClass} text-primary-400`} />
-    case 'express':
-      return <Package className={`${iconClass} text-accent-400`} />
-    case 'sampling':
-      return <ClipboardList className={`${iconClass} text-success-400`} />
-    default:
-      return <FileText className={`${iconClass} text-primary-400`} />
-  }
-}
-
-// 辅助函数：获取模板渐变色
-function getTemplateGradient(index: number) {
-  const gradients = [
-    'from-primary-900/50 to-primary-800/30 border-primary-500',
-    'from-accent-900/50 to-accent-800/30 border-accent-500',
-    'from-success-900/50 to-success-800/30 border-success-500',
-    'from-yellow-900/50 to-yellow-800/30 border-yellow-500',
-  ]
-  return gradients[index % gradients.length]
-}
-
-// 辅助函数：获取模板描述
-function getTemplateDescription(code: string) {
-  switch (code) {
-    case 'inspection_report':
-      return '自动提取检测项目、结论等关键信息'
-    case 'express':
-      return '快速提取运单号、收发件人信息'
-    case 'sampling':
-      return '自动识别抽样单位、产品信息'
-    default:
-      return '智能识别文档关键信息'
-  }
-}
 
 export function Dashboard() {
   const { data: documents, isLoading } = useDocumentList({ limit: 5 })
-  const { templates, tenantName, displayName, isLoading: profileLoading } = useProfile()
+  const { tenantName, displayName } = useProfile()
 
   // Calculate stats
   const stats = {
@@ -225,82 +182,6 @@ export function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* Quick Actions - 根据模板动态渲染 */}
-      <div>
-        <div className="mb-4 flex items-end justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-text-muted">Start here</p>
-            <h3 className="mt-1 text-lg font-semibold text-text-primary">快速开始</h3>
-          </div>
-          <span className="hidden text-xs text-text-muted sm:block">选择一个配置开始处理</span>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {templates.length > 0 ? (
-          // 显示用户租户的模板
-          templates.slice(0, 3).map((template, index) => (
-            <Card 
-              key={template.id}
-              className={`bg-gradient-to-br ${getTemplateGradient(index)} border-opacity-20`}
-            >
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 mb-2">
-                  {getTemplateIcon(template.code)}
-                  <h3 className="font-semibold text-text-primary">{template.name}</h3>
-                </div>
-                <p className="text-sm text-text-secondary mb-4">
-                  {template.description || getTemplateDescription(template.code)}
-                </p>
-                <Link to="/upload">
-                  <Button size="sm" variant="secondary">开始识别</Button>
-                </Link>
-              </CardContent>
-            </Card>
-          ))
-        ) : profileLoading ? (
-          // 加载中
-          <Card className="col-span-3 flex items-center justify-center py-12">
-            <Spinner />
-          </Card>
-        ) : (
-          // 默认卡片（未选择部门或无模板）
-          <>
-            <Card className="bg-gradient-to-br from-primary-900/50 to-primary-800/30 border-primary-500/20">
-              <CardContent className="pt-6">
-                <h3 className="font-semibold text-text-primary mb-2">检验报告识别</h3>
-                <p className="text-sm text-text-secondary mb-4">
-                  自动提取检测项目、结论等关键信息
-                </p>
-                <Link to="/upload">
-                  <Button size="sm" variant="secondary">开始识别</Button>
-                </Link>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-br from-accent-900/50 to-accent-800/30 border-accent-500/20">
-              <CardContent className="pt-6">
-                <h3 className="font-semibold text-text-primary mb-2">快递单识别</h3>
-                <p className="text-sm text-text-secondary mb-4">
-                  快速提取运单号、收发件人信息
-                </p>
-                <Link to="/upload">
-                  <Button size="sm" variant="secondary">开始识别</Button>
-                </Link>
-              </CardContent>
-            </Card>
-            <Card className="bg-gradient-to-br from-success-900/50 to-success-800/30 border-success-500/20">
-              <CardContent className="pt-6">
-                <h3 className="font-semibold text-text-primary mb-2">抽样单识别</h3>
-                <p className="text-sm text-text-secondary mb-4">
-                  自动识别抽样单位、产品信息
-                </p>
-                <Link to="/upload">
-                  <Button size="sm" variant="secondary">开始识别</Button>
-                </Link>
-              </CardContent>
-            </Card>
-          </>
-        )}
-        </div>
-      </div>
     </div>
   )
 }

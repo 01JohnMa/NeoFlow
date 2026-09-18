@@ -126,32 +126,12 @@ class DocumentWorkflow:
             document_id=document_id,
             document_type=configuration.get("code", ""),
             extraction_data=payload["extraction_data"],
-            ocr_text=payload["markdown"],
-            ocr_confidence=1.0,
             processing_time=processing_time,
             template_id=configuration.get("id"),
             template_name=configuration.get("name"),
         )
         return result
 
-    async def extract_with_prompt(
-        self,
-        prompt_template: str,
-    ) -> Dict[str, Any]:
-        """使用指定 Prompt 模板提取字段（底层方法）
-
-        Args:
-            prompt_template: Prompt 模板（已包含字段定义）
-
-        Returns:
-            提取的字段字典
-        """
-        try:
-            response_content = await self._llm_invoke_with_retry(prompt_template)
-            return parse_llm_json(response_content)
-        except Exception as e:
-            logger.error(f"字段提取失败: {e}")
-            return {"error": str(e)}
 
 
 # 单例工作流

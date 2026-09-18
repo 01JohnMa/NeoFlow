@@ -27,9 +27,6 @@ class SDKSessionStore:
         instruction: str | None = None,
         parse_mode: str = "pipeline",
         state: SDKSessionState = SDKSessionState.PARSING,
-        excel_template_file_name: str | None = None,
-        excel_template_path: str | None = None,
-        excel_placeholders=None,
         user_id: str,
     ) -> SDKSession:
         self.cleanup()
@@ -45,9 +42,6 @@ class SDKSessionStore:
             document_id=document_id,
             parse_job_id=parse_job_id,
             parse_mode=parse_mode,
-            excel_template_file_name=excel_template_file_name,
-            excel_template_path=excel_template_path,
-            excel_placeholders=excel_placeholders or [],
             user_id=user_id,
             state=state,
             created_at=now,

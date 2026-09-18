@@ -4,12 +4,16 @@ import { useUIStore } from '@/store/useStore'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { useRequireAuth } from '@/hooks/useAuth'
+import { useProfile } from '@/hooks/useProfile'
 import { PageLoader } from '@/components/ui/spinner'
 
 export function MainLayout() {
   const { sidebarOpen } = useUIStore()
   const { isLoading, isAuthenticated } = useRequireAuth()
   const location = useLocation()
+
+  // 全局加载 profile：侧边栏与管理员入口依赖角色信息
+  useProfile()
 
   // Playground（Parse 页）自带顶栏与浅色作用域，不使用全局 Header 与页面留白
   const isPlayground =

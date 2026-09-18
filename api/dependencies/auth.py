@@ -2,7 +2,6 @@
 """认证依赖注入 - FastAPI Depends 实现（支持多租户）"""
 
 import asyncio
-import secrets
 import time
 from typing import Optional, Tuple, Dict, Any
 from fastapi import Header, Depends
@@ -17,8 +16,6 @@ from config.settings import settings
 
 _PROFILE_CACHE_TTL = 60  # seconds
 _profile_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-QUALITY_CRM_TENANT_ID = "a0000000-0000-0000-0000-000000000001"
-CRM_SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 _JWKS_KEY_LIFESPAN = 86400  # PyJWKClient 内部公钥缓存时长；遇到未知 kid 会自动重新拉取
 _ASYMMETRIC_ALGORITHMS = ("ES256", "RS256")
@@ -203,28 +200,6 @@ async def get_current_user(
         logger.error(f"获取用户 profile 失败: user_id={user_id}, error={e}")
     
     return user_data
-
-
-async def get_crm_current_user(
-    authorization: Optional[str] = Header(None)
-) -> CurrentUser:
-    """
-    获取 CRM 调用身份。
-
-    优先识别固定 CRM_API_TOKEN；未命中时兼容普通登录 JWT，便于后台管理员测试。
-    """
-    token = _extract_bearer_token(authorization)
-    if settings.CRM_API_TOKEN and token and secrets.compare_digest(token, settings.CRM_API_TOKEN):
-        return CurrentUser(
-            user_id=CRM_SYSTEM_USER_ID,
-            token=token,
-            tenant_id=QUALITY_CRM_TENANT_ID,
-            tenant_code="quality",
-            tenant_name="质量管理中心",
-            role="tenant_admin",
-            display_name="CRM固定鉴权",
-        )
-    return await get_current_user(authorization)
 
 
 def invalidate_profile_cache(user_id: str) -> None:
