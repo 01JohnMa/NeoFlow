@@ -13,6 +13,8 @@ python-multipart==0.0.32
 pydantic==2.13.5
 pydantic-settings==2.15.0
 email-validator==2.2.0
+# Extract schema 契约：JSON Schema 子集校验（#32 / ADR-0009）
+jsonschema==4.26.0
 
 # ============ Supabase ============
 supabase==2.11.0
