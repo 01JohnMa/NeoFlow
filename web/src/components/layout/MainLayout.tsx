@@ -15,9 +15,11 @@ export function MainLayout() {
   // 全局加载 profile：侧边栏与管理员入口依赖角色信息
   useProfile()
 
-  // Playground（Parse 页）自带顶栏与浅色作用域，不使用全局 Header 与页面留白
+  // Playground（Parse / Extract 页）自带顶栏，不使用全局 Header 与页面留白
   const isPlayground =
-    location.pathname === '/parse' || location.pathname.startsWith('/parse?')
+    location.pathname === '/parse' ||
+    location.pathname.startsWith('/parse?') ||
+    location.pathname === '/extract'
 
   if (isLoading) {
     return <PageLoader />

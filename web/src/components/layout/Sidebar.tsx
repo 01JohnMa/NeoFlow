@@ -17,6 +17,7 @@ import Logo from '@/assets/neoflow-logo.png'
 
 const navigation = [
   { name: 'Parse', href: '/parse', icon: FileSearch },
+  { name: 'Extract', href: '/extract', icon: Sparkles },
 ]
 
 const workspaceNavigation = [
@@ -122,21 +123,6 @@ export function Sidebar() {
             </p>
           )}
           {navigation.map(renderLink)}
-
-          {/* Extract：下一轮上线，占位禁用 */}
-          <span
-            aria-disabled="true"
-            title={!sidebarOpen ? 'Extract（即将上线）' : undefined}
-            className="flex cursor-not-allowed items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-text-muted/60"
-          >
-            <Sparkles className="h-5 w-5 flex-shrink-0" />
-            {sidebarOpen && (
-              <span className="flex items-center gap-2">
-                Extract
-                <span className="rounded-full bg-bg-hover px-2 py-0.5 text-[10px] text-text-muted">即将上线</span>
-              </span>
-            )}
-          </span>
 
           <div className="my-2 border-t border-border-default/60" />
 

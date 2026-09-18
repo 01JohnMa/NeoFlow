@@ -14,6 +14,7 @@ import { Documents } from '@/pages/Documents'
 import { DocumentDetail } from '@/pages/DocumentDetail'
 import { ParseViewer } from '@/pages/ParseViewer'
 import { ParsePlayground } from '@/pages/ParsePlayground'
+import { ExtractPlayground } from '@/pages/ExtractPlayground'
 import { AdminConfig } from '@/pages/AdminConfig'
 
 // Create React Query client
@@ -45,6 +46,7 @@ function App() {
             <Route path="/documents" element={<Documents />} />
             <Route path="/documents/:id" element={<DocumentDetail />} />
             <Route path="/parse" element={<ParsePlayground />} />
+            <Route path="/extract" element={<ExtractPlayground />} />
             <Route path="/parse/viewer" element={<ParseViewer />} />
             <Route path="/admin" element={<AdminConfig />} />
           </Route>
