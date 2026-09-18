@@ -10,6 +10,7 @@ from services.parse_request_service import (
     build_request_fingerprint,
     compact_target_pages,
     normalize_document_ids,
+    normalize_parse_options,
     normalize_target_pages,
     resolve_parse_mode,
 )
@@ -56,6 +57,42 @@ class TestParseMode:
             resolve_parse_mode("agentic")
 
 
+class TestParseOptions:
+    def test_defaults_are_not_injected(self):
+        assert normalize_parse_options() == {}
+
+    def test_provided_options_are_kept(self):
+        assert normalize_parse_options(
+            language="en",
+            enable_formula=False,
+            enable_table=True,
+            remove_watermark=True,
+            watermark_keywords=["COPY", " COPY ", "样本", "样本", "  "],
+        ) == {
+            "language": "en",
+            "enable_formula": False,
+            "enable_table": True,
+            "remove_watermark": True,
+            "watermark_keywords": ["COPY", "样本"],
+        }
+
+    def test_blank_keyword_list_is_not_injected(self):
+        assert normalize_parse_options(watermark_keywords=["  ", ""]) == {}
+
+    def test_too_many_keywords_rejected(self):
+        with pytest.raises(ParseRequestError) as exc:
+            normalize_parse_options(watermark_keywords=[f"kw-{i}" for i in range(21)])
+        assert exc.value.reason == "too_many_watermark_keywords"
+
+    def test_language_is_trimmed(self):
+        assert normalize_parse_options(language="  ch  ") == {"language": "ch"}
+
+    def test_unsupported_language_rejected(self):
+        with pytest.raises(ParseRequestError) as exc:
+            normalize_parse_options(language="klingon")
+        assert exc.value.reason == "unsupported_language"
+
+
 class TestExecutionSpec:
     def test_spec_freezes_effective_params_and_selection(self):
         spec = build_execution_spec(parse_mode="vlm", target_pages=[1, 3, 4])
@@ -70,6 +107,31 @@ class TestExecutionSpec:
     def test_default_spec_has_no_page_ranges(self):
         spec = build_execution_spec(parse_mode="pipeline", target_pages=None)
         assert spec["effective_params"]["page_ranges"] is None
+
+    def test_options_override_defaults(self):
+        spec = build_execution_spec(
+            parse_mode="pipeline",
+            target_pages=None,
+            options={"language": "en", "enable_formula": False, "enable_table": False},
+        )
+        params = spec["effective_params"]
+        assert params["language"] == "en"
+        assert params["enable_formula"] is False
+        assert params["enable_table"] is False
+
+    def test_remove_watermark_defaults_off(self):
+        spec = build_execution_spec(parse_mode="pipeline", target_pages=None)
+        assert spec["effective_params"]["remove_watermark"] is False
+        assert spec["effective_params"]["watermark_keywords"] == []
+
+    def test_options_do_not_override_mode_or_pages(self):
+        spec = build_execution_spec(
+            parse_mode="vlm",
+            target_pages=[2],
+            options={"language": "en"},
+        )
+        assert spec["effective_params"]["model_version"] == "vlm"
+        assert spec["effective_params"]["page_ranges"] == "2"
 
 
 class TestFingerprint:
@@ -91,6 +153,33 @@ class TestFingerprint:
         )
         assert base != build_request_fingerprint(
             document_ids=["a"], requested_mode=None, target_pages=[1]
+        )
+
+    def test_fingerprint_distinguishes_options(self):
+        base = build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None
+        )
+        assert base == build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None, options=None
+        )
+        assert base == build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None, options={}
+        )
+        assert base != build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None,
+            options={"language": "en"},
+        )
+        assert base != build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None,
+            options={"enable_formula": False},
+        )
+        assert base != build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None,
+            options={"remove_watermark": True},
+        )
+        assert base != build_request_fingerprint(
+            document_ids=["a"], requested_mode=None, target_pages=None,
+            options={"watermark_keywords": ["COPY"]},
         )
 
     def test_fingerprint_does_not_depend_on_effective_defaults(self, monkeypatch):
@@ -159,6 +248,7 @@ class TestAdmitPayload:
             parse_mode=None,
             target_pages=[1, 2],
             idempotency_key="K1",
+            options={"language": "en", "enable_formula": False},
         )
 
         assert captured["name"] == "admit_parse_request"
@@ -168,6 +258,9 @@ class TestAdmitPayload:
         assert payload["p_idempotency_key"] == "K1"
         assert payload["p_policy_version"] == "policy-x"
         assert payload["p_spec"]["effective_params"]["model_version"] == "pipeline"
+        assert payload["p_spec"]["effective_params"]["language"] == "en"
+        assert payload["p_spec"]["effective_params"]["enable_formula"] is False
+        assert payload["p_spec"]["effective_params"]["enable_table"] is True
         assert payload["p_spec"]["input_selection"] == {"target_pages": [1, 2]}
         assert payload["p_max_files"] == settings.PARSE_MAX_FILES_PER_REQUEST
         assert result["status"] == "ok"

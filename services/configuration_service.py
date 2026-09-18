@@ -40,6 +40,8 @@ PARSE_DEFAULTS: Dict[str, Any] = {
     "language": "ch",
     "enable_formula": True,
     "enable_table": True,
+    "remove_watermark": False,
+    "watermark_keywords": [],
     "page_ranges": None,
     "extra_formats": [],
     "timeout_seconds": 900,

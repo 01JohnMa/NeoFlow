@@ -52,6 +52,34 @@ describe('parse service', () => {
     expect(apiMock.post).toHaveBeenCalledWith('/parse/jobs', { document_ids: ['doc-a'] }, { headers: undefined })
   })
 
+  it('透传高级解析参数', async () => {
+    apiMock.post.mockResolvedValue({
+      data: { success: true, data: { request_id: 'r', job_ids: ['j'], status: 'ok', reused: false, reuse_reason: null } },
+    })
+
+    await parseService.createJobs({
+      document_ids: ['doc-a'],
+      language: 'en',
+      enable_formula: false,
+      enable_table: true,
+      remove_watermark: true,
+      watermark_keywords: ['COPY', '样本'],
+    })
+
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/parse/jobs',
+      {
+        document_ids: ['doc-a'],
+        language: 'en',
+        enable_formula: false,
+        enable_table: true,
+        remove_watermark: true,
+        watermark_keywords: ['COPY', '样本'],
+      },
+      { headers: undefined },
+    )
+  })
+
   it('读取 Job 与按文档读取 Parse 结果', async () => {
     apiMock.get.mockResolvedValueOnce({ data: { job_id: 'job-1', status: 'processing' } })
     const job = await parseService.getJob('job-1')

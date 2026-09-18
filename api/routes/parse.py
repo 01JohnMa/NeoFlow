@@ -16,6 +16,7 @@ from api.exceptions import AuthorizationError
 from services.parse_request_service import (
     ParseRequestError,
     normalize_document_ids,
+    normalize_parse_options,
     normalize_target_pages,
     parse_request_service,
 )
@@ -34,6 +35,11 @@ class CreateParseRequestModel(BaseModel):
 
     document_ids: List[str] = Field(min_length=1)
     parse_mode: Optional[Literal["pipeline", "vlm"]] = None
+    language: Optional[str] = None
+    enable_formula: Optional[bool] = None
+    enable_table: Optional[bool] = None
+    remove_watermark: Optional[bool] = None
+    watermark_keywords: Optional[List[str]] = None
     page_ranges: Optional[ParsePageRangesModel] = None
 
 
@@ -72,6 +78,13 @@ async def create_parse_jobs(
         target_pages = normalize_target_pages(
             request.page_ranges.target_pages if request.page_ranges else None
         )
+        options = normalize_parse_options(
+            language=request.language,
+            enable_formula=request.enable_formula,
+            enable_table=request.enable_table,
+            remove_watermark=request.remove_watermark,
+            watermark_keywords=request.watermark_keywords,
+        )
     except ParseRequestError as exc:
         raise HTTPException(status_code=422, detail=exc.message)
 
@@ -83,6 +96,7 @@ async def create_parse_jobs(
         parse_mode=request.parse_mode,
         target_pages=target_pages,
         idempotency_key=key,
+        options=options,
     )
 
     status = result.get("status") or "invalid"

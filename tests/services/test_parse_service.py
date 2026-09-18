@@ -415,6 +415,101 @@ class TestParameterizedParseJob:
         assert mock_commit.await_args.kwargs["parse_data"]["markdown"] == "hello"
 
     @pytest.mark.asyncio
+    async def test_remove_watermark_filters_before_commit(self):
+        from services.parse_service import handle_parse_job
+
+        result = _parse_result()
+        result.pages[0].blocks.append(Block(
+            id="p1-b2", type="text", bbox=[0, 10, 10, 20], reading_order=2,
+            text="COPY", source="native-text",
+        ))
+        result.markdown = "hello\nCOPY"
+
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=result)
+        job = self._spec_job(effective_params={
+            "model_version": "vlm",
+            "backend": "mineru-api",
+            "remove_watermark": True,
+            "watermark_keywords": ["COPY"],
+        })
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job_if_owned", new_callable=AsyncMock) as mock_owned, \
+             patch("api.jobs.commit_parse_job", new_callable=AsyncMock) as mock_commit:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_owned.return_value = True
+            mock_commit.return_value = "completed"
+
+            returned = await handle_parse_job(job)
+
+        assert returned is not None
+        parse_data = mock_commit.await_args.kwargs["parse_data"]
+        assert parse_data["markdown"] == "hello"
+        assert [block["text"] for block in parse_data["pages"][0]["blocks"]] == ["hello"]
+        assert parse_data["engine"]["watermark_filter"]["mode"] == "keywords"
+        assert parse_data["engine"]["watermark_filter"]["removed_blocks"] == 1
+
+    @pytest.mark.asyncio
+    async def test_remove_watermark_without_keywords_auto_detects_repeats(self):
+        from services.parse_service import handle_parse_job
+
+        result = ParseResult(
+            pages=[
+                Page(page_no=1, width=100, height=200, blocks=[
+                    _parse_result().pages[0].blocks[0],
+                    Block(id="p1-b2", type="text", bbox=[0, 10, 10, 20], reading_order=2,
+                          text="COPY", source="native-text"),
+                ]),
+                Page(page_no=2, width=100, height=200, blocks=[
+                    Block(id="p2-b1", type="text", bbox=[0, 0, 10, 10], reading_order=1,
+                          text="COPY", source="native-text"),
+                ]),
+                Page(page_no=3, width=100, height=200, blocks=[
+                    Block(id="p3-b1", type="text", bbox=[0, 0, 10, 10], reading_order=1,
+                          text="copy", source="native-text"),
+                ]),
+            ],
+            markdown="hello\nCOPY",
+            engine={"name": "mineru"},
+        )
+        adapter = AsyncMock()
+        adapter.parse = AsyncMock(return_value=result)
+        job = self._spec_job(effective_params={
+            "model_version": "pipeline",
+            "backend": "mineru-api",
+            "remove_watermark": True,
+            "watermark_keywords": [],
+        })
+
+        with patch("services.parse_service.get_parser_adapter", return_value=adapter), \
+             patch("services.supabase_service.supabase_service") as mock_supabase, \
+             patch("api.jobs.update_job_if_owned", new_callable=AsyncMock) as mock_owned, \
+             patch("api.jobs.commit_parse_job", new_callable=AsyncMock) as mock_commit:
+            mock_supabase.get_document = AsyncMock(return_value=_document())
+            mock_owned.return_value = True
+            mock_commit.return_value = "completed"
+
+            returned = await handle_parse_job(job)
+
+        assert returned is not None
+        parse_data = mock_commit.await_args.kwargs["parse_data"]
+        assert parse_data["markdown"] == "hello"
+        remaining = [
+            block["text"]
+            for page in parse_data["pages"]
+            for block in page["blocks"]
+        ]
+        assert remaining == ["hello"]
+        assert parse_data["engine"]["watermark_filter"] == {
+            "mode": "auto",
+            "removed_blocks": 3,
+            "removed_lines": 1,
+            "auto_texts": ["copy"],
+        }
+
+    @pytest.mark.asyncio
     async def test_adapter_failure_commits_failed_without_product(self):
         from services.parse_service import handle_parse_job
 

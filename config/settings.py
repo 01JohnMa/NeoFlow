@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     PARSE_MAX_FILES_PER_REQUEST: int = 50
     PARSE_MAX_ACTIVE_JOBS_PER_TENANT: int = 30
     PARSE_MAX_TARGET_PAGES: int = 500
+    # 水印自动识别阈值：同文本在全文出现 >= 该次数即视为水印（未指定关键词时生效）
+    PARSE_WATERMARK_REPEAT_THRESHOLD: int = 3
 
     # ============ MinerU 解析（#8；key 由本地 .env 提供，不入库） ============
     MINERU_API_KEY: str = ""

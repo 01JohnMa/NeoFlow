@@ -13,6 +13,8 @@ from loguru import logger
 
 from config.settings import settings
 from services.configuration_service import PARSE_DEFAULTS
+from services.parse_postprocess import detect_repeated_texts, strip_watermark_content
+from services.parse_result import ParseResult
 from services.parser_adapter import get_parser_adapter
 from services.result_service import result_service
 
@@ -24,6 +26,24 @@ SUPPORTED_PARSE_MODES = ("pipeline", "vlm")
 def normalize_parse_mode(mode: Optional[str]) -> str:
     """解析模式只支持 pipeline / vlm，非法值回退快速解析。"""
     return mode if mode in SUPPORTED_PARSE_MODES else "pipeline"
+
+
+def apply_parse_postprocess(result: ParseResult, params: Dict[str, Any]) -> None:
+    """按冻结参数执行解析产物后处理（当前仅水印过滤）。
+
+    - 指定了关键词：按关键词过滤；
+    - 未指定：自动识别全文重复出现的文本（阈值由策略配置）。
+    """
+    if not params.get("remove_watermark"):
+        return
+    keywords = params.get("watermark_keywords") or []
+    if keywords:
+        removed = strip_watermark_content(result, keywords=keywords)
+    else:
+        auto_texts = detect_repeated_texts(result, settings.PARSE_WATERMARK_REPEAT_THRESHOLD)
+        removed = strip_watermark_content(result, auto_texts=auto_texts)
+    if removed:
+        logger.info(f"水印过滤移除 {removed} 个块: engine={result.engine.get('name')}")
 
 
 def build_parse_params(
@@ -274,6 +294,8 @@ async def _handle_parameterized_parse_job(
         if not heartbeat.done():
             await heartbeat
 
+    apply_parse_postprocess(result, params)
+
     if not await update_job_if_owned(job_id, worker_id, attempts, "saving"):
         # 解析期间认领失效：不得提交产物
         return None
@@ -333,6 +355,8 @@ async def handle_parse_job(
             )
             await update_job(job_id, "failed", error=str(exc))
             return None
+
+        apply_parse_postprocess(result, params)
 
         await update_job(job_id, "saving")
         stored = await result_service.record_parse_result(

@@ -6,6 +6,11 @@ export type ParseMode = 'pipeline' | 'vlm'
 export interface CreateParseJobsPayload {
   document_ids: string[]
   parse_mode?: ParseMode
+  language?: string
+  enable_formula?: boolean
+  enable_table?: boolean
+  remove_watermark?: boolean
+  watermark_keywords?: string[]
   page_ranges?: { target_pages?: string }
 }
 

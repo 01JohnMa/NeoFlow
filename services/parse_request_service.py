@@ -24,6 +24,26 @@ PARSE_CAPABILITY = "parse"
 PARSE_SPEC_VERSION = "1"
 SUPPORTED_PARSE_MODES = ("pipeline", "vlm")
 DEFAULT_PARSE_MODE = "pipeline"
+MAX_WATERMARK_KEYWORDS = 20
+# MinerU language 取值参考（托管 API v4）：独立语言包 + 语系包
+SUPPORTED_LANGUAGES = (
+    "ch",
+    "ch_server",
+    "en",
+    "japan",
+    "korean",
+    "chinese_cht",
+    "ta",
+    "te",
+    "ka",
+    "el",
+    "th",
+    "latin",
+    "arabic",
+    "cyrillic",
+    "east_slavic",
+    "devanagari",
+)
 
 _RANGE_PATTERN = re.compile(r"^(\d+)(?:-(\d+))?$")
 _COMPACT_RANGES_PATTERN = re.compile(r"^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
@@ -102,13 +122,54 @@ def resolve_parse_mode(parse_mode: Optional[str]) -> str:
     return parse_mode
 
 
+def normalize_parse_options(
+    *,
+    language: Optional[str] = None,
+    enable_formula: Optional[bool] = None,
+    enable_table: Optional[bool] = None,
+    remove_watermark: Optional[bool] = None,
+    watermark_keywords: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """规范化可选的 MinerU 解析参数；只保留显式提供的项（缺省不注入）。"""
+    options: Dict[str, Any] = {}
+    if language is not None:
+        value = language.strip()
+        if value not in SUPPORTED_LANGUAGES:
+            raise ParseRequestError("unsupported_language", f"不支持的解析语言: {language}")
+        options["language"] = value
+    if enable_formula is not None:
+        options["enable_formula"] = bool(enable_formula)
+    if enable_table is not None:
+        options["enable_table"] = bool(enable_table)
+    if remove_watermark is not None:
+        options["remove_watermark"] = bool(remove_watermark)
+    if watermark_keywords:
+        cleaned: List[str] = []
+        for keyword in watermark_keywords:
+            value = str(keyword).strip()
+            if value and value not in cleaned:
+                cleaned.append(value)
+        if len(cleaned) > MAX_WATERMARK_KEYWORDS:
+            raise ParseRequestError(
+                "too_many_watermark_keywords",
+                f"水印关键词最多 {MAX_WATERMARK_KEYWORDS} 个",
+            )
+        if cleaned:
+            options["watermark_keywords"] = cleaned
+    return options
+
+
 def build_execution_spec(
     *,
     parse_mode: str,
     target_pages: Optional[List[int]],
+    options: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """冻结本次执行的完整规格：默认值在此解析，worker 只读不再回退默认。"""
     effective_params = dict(PARSE_DEFAULTS)
+    for key, value in (options or {}).items():
+        if value is not None:
+            effective_params[key] = value
     effective_params["model_version"] = parse_mode
     effective_params["page_ranges"] = compact_target_pages(target_pages)
 
@@ -126,20 +187,24 @@ def build_request_fingerprint(
     document_ids: List[str],
     requested_mode: Optional[str],
     target_pages: Optional[List[int]],
+    options: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """请求指纹：规范化原始意图；不含默认值等随部署变化的内容。"""
-    canonical = json.dumps(
-        {
-            "capability": PARSE_CAPABILITY,
-            "spec_version": PARSE_SPEC_VERSION,
-            "document_ids": sorted(set(document_ids)),
-            "parse_mode": requested_mode,
-            "target_pages": target_pages,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+    """请求指纹：规范化原始意图；不含默认值等随部署变化的内容。
+
+    可选参数仅在调用方显式提供时纳入，未提供时不改变指纹形态，
+    保证与旧提交的幂等重放兼容。
+    """
+    intent: Dict[str, Any] = {
+        "capability": PARSE_CAPABILITY,
+        "spec_version": PARSE_SPEC_VERSION,
+        "document_ids": sorted(set(document_ids)),
+        "parse_mode": requested_mode,
+        "target_pages": target_pages,
+    }
+    for key, value in (options or {}).items():
+        if value is not None:
+            intent[key] = value
+    canonical = json.dumps(intent, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -177,14 +242,16 @@ class ParseRequestService(SupabaseClientMixin):
         parse_mode: Optional[str],
         target_pages: Optional[List[int]],
         idempotency_key: Optional[str],
+        options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """调用 admit_parse_request；返回 {status, request_id, job_ids, reason}。"""
         mode = resolve_parse_mode(parse_mode)
-        spec = build_execution_spec(parse_mode=mode, target_pages=target_pages)
+        spec = build_execution_spec(parse_mode=mode, target_pages=target_pages, options=options)
         fingerprint = build_request_fingerprint(
             document_ids=document_ids,
             requested_mode=parse_mode,
             target_pages=target_pages,
+            options=options,
         )
 
         payload = {

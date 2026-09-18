@@ -6,6 +6,7 @@ import { parseService, type ParseMode } from '@/services/parse'
 import { useProfile } from '@/hooks/useProfile'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { PageContent } from '@/components/parse-playground/PageContent'
 import { pagePlainText, resultFullText } from '@/lib/parseContent'
@@ -13,6 +14,7 @@ import { cn, formatDate } from '@/lib/utils'
 import type { ParsePage, ParseResult, ProcessingJob } from '@/types'
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -39,6 +41,26 @@ interface FileChunk {
 
 const MODE_STORAGE_KEY = 'nf.parse.mode'
 
+const DEFAULT_LANGUAGE = 'ch'
+const LANGUAGE_OPTIONS = [
+  { value: 'ch', label: '中文 / 英文（默认）' },
+  { value: 'ch_server', label: '中文（含繁体、手写体）' },
+  { value: 'en', label: '英文' },
+  { value: 'chinese_cht', label: '繁体中文为主' },
+  { value: 'japan', label: '日文为主' },
+  { value: 'korean', label: '韩文' },
+  { value: 'latin', label: '拉丁语系' },
+  { value: 'arabic', label: '阿拉伯语系' },
+  { value: 'cyrillic', label: '西里尔语系' },
+  { value: 'east_slavic', label: '东斯拉夫语系' },
+  { value: 'devanagari', label: '天城文语系' },
+  { value: 'el', label: '希腊文' },
+  { value: 'th', label: '泰文' },
+  { value: 'ta', label: '泰米尔文' },
+  { value: 'te', label: '泰卢固文' },
+  { value: 'ka', label: '卡纳达文' },
+] as const
+
 function jobStatusToChunk(status: string): ChunkStatus {
   if (status === 'completed') return 'done'
   if (status === 'failed') return 'failed'
@@ -61,6 +83,13 @@ function chunkStatusLabel(status: ChunkStatus): string {
     case 'failed':
       return '解析失败'
   }
+}
+
+function parseWatermarkKeywords(raw: string): string[] {
+  return raw
+    .split(/[,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
@@ -286,6 +315,12 @@ export function ParsePlayground() {
     return stored === 'vlm' ? 'vlm' : 'pipeline'
   })
   const [targetPages, setTargetPages] = useState('')
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE)
+  const [enableFormula, setEnableFormula] = useState(true)
+  const [enableTable, setEnableTable] = useState(true)
+  const [removeWatermark, setRemoveWatermark] = useState(false)
+  const [watermarkKeywords, setWatermarkKeywords] = useState('')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'build' | 'results'>('build')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -525,9 +560,15 @@ export function ParsePlayground() {
         .map((chunk) => chunk.documentId!)
         .slice()
         .sort()
+      const keywords = parseWatermarkKeywords(watermarkKeywords)
       const response = await parseService.createJobs({
         document_ids: documentIds,
         parse_mode: mode,
+        language,
+        enable_formula: enableFormula,
+        enable_table: enableTable,
+        remove_watermark: removeWatermark,
+        watermark_keywords: removeWatermark && keywords.length ? keywords : undefined,
         page_ranges: targetPages.trim() ? { target_pages: targetPages.trim() } : undefined,
       })
       const jobByDocument = new Map(documentIds.map((id, index) => [id, response.job_ids[index]]))
@@ -773,6 +814,98 @@ export function ParsePlayground() {
                   onChange={(event) => setTargetPages(event.target.value)}
                 />
                 <p className="mt-1 text-xs text-text-muted">整批文件使用同一范围；解析范围会记录在任务上</p>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  aria-expanded={advancedOpen}
+                  aria-controls="parse-advanced-options"
+                  onClick={() => setAdvancedOpen((open) => !open)}
+                  className="flex w-full items-center justify-between text-sm font-semibold text-text-primary"
+                >
+                  高级选项
+                  <ChevronDown
+                    className={cn(
+                      'h-4 w-4 text-text-muted transition-transform',
+                      advancedOpen && 'rotate-180',
+                    )}
+                  />
+                </button>
+                {advancedOpen && (
+                  <div
+                    id="parse-advanced-options"
+                    className="mt-2 space-y-3 rounded-lg border border-border-default p-3"
+                  >
+                    <div>
+                      <label htmlFor="parse-language" className="text-xs text-text-secondary">
+                        文档语言
+                      </label>
+                      <Select
+                        id="parse-language"
+                        className="mt-1"
+                        value={language}
+                        onChange={(event) => setLanguage(event.target.value)}
+                      >
+                        {LANGUAGE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="parse-enable-formula"
+                        checked={enableFormula}
+                        onChange={(event) => setEnableFormula(event.target.checked)}
+                        className="rounded"
+                      />
+                      <label htmlFor="parse-enable-formula" className="text-xs text-text-secondary">
+                        公式识别
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="parse-enable-table"
+                        checked={enableTable}
+                        onChange={(event) => setEnableTable(event.target.checked)}
+                        className="rounded"
+                      />
+                      <label htmlFor="parse-enable-table" className="text-xs text-text-secondary">
+                        表格识别
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="parse-remove-watermark"
+                        checked={removeWatermark}
+                        onChange={(event) => setRemoveWatermark(event.target.checked)}
+                        className="rounded"
+                      />
+                      <label htmlFor="parse-remove-watermark" className="text-xs text-text-secondary">
+                        去除水印
+                      </label>
+                    </div>
+                    {removeWatermark && (
+                      <div className="pl-5">
+                        <Input
+                          id="parse-watermark-keywords"
+                          className="h-8 text-xs"
+                          placeholder="水印关键词（可选，逗号分隔）"
+                          value={watermarkKeywords}
+                          onChange={(event) => setWatermarkKeywords(event.target.value)}
+                        />
+                        <p className="mt-1 text-[11px] text-text-muted">
+                          留空则自动识别全文中重复出现的文本（≥3 次）
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {runError && (
