@@ -187,20 +187,22 @@ class TestDefaultHandlers:
 
 class TestExtractHandler:
     @pytest.mark.asyncio
-    async def test_extract_handler_fails_closed(self):
-        """Extract 执行能力未上线：handler 标记 Job 失败并返回 None。"""
+    async def test_extract_handler_delegates_to_extract_service(self):
+        """Extract handler 委托给 services.extract_service（#32 v3.1）。"""
         from services.job_runner import handle_extract_job
 
-        with patch("api.jobs.update_job", new_callable=AsyncMock) as mock_update:
+        job = _job()
+        revision = {"id": REVISION_ID}
+        configuration = {"type": "extract"}
+
+        with patch(
+            "services.extract_service.handle_extract_job",
+            new_callable=AsyncMock,
+            return_value={"report_no": "WT-1"},
+        ) as mock_handle:
             result = await handle_extract_job(
-                job=_job(),
-                revision={"id": REVISION_ID},
-                configuration={"type": "extract"},
+                job=job, revision=revision, configuration=configuration
             )
 
-        assert result is None
-        mock_update.assert_awaited_once_with(
-            "job-1",
-            "failed",
-            error="Extract 执行能力未上线（Extract 轮实现）",
-        )
+        assert result == {"report_no": "WT-1"}
+        mock_handle.assert_awaited_once_with(job, revision, configuration)

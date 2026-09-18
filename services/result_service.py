@@ -35,20 +35,35 @@ class ResultService(SupabaseClientMixin):
         *,
         tenant_id: str,
         document_id: Optional[str],
-        data: Dict[str, Any],
+        data: Any,
         sample_key: str = DEFAULT_SAMPLE_KEY,
         job_id: Optional[str] = None,
         config_revision_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """构建一条 Result 记录（不含 id/时间戳，由数据库生成）。"""
+        """构建一条 Result 记录（不含 id/时间戳，由数据库生成）。
+
+        data 原样保存（对象或对象数组），调用方保证已通过校验。
+        """
+        if data is None:
+            raise ValueError("Result data 不得为空")
         return {
             "tenant_id": tenant_id,
             "job_id": job_id,
             "document_id": document_id,
             "config_revision_id": config_revision_id,
             "sample_key": sample_key,
-            "data": data or {},
+            "data": data,
         }
+
+    async def get_result(self, result_id: str) -> Optional[Dict[str, Any]]:
+        """按 ID 获取 Result；数据库错误向上抛出（不得伪装成“不存在”）。"""
+        result = await self._run_sync(
+            lambda: self._get_client().table(RESULTS_TABLE).select("*")
+            .eq("id", result_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
 
     async def create_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """追加一条 Result。"""

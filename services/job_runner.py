@@ -44,15 +44,10 @@ async def handle_extract_job(
     revision: Optional[Dict[str, Any]] = None,
     configuration: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """Extract 执行能力在 2.0 清场后下线，执行契约由 Extract 轮重建。
+    """extract handler：委托给 services.extract_service（#32 v3.1 / ADR-0009）。"""
+    from services.extract_service import handle_extract_job as _handle_extract_job
 
-    保留注册仅为维持配置创建/发布的 handler 校验；收到任务时明确失败。
-    """
-    from api.jobs import update_job
-
-    job_id = str(job.get("job_id"))
-    await update_job(job_id, "failed", error="Extract 执行能力未上线（Extract 轮实现）")
-    return None
+    return await _handle_extract_job(job, revision, configuration)
 
 
 async def _handle_parse_result_capability(

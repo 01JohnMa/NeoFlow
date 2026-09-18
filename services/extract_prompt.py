@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 
 TARGET_GUIDANCE = {
     "per_doc": "从整份文档中抽取 1 个实例，直接输出该 JSON 对象（不要数组、不要包装）。",
-    "per_page": "按页抽取：每页一个实例，输出 JSON 数组，顺序与页面顺序一致。",
-    "per_table_row": "按表格数据行抽取：每行一个实例，输出 JSON 数组，顺序与源行顺序一致。",
+    "per_page": "这是文档的一页：仅从该页抽取 1 个实例，直接输出该 JSON 对象（不要数组、不要包装）。",
+    "per_table_row": "这是表格的一批数据行：逐行抽取实例，输出 JSON 数组，顺序与行顺序一致。",
 }
 
 RULES = """你是 NeoFlow 的结构化抽取器。只依据下方原文抽取，遵守：

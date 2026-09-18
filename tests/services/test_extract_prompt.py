@@ -37,7 +37,7 @@ class TestBuildMessages:
 
     def test_target_guidance_varies(self):
         page = build_extract_messages(schema=SCHEMA, target="per_page", source_text="x")
-        assert "JSON 数组" in page[1]["content"]
+        assert "仅从该页" in page[1]["content"]
 
     def test_invalid_target_rejected(self):
         with pytest.raises(ValueError):

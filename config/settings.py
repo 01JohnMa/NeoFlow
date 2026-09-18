@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     # 水印自动识别阈值：同文本在全文出现 >= 该次数即视为水印（未指定关键词时生效）
     PARSE_WATERMARK_REPEAT_THRESHOLD: int = 3
 
+    # ============ Extract 执行（#32 v3.1；ADR-0009） ============
+    EXTRACT_MAX_ATTEMPTS: int = 2
+    EXTRACT_MAX_REQUESTS_PER_JOB: int = 200
+    EXTRACT_TIMEOUT_SECONDS: int = 900
+    LLM_CONTEXT_WINDOW_TOKENS: int = 128000
+    LLM_MAX_OUTPUT_TOKENS: int = 8000
+
     # ============ MinerU 解析（#8；key 由本地 .env 提供，不入库） ============
     MINERU_API_KEY: str = ""
     MINERU_BASE_URL: str = "https://mineru.net"

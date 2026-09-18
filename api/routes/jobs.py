@@ -7,7 +7,7 @@ Job 固定创建时选定的 Configuration Revision；执行统一由 JobRunner 
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api.dependencies.auth import get_current_user, CurrentUser
@@ -117,6 +117,7 @@ async def list_jobs_endpoint(
     document_id: Optional[str] = None,
     configuration_revision_id: Optional[str] = None,
     created_by: Optional[str] = None,
+    capability: Optional[str] = Query(None, description="按执行能力过滤，如 extract"),
     limit: int = 50,
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -125,6 +126,7 @@ async def list_jobs_endpoint(
     - super_admin：可跨租户，可选 tenant 过滤
     - 租户管理员：本租户全部
     - 普通成员：强制只看自己发起的 Job
+    - capability=extract：草稿快照 + Extract 配置的 Revision 均命中
     """
     if user.is_super_admin():
         tenant_id = None
@@ -137,14 +139,35 @@ async def list_jobs_endpoint(
         if not user.is_tenant_admin():
             effective_created_by = user.user_id
 
+    capability_revision_ids: Optional[List[str]] = None
+    if capability == "extract":
+        capability_revision_ids = await _extract_revision_ids(tenant_id)
+
     jobs = await list_jobs(
         tenant_id=tenant_id,
         document_id=document_id,
         configuration_revision_id=configuration_revision_id,
         created_by=effective_created_by,
+        capability=capability,
+        capability_revision_ids=capability_revision_ids,
         limit=max(1, min(limit, 100)),
     )
     return {"success": True, "data": jobs}
+
+
+async def _extract_revision_ids(tenant_id: Optional[str]) -> List[str]:
+    """收集租户下全部 Extract Configuration 的 Revision（含历史修订）。"""
+    configurations = await configuration_service.list_configurations(
+        tenant_id=tenant_id,
+        type="extract",
+    )
+    revision_ids: List[str] = []
+    for configuration in configurations:
+        revisions = await configuration_service.list_revisions(configuration["id"])
+        revision_ids.extend(
+            str(revision["id"]) for revision in revisions if revision.get("id")
+        )
+    return revision_ids
 
 
 @router.get("/jobs/{job_id}")
