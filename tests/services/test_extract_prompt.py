@@ -75,7 +75,12 @@ class TestStrictJsonLoads:
             strict_json_loads('{"a": 1, "a": 2}')
 
     def test_rejects_nan_and_infinity(self):
-        for content in ('{"a": NaN}', '{"a": Infinity}', '{"a": -Infinity}'):
+        for content in (
+            '{"a": NaN}',
+            '{"a": Infinity}',
+            '{"a": -Infinity}',
+            '{"a": 1e400}',
+        ):
             with pytest.raises(StrictJSONError):
                 strict_json_loads(content)
 

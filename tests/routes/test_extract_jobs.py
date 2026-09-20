@@ -149,6 +149,42 @@ class TestCreateExtractJobs:
         assert "target_not_supported" in resp.json()["error"]
         mod.create_job.assert_not_awaited()
 
+    def test_explicit_null_schema_rejected_instead_of_legacy_fallback(self, client, monkeypatch):
+        bad = _draft_config(
+            definition={
+                "target": "per_doc",
+                "data_schema": None,
+                "fields": [
+                    {"field_key": "report_no", "field_label": "报告编号", "field_type": "text"}
+                ],
+            }
+        )
+        mod = _patch(monkeypatch, bad)
+
+        resp = client.post(
+            "/api/extract/jobs",
+            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+        )
+
+        assert resp.status_code == 422
+        assert "schema_invalid" in resp.json()["error"]
+        mod.create_job.assert_not_awaited()
+
+    def test_omitted_target_is_not_frozen_as_explicit_null(self, client, monkeypatch):
+        mod = _patch(
+            monkeypatch,
+            _draft_config(definition={"data_schema": SCHEMA, "fields": []}),
+        )
+
+        resp = client.post(
+            "/api/extract/jobs",
+            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+        )
+
+        assert resp.status_code == 201
+        params = mod.create_job.await_args.kwargs["execution_spec"]["effective_params"]
+        assert "target" not in params
+
     def test_per_table_row_rejected_with_422(self, client, monkeypatch):
         mod = _patch(
             monkeypatch,

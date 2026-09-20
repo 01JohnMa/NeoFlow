@@ -1,5 +1,5 @@
 #!/bin/sh
-# 隔离数据库门禁（PR2b）：在临时 PostgreSQL 15 实例上验证迁移 024 与并发不变量。
+# 隔离数据库门禁（PR2b）：在临时 PostgreSQL 15 实例上验证迁移与并发不变量。
 #
 # 用法：
 #   sh tests/db/run.sh
@@ -11,7 +11,7 @@
 # - 不连接任何现有数据库；不读取 .env。
 #
 # 覆盖：
-#   1. 迁移 024 在最小前置 schema 上的完整执行（表/索引/RPC/权限）
+#   1. 迁移 024、026、027、028 在最小前置 schema 上的完整执行
 #   2. 受理：幂等重放、键冲突、活动复用（含别名映射）、重叠冲突、
 #      权限隐藏、文件数/活动 Job 上限
 #   3. 交卷：认领令牌校验、幂等确认、规范产物唯一索引、失败终态
@@ -81,8 +81,16 @@ psql_gate -f "$ROOT/tests/db/bootstrap_min.sql" >/dev/null
 echo "[gate] 应用迁移 024"
 psql_gate -f "$ROOT/supabase/migrations/024_parse_requests_and_admission.sql" >/dev/null
 
+echo "[gate] 应用 Extract 迁移 026-028"
+psql_gate -f "$ROOT/supabase/migrations/026_extract_execution.sql" >/dev/null
+psql_gate -f "$ROOT/supabase/migrations/027_extract_commit_hardening.sql" >/dev/null
+psql_gate -f "$ROOT/supabase/migrations/028_extract_engine_required.sql" >/dev/null
+
 echo "[gate] 受理/交卷/删除冒烟"
 psql_gate -f "$ROOT/tests/db/test_parse_admission.sql"
+
+echo "[gate] Extract 预算/交卷契约冒烟"
+psql_gate -f "$ROOT/tests/db/test_extract_commit.sql"
 
 echo "[gate] 并发认领不变量"
 psql_gate -f "$ROOT/tests/db/setup_claim_jobs.sql"

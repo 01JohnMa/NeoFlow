@@ -55,6 +55,18 @@ class TestDocumentParseResult:
 
         assert response.status_code == 404
 
+    def test_result_upstream_502_is_processing_error_not_authentication(self, client):
+        with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run, \
+             patch("api.routes.documents.query.result_service") as mock_result_service:
+            mock_run.return_value = SimpleNamespace(data=[_document()])
+            mock_result_service.get_document_parse_result = AsyncMock(
+                side_effect=RuntimeError("502 Bad Gateway")
+            )
+
+            response = client.get(f"/api/documents/{DOCUMENT_ID}/parse-result")
+
+        assert response.status_code == 500
+
     def test_other_users_document_hidden(self, client):
         with patch("api.routes.documents.query._run_supabase", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = SimpleNamespace(

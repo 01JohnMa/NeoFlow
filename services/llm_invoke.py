@@ -49,15 +49,20 @@ def _extract_text(content: Any) -> tuple[str, bool]:
         return content, False
     if isinstance(content, list):
         parts: List[str] = []
+        content_invalid = False
         for block in content:
-            if isinstance(block, dict):
+            if isinstance(block, dict) and block.get("type") in {"text", "output_text"}:
                 text = block.get("text")
                 if isinstance(text, str):
                     parts.append(text)
+                else:
+                    content_invalid = True
             elif isinstance(block, str):
                 parts.append(block)
+            else:
+                content_invalid = True
         joined = "".join(parts)
-        return joined, not joined.strip()
+        return joined, content_invalid or not joined.strip()
     return "", True
 
 
@@ -90,10 +95,16 @@ async def invoke_llm(
     metadata = getattr(response, "response_metadata", None) or {}
     extra = getattr(response, "additional_kwargs", None) or {}
     usage = metadata.get("token_usage") or getattr(response, "usage_metadata", None) or {}
-    content, content_invalid = _extract_text(getattr(response, "content", None))
+    raw_content = getattr(response, "content", None)
+    content, content_invalid = _extract_text(raw_content)
     finish_reason = metadata.get("finish_reason")
     model = metadata.get("model_name") or metadata.get("model")
     refusal = extra.get("refusal") or metadata.get("refusal")
+    if isinstance(raw_content, list) and not refusal:
+        for block in raw_content:
+            if isinstance(block, dict) and block.get("type") == "refusal":
+                refusal = block.get("refusal") or "模型拒绝返回内容"
+                break
 
     return LLMResult(
         content=content,

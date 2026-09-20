@@ -14,9 +14,17 @@
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Dict, List, Optional, Tuple
 
+import httpx
 from loguru import logger
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from api.jobs import (
     bind_extract_parse_result,
@@ -71,15 +79,16 @@ def build_execution_spec(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]
     显式提供的非法值（如 data_schema=[]、target=""）必须被下游校验拒绝，
     不能被快照层悄悄替换成默认值。
     """
-    definition = definition or {}
+    definition = definition if isinstance(definition, dict) else {}
+    effective_params = {
+        key: definition[key]
+        for key in ("target", "data_schema", "fields")
+        if key in definition
+    }
     return {
         "capability": EXTRACT_CAPABILITY,
         "spec_version": SPEC_VERSION,
-        "effective_params": {
-            "target": definition.get("target"),
-            "data_schema": definition.get("data_schema"),
-            "fields": definition.get("fields") or [],
-        },
+        "effective_params": effective_params,
     }
 
 
@@ -104,15 +113,13 @@ def resolve_extract_spec(
 
 
 def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
-    target = params.get("target")
-    if target is None:
-        target = "per_doc"
+    target = params["target"] if "target" in params else "per_doc"
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ExtractFailure("target_not_supported", str(target))
 
     schema_source = "data_schema"
-    if "data_schema" in params and params.get("data_schema") is not None:
-        schema = params.get("data_schema")
+    if "data_schema" in params:
+        schema = params["data_schema"]
         if not isinstance(schema, dict):
             raise ExtractFailure("schema_invalid", "data_schema 必须是 JSON 对象")
     else:
@@ -257,7 +264,15 @@ async def _heartbeat_until(
             return
         except asyncio.TimeoutError:
             pass
-        if not await renew_job_claim(job_id, worker_id, attempts):
+        try:
+            renewed = await renew_job_claim(job_id, worker_id, attempts)
+        except Exception as exc:
+            logger.opt(exception=exc).error(
+                f"Extract 心跳续租异常，认领状态不可信: job_id={job_id}"
+            )
+            lost.set()
+            return
+        if not renewed:
             logger.warning(f"Extract 心跳续租失败，认领已失效: job_id={job_id}")
             lost.set()
             return
@@ -387,6 +402,59 @@ def _ensure_unit_fits(messages: List[Dict[str, str]], unit_id: str) -> None:
         raise ExtractFailure("context_exceeded", unit_id)
 
 
+def _ensure_execution_window(
+    lost: asyncio.Event,
+    deadline: Optional[datetime],
+    unit_id: str,
+) -> Optional[float]:
+    if lost.is_set():
+        raise ExtractFailure("claim_lost")
+    remaining = _remaining_seconds(deadline)
+    if remaining is not None and remaining <= 0:
+        raise ExtractFailure("deadline_exceeded", unit_id)
+    return remaining
+
+
+async def _await_with_deadline(
+    awaitable: Awaitable[Any], deadline: Optional[datetime]
+) -> Any:
+    remaining = _remaining_seconds(deadline)
+    if remaining is None:
+        return await awaitable
+    if remaining <= 0:
+        close = getattr(awaitable, "close", None)
+        if close is not None:
+            close()
+        raise asyncio.TimeoutError
+    return await asyncio.wait_for(awaitable, timeout=remaining)
+
+
+def _is_retryable_transport_error(error: Exception) -> bool:
+    """只把网络/超时/限流/服务端错误纳入本单元的请求预算重试。"""
+    if isinstance(
+        error,
+        (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            APIConnectionError,
+            APITimeoutError,
+            RateLimitError,
+            InternalServerError,
+        ),
+    ):
+        return True
+    if isinstance(error, APIStatusError):
+        status_code = error.status_code
+        return status_code in {408, 429} or (
+            isinstance(status_code, int) and status_code >= 500
+        )
+    status_code = getattr(error, "status_code", None)
+    return status_code in {408, 429} or (
+        isinstance(status_code, int) and status_code >= 500
+    )
+
+
 async def _run_unit(
     *,
     unit: Dict[str, Any],
@@ -413,16 +481,17 @@ async def _run_unit(
     protocol_retry_used = False
 
     while True:
-        if lost.is_set():
-            raise ExtractFailure("claim_lost")
-
-        remaining = _remaining_seconds(deadline)
-        if remaining is not None and remaining <= 0:
-            raise ExtractFailure("deadline_exceeded", unit["id"])
+        remaining = _ensure_execution_window(lost, deadline, unit["id"])
         if budget_left <= 0:
             raise ExtractFailure("unit_failed", unit["id"])
 
-        consumed = await consume_extract_request(job_id, worker_id, attempts)
+        try:
+            consumed = await _await_with_deadline(
+                consume_extract_request(job_id, worker_id, attempts), deadline
+            )
+        except asyncio.TimeoutError as exc:
+            raise ExtractFailure("deadline_exceeded", unit["id"]) from exc
+        remaining = _ensure_execution_window(lost, deadline, unit["id"])
         if not consumed.get("allowed"):
             raise ExtractFailure(
                 f"budget_{consumed.get('reason') or 'denied'}", unit["id"]
@@ -432,20 +501,28 @@ async def _run_unit(
         usage["requests"] = int(used) if isinstance(used, int) else usage["requests"] + 1
 
         try:
-            result: LLMResult = await invoke_llm(
-                messages,
-                json_mode=True,
-                max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
-                timeout=_remaining_seconds(deadline),
+            result: LLMResult = await _await_with_deadline(
+                invoke_llm(
+                    messages,
+                    json_mode=True,
+                    max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
+                    timeout=remaining,
+                ),
+                deadline,
             )
+        except asyncio.TimeoutError as exc:
+            raise ExtractFailure("deadline_exceeded", unit["id"]) from exc
         except Exception as exc:
-            if repair_sent or budget_left <= 0:
+            if (
+                not _is_retryable_transport_error(exc)
+                or repair_sent
+                or budget_left <= 0
+            ):
                 raise ExtractFailure("request_failed", f"{unit['id']}: {exc}") from exc
             logger.warning(f"Extract 请求异常，额度内重试: unit={unit['id']} error={exc}")
             continue
 
-        if lost.is_set():
-            raise ExtractFailure("claim_lost")
+        _ensure_execution_window(lost, deadline, unit["id"])
 
         calls.append(
             {
@@ -457,10 +534,6 @@ async def _run_unit(
                 "request_id": result.request_id,
             }
         )
-
-        remaining = _remaining_seconds(deadline)
-        if remaining is not None and remaining <= 0:
-            raise ExtractFailure("deadline_exceeded", unit["id"])
 
         if result.refusal:
             raise ExtractFailure("response_refused", unit["id"])
@@ -563,6 +636,9 @@ def build_engine(
             "calls": calls[:ENGINE_MAX_CALLS],
         },
     }
+    if requests is not None and requests != len(calls):
+        engine["usage"]["input_tokens"] = None
+        engine["usage"]["output_tokens"] = None
     serialized = json.dumps(engine, ensure_ascii=False).encode("utf-8")
     while len(serialized) > ENGINE_MAX_BYTES and engine["usage"]["calls"]:
         engine["usage"]["calls"] = engine["usage"]["calls"][:-1]
@@ -577,6 +653,31 @@ async def _fetch_extract_result(job_id: str) -> Optional[Dict[str, Any]]:
         limit=1,
     )
     return rows[0] if rows else None
+
+
+async def _submit_success(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    payload: Any,
+    engine: Dict[str, Any],
+) -> Optional[str]:
+    return await commit_extract_job(
+        job_id,
+        worker_id,
+        attempts,
+        "ok",
+        extract_data=payload,
+        engine=engine,
+    )
+
+
+async def _read_confirmed_success(job_id: str) -> Optional[Any]:
+    fresh = await get_job(job_id)
+    existing = await _fetch_extract_result(job_id)
+    if fresh and fresh.get("status") == "completed" and existing:
+        return existing.get("data")
+    return None
 
 
 async def _commit_failure(
@@ -601,31 +702,22 @@ async def _commit_success(
 ) -> Any:
     """成功交卷；响应丢失时回读确认或重试同一交卷，绝不盲目标失败。"""
     try:
-        status = await commit_extract_job(
-            job_id,
-            worker_id,
-            attempts,
-            "ok",
-            extract_data=payload,
-            engine=engine,
-        )
+        status = await _submit_success(job_id, worker_id, attempts, payload, engine)
     except Exception as exc:
         logger.opt(exception=exc).warning(
             f"Extract 交卷响应不确定，回读确认: job_id={job_id}"
         )
-        fresh = await get_job(job_id)
-        existing = await _fetch_extract_result(job_id)
-        if fresh and fresh.get("status") == "completed" and existing:
-            return existing.get("data")
         try:
-            status = await commit_extract_job(
-                job_id,
-                worker_id,
-                attempts,
-                "ok",
-                extract_data=payload,
-                engine=engine,
+            confirmed = await _read_confirmed_success(job_id)
+        except Exception as confirm_exc:
+            logger.opt(exception=confirm_exc).error(
+                f"Extract 交卷确认读取失败，保持不确定状态: job_id={job_id}"
             )
+            return None
+        if confirmed is not None:
+            return confirmed
+        try:
+            status = await _submit_success(job_id, worker_id, attempts, payload, engine)
         except Exception as retry_exc:
             logger.opt(exception=retry_exc).error(
                 f"Extract 交卷仍不确定，交由重领兜底: job_id={job_id}"
@@ -635,7 +727,13 @@ async def _commit_success(
     if status == "completed":
         return payload
     if status == "already_committed":
-        existing = await _fetch_extract_result(job_id)
+        try:
+            existing = await _fetch_extract_result(job_id)
+        except Exception as confirm_exc:
+            logger.opt(exception=confirm_exc).error(
+                f"Extract 已交卷但 Result 回读失败，保持不确定状态: job_id={job_id}"
+            )
+            return None
         return existing.get("data") if existing else None
     if status in ("stale", "stale_token", "not_found"):
         logger.warning(f"Extract 交卷未生效: job_id={job_id} status={status}")
@@ -733,9 +831,13 @@ async def handle_extract_job(
             if final_errors:
                 raise ExtractFailure("final_validation_failed", str(final_errors[0]))
             engine = build_engine(spec, calls, attempts, usage["requests"])
-            if lost.is_set():
-                logger.warning(f"Extract 认领已失效，跳过交卷: job_id={job_id}")
-                return None
+            try:
+                _ensure_execution_window(lost, deadline, "commit")
+            except ExtractFailure:
+                logger.warning(
+                    f"Extract 认领或 deadline 已失效，跳过交卷: job_id={job_id}"
+                )
+                raise
             result = await _commit_success(job_id, worker_id, attempts, payload, engine)
         finally:
             stop.set()
