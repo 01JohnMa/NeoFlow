@@ -1,0 +1,442 @@
+{
+  "scene": "PRJ_BASIC_INFO",
+  "trialType": "药物",
+  "registrationType": "注册类",
+  "fields": [
+    {
+      "key": "registration_type",
+      "label": "注册类型",
+      "type": "enum",
+      "options": [
+        "注册类",
+        "非注册类"
+      ],
+      "value": "注册类",
+      "confidence": 0.98,
+      "source": "立项递交信函"
+    },
+    {
+      "key": "trial_type",
+      "label": "试验类型",
+      "type": "enum",
+      "options": [
+        "药物",
+        "器械",
+        "体外诊断试剂",
+        "其它"
+      ],
+      "value": "药物",
+      "confidence": 0.99,
+      "source": "方案封面"
+    },
+    {
+      "key": "trial_phase",
+      "label": "试验分期",
+      "type": "enum",
+      "options": [
+        "I期",
+        "II期",
+        "III期",
+        "IV期",
+        "BE",
+        "其他"
+      ],
+      "value": "I期",
+      "confidence": 0.93,
+      "source": "方案摘要"
+    },
+    {
+      "key": "blinding_method",
+      "label": "盲法",
+      "type": "enum",
+      "options": [
+        "开放",
+        "单盲",
+        "双盲",
+        "双盲双模拟"
+      ],
+      "value": "开放",
+      "confidence": 0.88,
+      "source": "方案摘要"
+    },
+    {
+      "key": "planned_start_date",
+      "label": "计划开始日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "value": "2026-09-01",
+      "confidence": 0.82,
+      "source": "方案摘要 计划实施时间"
+    },
+    {
+      "key": "planned_end_date",
+      "label": "计划结束日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "value": "2027-08-31",
+      "confidence": 0.8,
+      "source": "方案摘要 计划实施时间"
+    },
+    {
+      "key": "planned_subject_count",
+      "label": "试验总设计例数",
+      "type": "number",
+      "hint": "总设计例数纯数字",
+      "value": 48,
+      "confidence": 0.9,
+      "source": "统计学章节"
+    },
+    {
+      "key": "project_name",
+      "label": "项目名称",
+      "type": "string",
+      "hint": "研究项目完整名称，通常在方案封面",
+      "value": "SHR-1701治疗晚期实体瘤I期临床研究",
+      "confidence": 0.96,
+      "source": "封面标题"
+    },
+    {
+      "key": "project_short_name",
+      "label": "项目简称",
+      "type": "string",
+      "hint": "项目简称",
+      "value": "SHR-1701 I期研究",
+      "confidence": 0.75,
+      "source": "封面"
+    },
+    {
+      "key": "registration_no",
+      "label": "登记号",
+      "type": "string",
+      "hint": "临床研究登记号，如 ChiCTR/CTR 开头",
+      "value": "CTR20261234",
+      "confidence": 0.95,
+      "source": "中国临床试验注册中心回执页"
+    },
+    {
+      "key": "registration_date",
+      "label": "登记日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "value": "2026-07-20",
+      "confidence": 0.94,
+      "source": "中国临床试验注册中心回执页"
+    },
+    {
+      "key": "project_scope",
+      "label": "项目范围",
+      "type": "string",
+      "hint": "如「国内多中心」",
+      "value": "国内多中心",
+      "confidence": 0.91,
+      "source": "方案摘要"
+    },
+    {
+      "key": "nmpa_info",
+      "label": "NMPA信息",
+      "type": "string",
+      "hint": "药监部门批件号/通知书号及状态",
+      "value": "2026L00518（药物临床试验批准通知书）",
+      "confidence": 0.87,
+      "source": "NMPA批件页"
+    },
+    {
+      "key": "indication",
+      "label": "适应症",
+      "type": "string",
+      "value": "晚期实体瘤",
+      "confidence": 0.95,
+      "source": "方案摘要"
+    },
+    {
+      "key": "multisite_flag",
+      "label": "是否多中心",
+      "type": "enum",
+      "options": [
+        "是",
+        "否"
+      ],
+      "hint": "是/否",
+      "value": "是",
+      "confidence": 0.9,
+      "source": "方案摘要"
+    },
+    {
+      "key": "human_resource_review",
+      "label": "人类遗传资源审核备案情况",
+      "type": "string",
+      "hint": "人类遗传资源采集/出境等备案情况描述",
+      "value": "本项目不涉及人类遗传资源采集与出境",
+      "confidence": 0.72,
+      "source": "伦理递交材料"
+    },
+    {
+      "key": "insurance_flag",
+      "label": "是否购买保险",
+      "type": "enum",
+      "options": [
+        "是",
+        "否"
+      ],
+      "hint": "是/否",
+      "value": "是",
+      "confidence": 0.85,
+      "source": "伦理递交材料"
+    },
+    {
+      "key": "project_owner",
+      "label": "项目负责人",
+      "type": "string",
+      "hint": "项目负责人姓名",
+      "value": "王芳",
+      "confidence": 0.86,
+      "source": "递交信函签名页"
+    },
+    {
+      "key": "project_owner_phone",
+      "label": "项目负责人手机号",
+      "type": "string",
+      "hint": "手机号",
+      "value": "13800138000",
+      "confidence": 0.83,
+      "source": "递交信函签名页"
+    },
+    {
+      "key": "project_owner_email",
+      "label": "项目负责人邮箱",
+      "type": "string",
+      "hint": "邮箱",
+      "value": "wangfang@hrpharma.com",
+      "confidence": 0.84,
+      "source": "递交信函签名页"
+    },
+    {
+      "key": "protocol_no",
+      "label": "试验方案号",
+      "type": "string",
+      "hint": "试验方案编号",
+      "value": "HR-SHR-2026-003",
+      "confidence": 0.95,
+      "source": "方案首页"
+    },
+    {
+      "key": "protocol_name",
+      "label": "方案名称",
+      "type": "string",
+      "value": "SHR-1701治疗晚期实体瘤I期临床研究",
+      "confidence": 0.92,
+      "source": "方案首页"
+    },
+    {
+      "key": "protocol_version",
+      "label": "方案版本号",
+      "type": "string",
+      "hint": "如 V2.1",
+      "value": "V2.1",
+      "confidence": 0.94,
+      "source": "方案首页"
+    },
+    {
+      "key": "study_objective",
+      "label": "试验目的",
+      "type": "string",
+      "hint": "试验目的章节摘录",
+      "value": "评价SHR-1701在晚期实体瘤受试者中的安全性、耐受性和药代动力学特征，并初步探索抗肿瘤有效性。",
+      "confidence": 0.9,
+      "source": "§1.2 试验目的"
+    },
+    {
+      "key": "study_design",
+      "label": "试验设计",
+      "type": "string",
+      "hint": "试验设计类型描述",
+      "value": "单臂、开放、剂量递增的I期临床试验",
+      "confidence": 0.89,
+      "source": "§2.1 试验设计"
+    },
+    {
+      "key": "sample_size",
+      "label": "样本量",
+      "type": "string",
+      "hint": "可含单位，如「48例」",
+      "value": "48例",
+      "confidence": 0.88,
+      "source": "统计学章节"
+    },
+    {
+      "key": "inclusion_criteria",
+      "label": "入选标准",
+      "type": "string",
+      "hint": "入选标准逐条",
+      "value": "①年龄18~75周岁；②经组织学或细胞学确诊的晚期实体瘤，标准治疗失败或无标准治疗；③ECOG评分0~1分；④主要器官功能满足方案要求；⑤自愿签署知情同意书。",
+      "confidence": 0.86,
+      "source": "§4.1 入选标准"
+    },
+    {
+      "key": "exclusion_criteria",
+      "label": "排除标准",
+      "type": "string",
+      "hint": "排除标准逐条",
+      "value": "①妊娠或哺乳期妇女；②严重肝肾功能不全；③活动性脑转移未经治疗；④既往对同类药物严重过敏；⑤研究者判断不适合入组的其它情况。",
+      "confidence": 0.85,
+      "source": "§4.2 排除标准"
+    },
+    {
+      "key": "study_group",
+      "label": "试验分组",
+      "type": "string",
+      "hint": "分组与用药安排",
+      "value": "所有受试者按剂量递增方案依次入组，不设平行对照组。",
+      "confidence": 0.8,
+      "source": "§5 试验分组"
+    },
+    {
+      "key": "primary_endpoint",
+      "label": "主要终点指标",
+      "type": "string",
+      "hint": "主要终点指标",
+      "value": "剂量限制性毒性（DLT）、不良事件发生率及推荐II期剂量（RP2D）。",
+      "confidence": 0.87,
+      "source": "§6.1 主要终点"
+    },
+    {
+      "key": "secondary_endpoint",
+      "label": "次要终点指标",
+      "type": "string",
+      "hint": "次要终点指标",
+      "value": "客观缓解率（ORR）、无进展生存期（PFS）及药代动力学参数。",
+      "confidence": 0.85,
+      "source": "§6.2 次要终点"
+    },
+    {
+      "key": "drug_cn_name",
+      "label": "研究产品中文名称",
+      "type": "string",
+      "hint": "研究产品中文名",
+      "value": "注射用SHR-1701",
+      "confidence": 0.93,
+      "source": "试验产品章节"
+    },
+    {
+      "key": "drug_en_name",
+      "label": "研究产品英文名称",
+      "type": "string",
+      "hint": "研究产品英文名",
+      "value": "SHR-1701 for Injection",
+      "confidence": 0.9,
+      "source": "试验产品章节"
+    },
+    {
+      "key": "drug_registration_class",
+      "label": "药物注册分类",
+      "type": "enum",
+      "options": [
+        "化学药",
+        "治疗用生物制品",
+        "预防用生物制品",
+        "中药",
+        "天然药物"
+      ],
+      "value": "治疗用生物制品",
+      "confidence": 0.84,
+      "source": "NMPA批件页"
+    },
+    {
+      "key": "dosage_form",
+      "label": "剂型",
+      "type": "enum",
+      "options": [
+        "片剂",
+        "胶囊剂",
+        "颗粒剂",
+        "注射液",
+        "冻干粉针剂",
+        "口服溶液",
+        "乳膏剂",
+        "贴剂",
+        "其他"
+      ],
+      "value": "冻干粉针剂",
+      "confidence": 0.86,
+      "source": "试验产品章节"
+    },
+    {
+      "key": "specification_model",
+      "label": "规格/型号",
+      "type": "string",
+      "hint": "规格或型号",
+      "value": "100mg/瓶",
+      "confidence": 0.88,
+      "source": "试验产品章节"
+    },
+    {
+      "key": "combination_products",
+      "label": "联合产品",
+      "type": "product[]",
+      "itemFields": [
+        {
+          "key": "name",
+          "label": "产品名称",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "name_en",
+          "label": "产品英文名",
+          "type": "string"
+        },
+        {
+          "key": "specification_model",
+          "label": "规格/型号",
+          "type": "string"
+        },
+        {
+          "key": "dosage_form",
+          "label": "剂型",
+          "type": "enum",
+          "options": [
+            "片剂",
+            "胶囊剂",
+            "颗粒剂",
+            "注射液",
+            "冻干粉针剂",
+            "口服溶液",
+            "乳膏剂",
+            "贴剂",
+            "其他"
+          ]
+        },
+        {
+          "key": "drug_registration_class",
+          "label": "药物注册分类",
+          "type": "enum",
+          "options": [
+            "化学药",
+            "治疗用生物制品",
+            "预防用生物制品",
+            "中药",
+            "天然药物"
+          ]
+        }
+      ],
+      "hint": "每行一个产品对象，子字段见 itemFields；多个联合用药各占一行",
+      "value": [
+        {
+          "name": "帕博利珠单抗注射液",
+          "name_en": "Pembrolizumab Injection",
+          "specification_model": "100mg/4mL",
+          "dosage_form": "注射液",
+          "drug_registration_class": "治疗用生物制品"
+        },
+        {
+          "name": "注射用紫杉醇（白蛋白结合型）",
+          "name_en": "Paclitaxel for Injection (Albumin Bound)",
+          "specification_model": "100mg/瓶",
+          "dosage_form": "冻干粉针剂"
+        }
+      ],
+      "confidence": 0.85,
+      "source": "§5.2 联合用药"
+    }
+  ]
+}

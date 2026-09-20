@@ -1,0 +1,369 @@
+{
+  "scene": "PRJ_BASIC_INFO",
+  "trialType": "药物",
+  "registrationType": "注册类",
+  "fields": [
+    {
+      "key": "registration_type",
+      "label": "注册类型",
+      "type": "enum",
+      "options": [
+        "注册类",
+        "非注册类"
+      ]
+    },
+    {
+      "key": "trial_type",
+      "label": "试验类型",
+      "type": "enum",
+      "options": [
+        "药物",
+        "器械",
+        "体外诊断试剂",
+        "其它"
+      ]
+    },
+    {
+      "key": "trial_phase",
+      "label": "试验分期",
+      "type": "enum",
+      "options": [
+        "I期",
+        "II期",
+        "III期",
+        "IV期",
+        "BE",
+        "其他"
+      ]
+    },
+    {
+      "key": "blinding_method",
+      "label": "盲法",
+      "type": "enum",
+      "options": [
+        "开放",
+        "单盲",
+        "双盲",
+        "双盲双模拟"
+      ]
+    },
+    {
+      "key": "planned_start_date",
+      "label": "计划开始日期",
+      "type": "date",
+      "format": "yyyy-MM-dd"
+    },
+    {
+      "key": "planned_end_date",
+      "label": "计划结束日期",
+      "type": "date",
+      "format": "yyyy-MM-dd"
+    },
+    {
+      "key": "planned_subject_count",
+      "label": "试验总设计例数",
+      "type": "number",
+      "hint": "总设计例数纯数字"
+    },
+    {
+      "key": "project_name",
+      "label": "项目名称",
+      "type": "string",
+      "hint": "研究项目完整名称，通常在方案封面"
+    },
+    {
+      "key": "project_short_name",
+      "label": "项目简称",
+      "type": "string",
+      "hint": "项目简称"
+    },
+    {
+      "key": "registration_no",
+      "label": "登记号",
+      "type": "string",
+      "hint": "临床研究登记号，如 ChiCTR/CTR 开头"
+    },
+    {
+      "key": "registration_date",
+      "label": "登记日期",
+      "type": "date",
+      "format": "yyyy-MM-dd"
+    },
+    {
+      "key": "project_scope",
+      "label": "项目范围",
+      "type": "string",
+      "hint": "如「国内多中心」"
+    },
+    {
+      "key": "nmpa_info",
+      "label": "NMPA信息",
+      "type": "string",
+      "hint": "药监部门批件号/通知书号及状态"
+    },
+    {
+      "key": "indication",
+      "label": "适应症",
+      "type": "string"
+    },
+    {
+      "key": "multisite_flag",
+      "label": "是否多中心",
+      "type": "enum",
+      "options": [
+        "是",
+        "否"
+      ],
+      "hint": "是/否"
+    },
+    {
+      "key": "human_resource_review",
+      "label": "人类遗传资源审核备案情况",
+      "type": "string",
+      "hint": "人类遗传资源采集/出境等备案情况描述"
+    },
+    {
+      "key": "insurance_flag",
+      "label": "是否购买保险",
+      "type": "enum",
+      "options": [
+        "是",
+        "否"
+      ],
+      "hint": "是/否"
+    },
+    {
+      "key": "project_owner",
+      "label": "项目负责人",
+      "type": "string",
+      "hint": "项目负责人姓名"
+    },
+    {
+      "key": "project_owner_phone",
+      "label": "项目负责人手机号",
+      "type": "string",
+      "hint": "手机号"
+    },
+    {
+      "key": "project_owner_email",
+      "label": "项目负责人邮箱",
+      "type": "string",
+      "hint": "邮箱"
+    },
+    {
+      "key": "protocol_no",
+      "label": "试验方案号",
+      "type": "string",
+      "hint": "试验方案编号"
+    },
+    {
+      "key": "protocol_name",
+      "label": "方案名称",
+      "type": "string"
+    },
+    {
+      "key": "protocol_version",
+      "label": "方案版本号",
+      "type": "string",
+      "hint": "如 V2.1"
+    },
+    {
+      "key": "study_objective",
+      "label": "试验目的",
+      "type": "string",
+      "hint": "试验目的章节摘录"
+    },
+    {
+      "key": "study_design",
+      "label": "试验设计",
+      "type": "string",
+      "hint": "试验设计类型描述"
+    },
+    {
+      "key": "sample_size",
+      "label": "样本量",
+      "type": "string",
+      "hint": "可含单位，如「48例」"
+    },
+    {
+      "key": "inclusion_criteria",
+      "label": "入选标准",
+      "type": "string",
+      "hint": "入选标准逐条"
+    },
+    {
+      "key": "exclusion_criteria",
+      "label": "排除标准",
+      "type": "string",
+      "hint": "排除标准逐条"
+    },
+    {
+      "key": "study_group",
+      "label": "试验分组",
+      "type": "string",
+      "hint": "分组与用药安排"
+    },
+    {
+      "key": "primary_endpoint",
+      "label": "主要终点指标",
+      "type": "string",
+      "hint": "主要终点指标"
+    },
+    {
+      "key": "secondary_endpoint",
+      "label": "次要终点指标",
+      "type": "string",
+      "hint": "次要终点指标"
+    },
+    {
+      "key": "drug_cn_name",
+      "label": "研究产品中文名称",
+      "type": "string",
+      "hint": "研究产品中文名"
+    },
+    {
+      "key": "drug_en_name",
+      "label": "研究产品英文名称",
+      "type": "string",
+      "hint": "研究产品英文名"
+    },
+    {
+      "key": "drug_registration_class",
+      "label": "药物注册分类",
+      "type": "enum",
+      "options": [
+        "化学药",
+        "治疗用生物制品",
+        "预防用生物制品",
+        "中药",
+        "天然药物"
+      ]
+    },
+    {
+      "key": "dosage_form",
+      "label": "剂型",
+      "type": "enum",
+      "options": [
+        "片剂",
+        "胶囊剂",
+        "颗粒剂",
+        "注射液",
+        "冻干粉针剂",
+        "口服溶液",
+        "乳膏剂",
+        "贴剂",
+        "其他"
+      ]
+    },
+    {
+      "key": "specification_model",
+      "label": "规格/型号",
+      "type": "string",
+      "hint": "规格或型号"
+    },
+    {
+      "key": "combination_products",
+      "label": "联合产品",
+      "type": "product[]",
+      "itemFields": [
+        {
+          "key": "name",
+          "label": "产品名称",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "name_en",
+          "label": "产品英文名",
+          "type": "string"
+        },
+        {
+          "key": "specification_model",
+          "label": "规格/型号",
+          "type": "string"
+        },
+        {
+          "key": "dosage_form",
+          "label": "剂型",
+          "type": "enum",
+          "options": [
+            "片剂",
+            "胶囊剂",
+            "颗粒剂",
+            "注射液",
+            "冻干粉针剂",
+            "口服溶液",
+            "乳膏剂",
+            "贴剂",
+            "其他"
+          ]
+        },
+        {
+          "key": "drug_registration_class",
+          "label": "药物注册分类",
+          "type": "enum",
+          "options": [
+            "化学药",
+            "治疗用生物制品",
+            "预防用生物制品",
+            "中药",
+            "天然药物"
+          ]
+        }
+      ],
+      "hint": "每行一个产品对象，子字段见 itemFields；多个联合用药各占一行"
+    },
+    {
+      "key": "control_products",
+      "label": "对照产品",
+      "type": "product[]",
+      "itemFields": [
+        {
+          "key": "name",
+          "label": "产品名称",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "name_en",
+          "label": "产品英文名",
+          "type": "string"
+        },
+        {
+          "key": "specification_model",
+          "label": "规格/型号",
+          "type": "string"
+        },
+        {
+          "key": "dosage_form",
+          "label": "剂型",
+          "type": "enum",
+          "options": [
+            "片剂",
+            "胶囊剂",
+            "颗粒剂",
+            "注射液",
+            "冻干粉针剂",
+            "口服溶液",
+            "乳膏剂",
+            "贴剂",
+            "其他"
+          ]
+        },
+        {
+          "key": "drug_registration_class",
+          "label": "药物注册分类",
+          "type": "enum",
+          "options": [
+            "化学药",
+            "治疗用生物制品",
+            "预防用生物制品",
+            "中药",
+            "天然药物"
+          ]
+        }
+      ],
+      "hint": "每行一个产品对象，子字段见 itemFields；多个对照产品各占一行"
+    }
+  ]
+}

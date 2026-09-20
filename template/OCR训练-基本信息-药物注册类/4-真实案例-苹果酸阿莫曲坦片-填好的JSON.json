@@ -1,0 +1,351 @@
+{
+  "scene": "PRJ_BASIC_INFO",
+  "trialType": "药物",
+  "registrationType": "注册类",
+  "fields": [
+    {
+      "key": "registration_type",
+      "label": "注册类型",
+      "type": "enum",
+      "options": [
+        "注册类",
+        "非注册类"
+      ],
+      "value": "注册类",
+      "confidence": 0.95,
+      "source": "方案摘要 临床试验类型（注册临床研究）"
+    },
+    {
+      "key": "trial_type",
+      "label": "试验类型",
+      "type": "enum",
+      "options": [
+        "药物",
+        "器械",
+        "体外诊断试剂",
+        "其它"
+      ],
+      "value": "药物",
+      "confidence": 0.97,
+      "source": "方案封面 临床试验批件（药物临床试验批件号2014L00847）"
+    },
+    {
+      "key": "blinding_method",
+      "label": "盲法",
+      "type": "enum",
+      "options": [
+        "开放",
+        "单盲",
+        "双盲",
+        "双盲双模拟"
+      ],
+      "value": "双盲",
+      "confidence": 0.95,
+      "source": "§3.4 设盲水平（本次试验使用双盲技术）"
+    },
+    {
+      "key": "planned_start_date",
+      "label": "计划开始日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "value": "2014-11-01",
+      "confidence": 0.68,
+      "source": "方案摘要 计划研究周期（招募自2014.11起，月粒度归一为月初）"
+    },
+    {
+      "key": "planned_end_date",
+      "label": "计划结束日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "value": "2015-04-30",
+      "confidence": 0.66,
+      "source": "方案摘要 计划研究周期（招募至2015.4止，月粒度归一为月末）"
+    },
+    {
+      "key": "planned_subject_count",
+      "label": "试验总设计例数",
+      "type": "number",
+      "hint": "总设计例数纯数字",
+      "value": 240,
+      "confidence": 0.97,
+      "source": "§5 样本量（两组共需入组受试者240例）"
+    },
+    {
+      "key": "project_name",
+      "label": "项目名称",
+      "type": "string",
+      "hint": "研究项目完整名称，通常在方案封面",
+      "value": "评价苹果酸阿莫曲坦片用于偏头痛发作急性治疗的有效性和安全性的随机、双盲、安慰剂平行对照、多中心临床研究",
+      "confidence": 0.97,
+      "source": "封面标题"
+    },
+    {
+      "key": "project_scope",
+      "label": "项目范围",
+      "type": "string",
+      "hint": "如「国内多中心」",
+      "value": "国内多中心",
+      "confidence": 0.78,
+      "source": "§3.1 试验设计（多中心）及§22.2 中心列表（8家均为国内医院）"
+    },
+    {
+      "key": "nmpa_info",
+      "label": "NMPA信息",
+      "type": "string",
+      "hint": "药监部门批件号/通知书号及状态",
+      "value": "2014L00847（国家食品药品监督管理局药物临床试验批件）",
+      "confidence": 0.96,
+      "source": "封面/§1.6 立项依据"
+    },
+    {
+      "key": "indication",
+      "label": "适应症",
+      "type": "string",
+      "value": "有或无先兆偏头痛发作的急性治疗",
+      "confidence": 0.97,
+      "source": "方案摘要 适应症"
+    },
+    {
+      "key": "multisite_flag",
+      "label": "是否多中心",
+      "type": "enum",
+      "options": [
+        "是",
+        "否"
+      ],
+      "hint": "是/否",
+      "value": "是",
+      "confidence": 0.97,
+      "source": "方案摘要（8个研究中心）"
+    },
+    {
+      "key": "project_owner",
+      "label": "项目负责人",
+      "type": "string",
+      "hint": "项目负责人姓名",
+      "value": "于生元",
+      "confidence": 0.82,
+      "source": "封面 临床试验负责人/方案摘要 主要研究者"
+    },
+    {
+      "key": "project_owner_phone",
+      "label": "项目负责人手机号",
+      "type": "string",
+      "hint": "手机号",
+      "value": "13501171068",
+      "confidence": 0.75,
+      "source": "§22.3 联系方式表（01中心 于生元）"
+    },
+    {
+      "key": "protocol_no",
+      "label": "试验方案号",
+      "type": "string",
+      "hint": "试验方案编号",
+      "value": "CTS1248",
+      "confidence": 0.98,
+      "source": "封面 方案编号"
+    },
+    {
+      "key": "protocol_name",
+      "label": "方案名称",
+      "type": "string",
+      "value": "评价苹果酸阿莫曲坦片用于偏头痛发作急性治疗的有效性和安全性的随机、双盲、安慰剂平行对照、多中心临床研究",
+      "confidence": 0.95,
+      "source": "方案摘要 方案标题"
+    },
+    {
+      "key": "protocol_version",
+      "label": "方案版本号",
+      "type": "string",
+      "hint": "如 V2.1",
+      "value": "V1.0",
+      "confidence": 0.95,
+      "source": "封面 方案版本号（第1.0版）/摘要 版本号和日期"
+    },
+    {
+      "key": "study_objective",
+      "label": "试验目的",
+      "type": "string",
+      "hint": "试验目的章节摘录",
+      "value": "以安慰剂为对照，评价扬子江药业集团四川海蓉药业有限公司生产的苹果酸阿莫曲坦片用于偏头痛发作急性治疗的有效性和安全性。",
+      "confidence": 0.95,
+      "source": "§2 试验目的"
+    },
+    {
+      "key": "study_design",
+      "label": "试验设计",
+      "type": "string",
+      "hint": "试验设计类型描述",
+      "value": "多中心、随机、双盲、安慰剂平行对照试验设计",
+      "confidence": 0.95,
+      "source": "方案摘要 试验设计/§3.1"
+    },
+    {
+      "key": "sample_size",
+      "label": "样本量",
+      "type": "string",
+      "hint": "可含单位，如「48例」",
+      "value": "240例（试验组和对照组各120例）",
+      "confidence": 0.95,
+      "source": "方案摘要 病例总数/§5 样本量"
+    },
+    {
+      "key": "inclusion_criteria",
+      "label": "入选标准",
+      "type": "string",
+      "hint": "入选标准逐条",
+      "value": "①自愿签署知情同意书的患者；②年龄≥18周岁且≤65周岁的患者，性别不限；③符合ICHD-Ⅲ(β版)有先兆偏头痛或无先兆偏头痛的诊断标准的患者；④患者偏头痛病史≥1年；⑤入组前3月内患者偏头痛每月发生频率1-6次；⑥患者应当至少有48小时的偏头痛发作间期；⑦患者能够理解并按照要求填写头痛日记卡。",
+      "confidence": 0.93,
+      "source": "§4.2 入选标准"
+    },
+    {
+      "key": "exclusion_criteria",
+      "label": "排除标准",
+      "type": "string",
+      "hint": "排除标准逐条",
+      "value": "①已知对曲坦类药物过敏或对芬必得过敏的患者或过敏体质的患者；②诊断为偏瘫性偏头痛或脑干先兆偏头痛的患者；③患者偏头痛发生频率大于6次/月；④既往有心肌梗塞或中风的病史的患者；⑤伴有缺血性心脏病（心绞痛、心肌缺血等）或符合冠状动脉血管痉挛症状或检查结果（包括普氏变异型心绞痛）的患者；⑥短暂性脑缺血发作的患者；⑦伴有外周血管疾病（包括但不限于局部缺血性肠疾病）的患者；⑧高血压经治疗后仍控制不佳（收缩压≥140mmHg、舒张压≥90mmHg）的患者；⑨甲状腺功能异常的患者；⑩活动期消化道溃疡患者；⑪入组前1月内使用过偏头痛预防性治疗药物的患者；⑫严重肝肾功能不全者（ALT、AST＞2倍ULN，或血清肌酐＞1倍ULN）；⑬患者有严重的精神疾病史者；⑭酒精依赖或药物滥用史者；⑮妊娠、哺乳期妇女，未采取有效避孕措施的育龄妇女；⑯3个月内参加过其他药物临床试验的患者；⑰除上述情况以外，研究者判断不适合参加此项临床试验的患者。",
+      "confidence": 0.92,
+      "source": "§4.3 排除标准"
+    },
+    {
+      "key": "study_group",
+      "label": "试验分组",
+      "type": "string",
+      "hint": "分组与用药安排",
+      "value": "试验组：苹果酸阿莫曲坦片组；对照组：安慰剂组。受试者以1:1的比例分层区组随机分配，每组120例；头痛发作时口服研究药物或安慰剂1片，仅针对2次偏头痛急性发作进行治疗和观察。",
+      "confidence": 0.9,
+      "source": "方案摘要 试验分组及治疗方案/§3.3 随机分组"
+    },
+    {
+      "key": "primary_endpoint",
+      "label": "主要终点指标",
+      "type": "string",
+      "hint": "主要终点指标",
+      "value": "首次用药后2小时无头痛患者的比例。",
+      "confidence": 0.96,
+      "source": "§9.1.1 主要疗效评价指标"
+    },
+    {
+      "key": "secondary_endpoint",
+      "label": "次要终点指标",
+      "type": "string",
+      "hint": "次要终点指标",
+      "value": "①第1次和第2次偏头痛发作治疗后头痛消失患者比例；②第1次和第2次偏头痛发作治疗后的复发率；③第1次和第2次偏头痛发作用药后0.5小时、1小时、1.5小时无头痛患者的比例；④第1次和第2次偏头痛发作用药后0.5小时、1小时、1.5小时和2小时的头痛缓解率；⑤用药后0.5小时、1小时、1.5小时和2小时发生的偏头痛相关症状（恶心、呕吐、畏光、畏声）和发生次数；⑥第2次偏头痛发作用药后2小时无头痛患者的比例；⑦第1次和第2次偏头痛发作时的急救药物使用情况。",
+      "confidence": 0.92,
+      "source": "§9.1.2 次要疗效评价指标"
+    },
+    {
+      "key": "drug_cn_name",
+      "label": "研究产品中文名称",
+      "type": "string",
+      "hint": "研究产品中文名",
+      "value": "苹果酸阿莫曲坦片",
+      "confidence": 0.98,
+      "source": "封面/§6.2 研究用药"
+    },
+    {
+      "key": "drug_registration_class",
+      "label": "药物注册分类",
+      "type": "enum",
+      "options": [
+        "化学药",
+        "治疗用生物制品",
+        "预防用生物制品",
+        "中药",
+        "天然药物"
+      ],
+      "value": "化学药",
+      "confidence": 0.8,
+      "source": "§1.3 药物背景（化学合成小分子5-HT1B/1D受体激动剂）及批件号2014L00847（化学药批件序列）"
+    },
+    {
+      "key": "dosage_form",
+      "label": "剂型",
+      "type": "enum",
+      "options": [
+        "片剂",
+        "胶囊剂",
+        "颗粒剂",
+        "注射液",
+        "冻干粉针剂",
+        "口服溶液",
+        "乳膏剂",
+        "贴剂",
+        "其他"
+      ],
+      "value": "片剂",
+      "confidence": 0.98,
+      "source": "§6.2 研究用药（剂型：片剂）"
+    },
+    {
+      "key": "specification_model",
+      "label": "规格/型号",
+      "type": "string",
+      "hint": "规格或型号",
+      "value": "12.5mg/片",
+      "confidence": 0.98,
+      "source": "§6.2 研究用药（规格：12.5mg/片）"
+    },
+    {
+      "key": "control_products",
+      "label": "对照产品",
+      "type": "product[]",
+      "itemFields": [
+        {
+          "key": "name",
+          "label": "产品名称",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "name_en",
+          "label": "产品英文名",
+          "type": "string"
+        },
+        {
+          "key": "specification_model",
+          "label": "规格/型号",
+          "type": "string"
+        },
+        {
+          "key": "dosage_form",
+          "label": "剂型",
+          "type": "enum",
+          "options": [
+            "片剂",
+            "胶囊剂",
+            "颗粒剂",
+            "注射液",
+            "冻干粉针剂",
+            "口服溶液",
+            "乳膏剂",
+            "贴剂",
+            "其他"
+          ]
+        },
+        {
+          "key": "drug_registration_class",
+          "label": "药物注册分类",
+          "type": "enum",
+          "options": [
+            "化学药",
+            "治疗用生物制品",
+            "预防用生物制品",
+            "中药",
+            "天然药物"
+          ]
+        }
+      ],
+      "hint": "每行一个产品对象，子字段见 itemFields；多个对照产品各占一行",
+      "value": [
+        {
+          "name": "安慰剂",
+          "specification_model": "0mg/片",
+          "dosage_form": "片剂"
+        }
+      ],
+      "confidence": 0.9,
+      "source": "§6.1 对照药的选择（选用安慰剂作为对照产品）及§6.2 研究用药（对照药规格0mg/片、剂型片剂）"
+    }
+  ]
+}
