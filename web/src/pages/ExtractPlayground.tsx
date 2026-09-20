@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useUploadDocument } from '@/hooks/useDocuments'
 import { documentsService } from '@/services/documents'
 import {
   extractService,
@@ -18,12 +19,13 @@ import {
   configurationDefinitionPreview,
   resolveResultTarget,
   resultMatchesJob,
+  resolveSelectedConfigId,
   selectableConfigurations,
   type ResultRef,
 } from '@/lib/extractSelection'
 import { cn, formatDate, getStatusText } from '@/lib/utils'
 import type { Document, ProcessingJob } from '@/types'
-import { Check, Copy, Download, History, Play, X } from 'lucide-react'
+import { Check, Copy, Download, History, Play, Upload as UploadIcon, X } from 'lucide-react'
 
 type Tab = 'build' | 'results'
 
@@ -256,12 +258,15 @@ export function ExtractPlayground() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState('')
+  const [uploadError, setUploadError] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const historyButtonRef = useRef<HTMLButtonElement>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
   const restoreAttempted = useRef(false)
   const queryClient = useQueryClient()
+  const uploadMutation = useUploadDocument()
 
   const configsQuery = useQuery({
     queryKey: ['extract-configs'],
@@ -292,8 +297,7 @@ export function ExtractPlayground() {
 
   // 默认选中首个可用配置
   useEffect(() => {
-    if (configs.length === 0) return
-    setConfigId((prev) => (prev && configs.some((config) => config.id === prev) ? prev : configs[0].id))
+    setConfigId((prev) => resolveSelectedConfigId(configs, prev))
   }, [configs])
 
   // Job 轮询：结果列表中的任一任务排队/执行中时 1.5s 刷新
@@ -395,14 +399,35 @@ export function ExtractPlayground() {
     setSelectedDocIds(allSelected ? [] : documents.map((doc) => doc.id))
   }
 
+  const handleUploadDocument = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setUploadError('')
+    try {
+      const uploaded = await uploadMutation.mutateAsync(file)
+      const refreshed = await documentsQuery.refetch()
+      if (!refreshed.data?.items.some((document) => document.id === uploaded.document_id)) {
+        setUploadError('文档上传成功，但当前文档列表暂未返回该文件，请稍后刷新')
+        return
+      }
+      setSelectedDocIds((prev) =>
+        prev.includes(uploaded.document_id) ? prev : [...prev, uploaded.document_id],
+      )
+    } catch (error) {
+      setUploadError(getApiErrorMessage(error, '文档上传失败，请稍后重试'))
+    }
+  }
+
   const handleRun = async () => {
-    if (!configId || selectedDocIds.length === 0) return
+    if (!selectedConfig || selectedDocIds.length === 0) return
     setRunError('')
     setRunning(true)
     try {
       const documentIds = [...selectedDocIds].sort()
       const response = await extractService.createJobs({
-        configuration_id: configId,
+        configuration_id: selectedConfig.id,
         document_ids: documentIds,
       })
       const refs = buildResultRefs(documentIds, response.job_ids)
@@ -581,11 +606,40 @@ export function ExtractPlayground() {
 
               <div>
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-text-primary">选择文档</h3>
-                  <span className="text-xs text-text-muted">
-                    已选 {selectedDocIds.length} / {documents.length}
-                  </span>
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-primary">选择文档</h3>
+                    <span className="text-xs text-text-muted">
+                      已选 {selectedDocIds.length} / {documents.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp"
+                      onChange={handleUploadDocument}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => uploadInputRef.current?.click()}
+                      disabled={uploadMutation.isPending}
+                    >
+                      <UploadIcon className="mr-1 h-4 w-4" />
+                      {uploadMutation.isPending ? '上传中…' : '上传文档测试'}
+                    </Button>
+                  </div>
                 </div>
+                {uploadError && (
+                  <p
+                    role="alert"
+                    className="mt-2 rounded-lg border border-error-500/30 bg-error-500/10 p-3 text-xs text-error-500"
+                  >
+                    {uploadError}
+                  </p>
+                )}
                 {documentsQuery.isLoading ? (
                   <div className="mt-2 flex justify-center py-4">
                     <Spinner />
@@ -668,7 +722,7 @@ export function ExtractPlayground() {
               <Button
                 className="w-full"
                 onClick={handleRun}
-                disabled={running || !configId || selectedDocIds.length === 0}
+                disabled={running || !selectedConfig || selectedDocIds.length === 0}
               >
                 <Play className="mr-1 h-4 w-4" />
                 {running ? '提交中…' : 'Run Extract'}

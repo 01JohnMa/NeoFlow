@@ -7,6 +7,7 @@ import {
   configurationDefinitionPreview,
   resolveResultTarget,
   resultMatchesJob,
+  resolveSelectedConfigId,
   selectableConfigurations,
 } from '@/lib/extractSelection'
 
@@ -99,6 +100,22 @@ describe('selectableConfigurations', () => {
       makeConfig({ id: 'c3', status: 'archived' }),
     ]
     expect(selectableConfigurations(configs).map((config) => config.id)).toEqual(['c1', 'c2'])
+  })
+})
+
+describe('resolveSelectedConfigId', () => {
+  const configs = [
+    makeConfig({ id: 'c1', status: 'draft' }),
+    makeConfig({ id: 'c2', status: 'published' }),
+  ]
+
+  it('无可用配置时清空选择', () => {
+    expect(resolveSelectedConfigId([], 'c1')).toBe('')
+  })
+
+  it('保留仍然有效的选择，否则选择首个配置', () => {
+    expect(resolveSelectedConfigId(configs, 'c2')).toBe('c2')
+    expect(resolveSelectedConfigId(configs, 'archived')).toBe('c1')
   })
 })
 

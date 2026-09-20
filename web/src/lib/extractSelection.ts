@@ -46,6 +46,17 @@ export function selectableConfigurations(configs: ExtractConfiguration[]): Extra
   return configs.filter((config) => config.status !== 'archived')
 }
 
+/** 配置列表变化后的稳定选择：无可用配置时清空，当前项失效时选首项。 */
+export function resolveSelectedConfigId(
+  configs: ExtractConfiguration[],
+  currentId: string,
+): string {
+  if (configs.length === 0) return ''
+  return currentId && configs.some((config) => config.id === currentId)
+    ? currentId
+    : configs[0].id
+}
+
 export type ConfigurationDefinitionPreview =
   | { kind: 'schema'; schema: unknown }
   | { kind: 'legacy'; fieldCount: number }
