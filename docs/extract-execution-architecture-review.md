@@ -24,7 +24,7 @@ NeoFlow 2.0 是企业文档能力平台（Parse / Extract / Classify / Split）�
 4. **执行语义**：per-file Job；抽取前**持久化 Parse Result 绑定**（重试沿用绑定，不读最新解析）；认领感知 + 原子交卷（沿用 Parse 的 claim/commit 模式）。
 5. **不做**：审核、Excel/Feishu 推送、citations/confidence、幂等受理与租户配额（留给对外接口轮）、嵌套 Builder、多模型档位（tier）。
 6. **结果契约**：`data` 直接存 JSON Schema 形状（对象或数组）；engine 记录 schema/target/模型等元信息；结果只读展示（JSON 树），无审核面板。
-7. **UI 信息架构**：Build（选配置 + 文档 + 草稿 schema 只读预览 + Run）/ Results（JSON 树 + 复制/下载）/ History（Job 列表）。
+7. **UI 信息架构**：Build（选配置 + 从本机上传/选择文档 + 草稿 schema 只读预览 + Run）/ Results（JSON 树 + 复制/下载）/ History（Job 列表）。上传只负责文档接入，不要求先选择模板；模板由管理员配置和发布。
 
 ## 约束与环境
 

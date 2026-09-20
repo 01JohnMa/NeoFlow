@@ -1,28 +1,34 @@
-# NeoFlow - 智能文档处理平台
+# NeoFlow - 企业文档能力平台
 
-基于 MinerU 版面感知解析 + LLM 的文档处理 Pipeline：文档解析为结构化 markdown 后，按 Configuration 定义抽取字段、人工审核，并可输出到飞书/Excel。
+基于 MinerU 版面感知解析 + LLM 的文档处理平台：文档解析为结构化 `ParseResult`（文档 → 页 → 块），各类能力（Parse / Extract / Classify / Split）在统一的 Job / Result 契约上执行，结果以 JSON 形态持久化在 `results` 表。
 
 ## 技术栈
 
 | 层级 | 技术选型 |
 |------|----------|
-| **后端** | FastAPI + LangGraph + LLM (DeepSeek/GPT-4o/Claude) |
-| **前端** | React + TypeScript + Vite + Tailwind CSS + shadcn/ui |
-| **数据库** | Supabase (PostgreSQL + Auth + PostgREST) |
-| **解析引擎** | MinerU（pipeline / vlm 两种模式） |
-| **AI Agent** | LangGraph 工作流编排 |
+| **后端** | FastAPI + LangChain 1.x（OpenAI 兼容 LLM） |
+| **前端** | React + TypeScript + Vite + TailwindCSS + Zustand |
+| **数据库** | Supabase (PostgreSQL + Auth + PostgREST + RLS) |
+| **解析引擎** | MinerU 托管 API（pipeline / vlm 两种模式） |
+| **执行架构** | API 受理 + 独立 worker 认领执行 + RPC 原子交卷 |
 
-## 核心功能
+## 核心概念
 
-- **文档上传** - 支持 PDF、图片批量上传
-- **文档解析** - MinerU 版面感知解析（快速/高精度），产出 markdown + 块坐标
-- **智能提取** - LLM 基于解析结果结构化提取字段
-- **配置化管理** - Configuration/Revision 定义字段与输出，无需改表
-- **合并模式** - 多文件合并处理（如积分球+光分布 → 照明综合报告）
-- **人工审核** - 识别结果校验与修正
-- **数据存储** - Supabase 持久化存储
-- **飞书同步** - 审核后自动推送到飞书多维表格（按模板配置）
-- **多租户** - 基于 Supabase RLS 的部门/租户权限隔离
+- **Configuration / Revision** - 能力配置（草稿 → 发布 → 不可变 Revision）；Extract 配置携带 JSON Schema 子集（Draft 2020-12）与 target
+- **Processing Job** - 唯一执行单元。已发布配置 pin Revision；草稿运行 / 参数化能力冻结 `execution_spec` 快照到 Job
+- **ParseResult** - 解析产物，是 Extract / Classify / Split 的唯一输入，按文档持久化复用
+- **Result** - append-only 结果存储，`sample_key` 区分 `parse` / `extract` / `default`，`engine` 记录执行元信息
+- **多租户** - 基于 Supabase RLS 的租户/用户权限隔离
+
+## 能力与执行语义
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| Parse | 已交付 | 受理走 `admit_parse_request`（幂等键 + 活动冲突检测），MinerU 解析，`commit_parse_job` 原子交卷 |
+| Extract | 已交付 | JSON Schema 抽取执行器：绑定 ParseResult → 单元执行 → 严格校验 + 至多一次修复 → 认领感知原子交卷（迁移 026–028） |
+| Classify / Split | 部分交付 | 消费 ParseResult，独立执行入口已通，流水线编排见 issue #17/#19 |
+
+通用护栏：心跳续租、认领失效即停手、交卷响应丢失回读确认、绝不伪造成功、整单成功/失败无 partial、单元/Job 两级请求预算与 deadline。
 
 ## 快速启动
 
@@ -35,39 +41,31 @@ docker-compose up -d
 
 ### 生产部署（单机一体化）
 
-> 说明：以下方式把 web + 后端 + 统一入口（Nginx）与 Supabase 组合部署，外部只暴露 80 端口。
-
-**环境变量**：在仓库根目录放 `.env`，变量名与 `supabase/.env` 一致（如 `ANON_KEY`、`SERVICE_ROLE_KEY`、`POSTGRES_PASSWORD`、`JWT_SECRET`）。可复制 `env.example.txt` 为 `.env` 后按需修改。
+> web + 后端 + 统一入口（Nginx ingress 直连 auth/rest）与 Supabase 组合部署，外部只暴露一个端口。
 
 ```bash
-# 在仓库根目录执行
-# Windows: copy env.example.txt .env
-# Linux/Mac: cp env.example.txt .env
-# 编辑 .env 后启动
+# 在仓库根目录
+cp env.example.txt .env   # 按需修改
 docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
-默认路由：
-- `/` → 前端页面
-- `/api` → 后端 API
-- `/supabase` → Supabase Auth / REST（ingress 直连）
+默认路由：`/` → 前端；`/api` → 后端；`/supabase` → Supabase Auth/REST 直连。
 
-### 2. 启动后端
+### 2. 启动后端 API
 
 ```bash
-# 安装依赖
 pip install -r requirements.txt
-
-# 配置环境变量
-# Windows: copy env.example.txt .env
-# Linux/Mac: cp env.example.txt .env
-# 编辑 .env 填入 LLM_API_KEY、SUPABASE_*
-
-# 启动服务
+cp env.example.txt .env   # 填入 SUPABASE_*、LLM_API_KEY、MINERU_API_KEY
 uvicorn api.main:app --reload --port 8080
 ```
 
-### 3. 启动前端
+### 3. 启动文档 worker（独立进程，负责认领并执行 Job）
+
+```bash
+python -m workers.document_worker
+```
+
+### 4. 启动前端
 
 ```bash
 cd web
@@ -75,246 +73,142 @@ npm install
 npm run dev
 ```
 
-## 服务地址
+## API 概览
 
-| 服务 | 地址 | 说明 |
-|------|------|------|
-| 统一入口 | http://localhost | Nginx 入口 |
-| API | http://localhost/api | FastAPI 接口 |
-| API 文档 | http://localhost/docs | Swagger UI |
-| Supabase | http://localhost/supabase | Auth / REST 直连 |
+鉴权走 Supabase Auth JWT；管理员接口需租户管理员权限。完整 schema 见 `/docs`（Swagger）。
+
+### 文档
+
+```bash
+POST   /api/documents/upload                  # 上传（PDF/图片）
+GET    /api/documents                          # 文档列表
+GET    /api/documents/{id}/status              # 文档状态
+GET    /api/documents/{id}/parse-result        # 文档最新 ParseResult
+GET    /api/documents/{id}/download            # 原文件下载
+PUT    /api/documents/{id}/rename              # 重命名
+DELETE /api/documents/{id}                     # 删除（活动任务占用时 409）
+```
+
+### Parse 能力
+
+```bash
+POST /api/parse/jobs                          # 受理解析（支持 Idempotency-Key 头）
+GET  /api/jobs/{job_id}/parse-result          # 指定 Job 的解析结果
+```
+
+### Extract 能力
+
+```bash
+POST /api/extract/jobs                        # 受理抽取（每文档一个 Job）
+GET  /api/documents/{id}/extract-result       # 文档最新正式抽取结果
+GET  /api/jobs/{job_id}/extract-result        # 指定 Job 的正式抽取结果
+```
+
+### 任务与配置
+
+```bash
+GET  /api/jobs                                # 任务列表（按租户/文档/能力过滤）
+GET  /api/jobs/{job_id}                       # 任务详情
+GET|POST /api/configurations                  # 配置列表/创建
+PUT  /api/configurations/{id}                 # 更新草稿
+POST /api/configurations/{id}/publish         # 发布为不可变 Revision
+POST /api/configurations/{id}/archive         # 归档
+GET  /api/configurations/{id}/revisions       # 修订历史
+GET  /api/tenants                             # 租户列表
+POST /api/sdk/sessions                        # AI 模板向导（草拟抽取配置）
+```
 
 ## 项目结构
 
 ```
 neoflow/
-├── api/                        # FastAPI 应用层
-│   ├── main.py                # 应用入口
-│   ├── jobs.py                # 任务状态管理
-│   ├── dependencies/          # 依赖注入（auth 等）
+├── api/
+│   ├── main.py                # FastAPI 入口（受理 + 超时恢复后台任务）
+│   ├── jobs.py                # Job 读写、认领续租、原子交卷 RPC 封装
+│   ├── dependencies/          # 鉴权（JWT/JWKS）
 │   └── routes/
-│       ├── documents/         # 文档路由（子模块）
-│       │   ├── upload.py      # 上传
-│       │   ├── process.py     # 处理（含 process-with-template）
-│       │   ├── query.py       # 查询
-│       │   ├── review.py     # 审核
-│       │   ├── helpers.py    # 辅助函数（飞书推送等）
-│       │   └── schemas.py    # 请求/响应模型
-│       ├── configurations.py  # 配置管理（Configuration/Revision）
-│       ├── jobs.py            # 任务与结果
-│       ├── tenants.py         # 租户/部门管理
+│       ├── documents/         # 上传/查询/重命名（子模块）
+│       ├── parse.py           # Parse 受理（幂等 + 活动冲突检测）
+│       ├── extract.py         # Extract 受理与结果读取
+│       ├── configurations.py  # Configuration/Revision 管理
+│       ├── jobs.py            # 任务与结果查询
+│       ├── sdk.py             # AI 模板向导会话
+│       ├── tenants.py         # 租户/用户
 │       └── health.py          # 健康检查
-│
-├── web/                        # React 前端 (Vite)
-│   ├── src/
-│   │   ├── components/        # 组件（ui/、layout/）
-│   │   ├── pages/             # 页面
-│   │   │   ├── Login.tsx      # 登录
-│   │   │   ├── Dashboard.tsx  # 仪表盘
-│   │   │   ├── Upload.tsx     # 上传（单文件/相机）
-│   │   │   ├── Documents.tsx  # 文档列表
-│   │   │   ├── DocumentDetail.tsx # 文档详情/审核
-│   │   │   ├── ParseViewer.tsx    # 解析结果查看
-│   │   │   ├── AdminConfig.tsx    # 管理配置入口
-│   │   │   ├── AdminFeishuTab.tsx # 飞书配置
-│   │   │   └── AdminFieldsTab.tsx # 配置字段（含字段描述/示例）
-│   │   ├── hooks/             # 自定义 Hooks
-│   │   ├── services/          # API 服务
-│   │   ├── store/             # 状态管理
-│   │   └── lib/               # 工具库
-│   └── vite.config.ts
-│
-├── agents/                     # LangGraph 智能体
-│   ├── workflow.py            # 配置化抽取工作流（消费 ParseResult）
-│   ├── json_cleaner.py        # JSON 清洗
-│   └── result_builder.py      # 结果构建
-│
-├── config/                     # 配置
-│   ├── settings.py            # 应用配置
-│   └── prompts.py             # LLM Prompt 配置
-│
-├── services/                   # 业务服务
-│   ├── base.py                # 基类（SupabaseClientMixin、prompt 构建）
-│   ├── supabase_service.py    # 数据库服务
+├── workers/
+│   └── document_worker.py     # 独立 worker：认领 → JobRunner → 原子交卷
+├── services/
+│   ├── job_runner.py          # 唯一执行 Seam：按能力/配置类型分发 handler
+│   ├── parse_service.py       # Parse handler（参数化执行规格）
+│   ├── extract_service.py     # Extract handler（绑定/预算/单元/交卷）
+│   ├── extract_schema.py      # JSON Schema 子集白名单与取值校验
+│   ├── extract_prompt.py      # prompt 构造、严格 JSON 解析、上下文估算
+│   ├── llm_invoke.py          # LLM 窄接口（无隐式重试，回传 usage/finish_reason）
+│   ├── parse_request_service.py # Parse 受理台账
+│   ├── parse_result.py / parser_adapter.py / mineru_adapter.py
 │   ├── configuration_service.py # Configuration/Revision 服务
-│   ├── result_service.py      # Result 存储
-│   ├── job_runner.py          # Job 执行入口（按类型分发）
-│   ├── parser_adapter.py      # ParserAdapter 接口
-│   ├── mineru_adapter.py      # MinerU 解析后端
-│   ├── parse_service.py       # Parse Job 处理
-│   ├── tenant_service.py       # 租户服务
-│   └── feishu_service.py       # 飞书推送服务
-│
-├── supabase/                   # Supabase 本地部署
-│   ├── docker-compose.yml     # Docker 编排
-│   ├── migrations/            # 数据库迁移
-│   └── .env                   # 环境变量
-│
-├── tests/                      # 测试
-│   ├── conftest.py            # pytest 配置
-│   ├── routes/                # 路由测试
-│   ├── services/              # 服务测试
-│   └── agents/                # 智能体测试
-│
-├── uploads/                    # 上传文件目录
-├── logs/                       # 日志目录
-├── requirements.txt            # Python 依赖
-├── env.example.txt             # 环境变量示例
-└── docker-compose.prod.yml     # 生产部署编排
-```
-
-## API 接口
-
-### 文档管理
-
-```bash
-# 上传文档
-POST /api/documents/upload
-
-# 按已发布 Configuration 处理文档
-POST /api/documents/{id}/process?sync=false
-
-# 按指定配置处理
-POST /api/documents/{id}/process-with-template
-Body: { "template_id": "配置ID", "sync": false }
-
-# 查询任务状态
-GET /api/documents/jobs/{job_id}
-
-# 获取结果
-GET /api/documents/{id}/result
-
-# 获取文档列表
-GET /api/documents
-
-# 审核通过
-PUT /api/documents/{id}/validate
-
-# 打回重做
-PUT /api/documents/{id}/reject
-
-# CRM 提交文档（识别后等待 CRM 审核和推送）
-POST /api/crm/documents/submit
-Form: file, template_id, custom_push_name?
-# 详细文档: docs/crm-api.md
-
-# 删除文档
-DELETE /api/documents/{id}
-```
-
-### 租户与认证
-
-认证由 Supabase Auth 提供（JWT）。用户需在个人设置中选择所属部门（tenant_id）后才能处理文档。
-
-```bash
-# 获取租户/部门列表
-GET /api/tenants
-```
-
-### 管理员配置
-
-```bash
-# Configuration、Revision 与字段描述接口（需管理员权限）
-# 详见 /docs
+│   ├── result_service.py      # Result 读写（append-only）
+│   └── supabase_service.py    # 数据库服务
+├── agents/                    # Classify/Split 的 LLM 工作流与结果构建
+├── web/                       # React 前端（Parse/Extract Playground、配置管理）
+├── supabase/
+│   ├── docker-compose.yml     # 本地/生产 Supabase 编排
+│   └── migrations/            # 数据库迁移（000–028）
+├── tests/                     # pytest（services/routes/workers/db）+ SQL 并发测试
+├── docs/
+│   ├── adr/                   # 架构决策记录
+│   ├── agents/                # 工程协作规范（issue 流程、领域文档）
+│   ├── ops/                   # 运维脚本
+│   └── archive/               # 已废弃文档归档
+├── env.example.txt            # 环境变量示例
+└── docker-compose.prod.yml    # 生产部署编排
 ```
 
 ## 环境变量
 
+完整清单见 [env.example.txt](./env.example.txt)，关键项：
+
 ```env
-# .env 文件（可复制 env.example.txt）
+# Supabase
+SUPABASE_PUBLIC_URL=...
+ANON_KEY=...
+SERVICE_ROLE_KEY=...
+JWT_SECRET=...            # 自建项目用于 API 验签；云项目可改用 JWKS_URL
 
-# Supabase（与 supabase/.env 一致）
-SUPABASE_URL=http://localhost:3002
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-key
-
-# LLM 配置（默认 DeepSeek）
-LLM_API_KEY=your-api-key
+# LLM（OpenAI 兼容，默认 DeepSeek）
+LLM_API_KEY=...
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL_ID=deepseek-v4-flash
+LLM_MODEL_ID=deepseek-chat
 
-# 飞书配置（可选，推送目标按模板在 Supabase 中配置）
-FEISHU_APP_ID=your-app-id
-FEISHU_APP_SECRET=your-app-secret
-FEISHU_PUSH_ENABLED=false
-
-# MinerU 解析（配置的 parse.model_version 选择 pipeline 或 vlm）
-MINERU_API_KEY=
+# MinerU 解析
+MINERU_API_KEY=...
 MINERU_BASE_URL=https://mineru.net
-MINERU_POLL_INTERVAL_SECONDS=5.0
-MINERU_PARSE_TIMEOUT_SECONDS=900
+
+# Worker
+DOC_WORKER_POLL_INTERVAL_SECONDS=2.0
+DOC_WORKER_STALE_LOCK_SECONDS=1800
+
+# Extract 护栏
+EXTRACT_MAX_ATTEMPTS=2
+EXTRACT_MAX_REQUESTS_PER_JOB=200
+EXTRACT_TIMEOUT_SECONDS=900
 ```
-
-> 各模板的飞书目标表格（feishu_bitable_token、feishu_table_id）在
-> `supabase/migrations/002_init_data.sql` 及管理后台中配置，无需环境变量。
-
-## UI/UX Pro Max
-
-本项目使用 UI/UX Pro Max 设计系统进行前端开发，确保专业级的 UI/UX 质量。
-
-### 使用方法
-
-在 Cursor 中使用 `/ui-ux-pro-max` 命令：
-
-```bash
-# 生成设计系统
-python3 .shared/ui-ux-pro-max/scripts/search.py "ocr llm document platform" --design-system -p "NeoFlow"
-
-# 搜索配色方案 (磨砂玻璃风格)
-python3 .shared/ui-ux-pro-max/scripts/search.py "glassmorphism" --domain style
-
-# 搜索组件布局
-python3 .shared/ui-ux-pro-max/scripts/search.py "dashboard layout" --stack html-tailwind
-```
-
-### 设计规范
-
-- **配色**: 翡翠绿 (#018C39) + 紫色 (#8B5CF6) + 磨砂玻璃质感
-- **风格**: 科技简约、暗色主题、毛玻璃卡片
-- **图标**: Heroicons SVG 图标
-- **字体**: Inter / 中文思源黑体
-
-## 文档类型
-
-| 类型 | display_name 规则 | 说明 |
-|------|-------------------|------|
-| 测试单 | `报告_{样品名称}_{规格型号}_{抽样日期}` | 检测报告 |
-| 快递单 | 自动识别 | 物流单据 |
-| 抽样单 | 自动识别 | 抽样记录 |
-
-## 开发日志
-
-| 日期 | 类型 | 内容 |
-|------|------|------|
-| 2026-01-04 | feat | 添加 React 前端业务页面 |
-| 2026-01-06 | feat | 用户权限隔离 (RLS) |
-| 2026-01-08 | feat | 飞书多维表格推送服务 |
-| 2026-01-13 | refactor | 路由拆分、异常体系重构 |
-| 2026-01-13 | feat | pending_review 强制审核流程 |
-| 2026-03 | feat | 模板化管理、合并模式、多部门配置 |
-| 2026-03 | feat | VLM 多模态提取模式、process-with-template 返回 202 |
-| 2026-03 | refactor | 代码质量优化：飞书推送统一、权限检查复用、auth 中间件、安全加固、死代码清理、过长函数拆分、服务层装饰器、共享基类 |
-
-## 代码规范
-
-项目遵循 [.cursor/rules/code-simplifier.mdc](.cursor/rules/code-simplifier.mdc) 原则：保持功能不变的前提下提升可读性与可维护性，避免嵌套三元、冗余抽象，优先显式逻辑。
 
 ## 测试
 
 ```bash
-# 运行全部测试
-pytest -v
-
-# 运行指定模块
-pytest tests/routes/ -v
-pytest tests/services/ -v
+pytest -v                       # 全部
+pytest tests/services -v        # 服务层（含 Extract 执行器约 60 个用例）
+pytest tests/routes -v          # 路由层
+tests/db/run.sh                 # 迁移与 RPC 的 SQL 级并发测试
 ```
 
 ## 相关文档
 
-- [Supabase 部署指南](./supabase/README.md)
+- [领域术语表](./CONTEXT.md)
+- [架构决策记录 (ADR)](./docs/adr/)
+- [归档文档索引](./docs/archive/README.md)
 - [生产部署说明](./deploy/REDEPLOY_WITH_NEW_CODE.md)
-- [代码质量优化计划](./.cursor/plans/代码质量优化计划_f9149055.plan.md)
 
 ## License
 

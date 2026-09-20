@@ -19,7 +19,7 @@ _Avoid_: application, global workspace
 ## Documents and extraction
 
 **Document**:
-A source file tracked through ingestion and extraction. A document may participate in a Composite Extraction with other documents.
+A source file tracked through ingestion and extraction. Composite Extraction across documents is not part of the NeoFlow 2.0 contract.
 _Avoid_: upload, file record
 
 **Document Kind**:
@@ -47,7 +47,7 @@ The parsing pipeline a Parse job runs — fast (`pipeline`) or high-precision (`
 _Avoid_: tier, model version, OCR mode
 
 **Extraction Target**:
-The result unit of one Extraction run — the whole document (`per_doc`), each page (`per_page`), or each table row (`per_table_row`). It selects the outer shape of the Extraction Result, never the schema of one instance. Chosen in the Configuration, never inferred from content.
+The result unit of one Extraction run — the whole document (`per_doc`) or each page (`per_page`); `per_table_row` is reserved by the contract but not yet delivered (executions reject it explicitly). It selects the outer shape of the Extraction Result, never the schema of one instance. Chosen in the Configuration, never inferred from content.
 _Avoid_: granularity, chunking strategy, field scope
 
 ## Configurations and fields
