@@ -94,10 +94,12 @@ export function AdminConfig() {
   }, [selectedTenantId])
 
   useEffect(() => {
-    setView('list')
-    setSelectedId(null)
+    if (!draftingSessionId) {
+      setView('list')
+      setSelectedId(null)
+    }
     void refreshList()
-  }, [refreshList])
+  }, [refreshList, draftingSessionId])
 
   const openDetail = (id: string) => {
     setSelectedId(id)
