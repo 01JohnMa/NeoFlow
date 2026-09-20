@@ -2,6 +2,8 @@
 """文档路由 - 辅助函数"""
 
 import os
+import re
+
 import aiofiles
 from fastapi import UploadFile
 from loguru import logger
@@ -41,10 +43,24 @@ def validate_file_extension(filename: str) -> bool:
 
 
 def is_auth_error(error: Exception) -> bool:
-    """检测是否为认证/授权相关错误（token 过期等）"""
+    """只识别明确的 401/JWT 错误，避免把上游 5xx 当成登录过期。"""
+    status_code = getattr(error, "status_code", None)
+    response = getattr(error, "response", None)
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+    if status_code == 401:
+        return True
+
     error_str = str(error).lower()
-    auth_keywords = ['jwt', 'token', '401', '502', 'expired', 'invalid', 'unauthorized']
-    return any(keyword in error_str for keyword in auth_keywords)
+    return bool(
+        re.search(r"\b401\b", error_str)
+        or "jwt" in error_str
+        or "unauthorized" in error_str
+        or "authentication" in error_str
+        or "invalid token" in error_str
+        or "token invalid" in error_str
+        or "token expired" in error_str
+    )
 
 
 def raise_auth_or_processing_error(error: Exception, message: str) -> None:

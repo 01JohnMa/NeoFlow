@@ -243,23 +243,23 @@ class ConfigurationService(SupabaseClientMixin):
         status: Optional[str] = None,
         type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """列出配置（按租户/项目/状态/类型过滤）"""
+        """列出配置；数据库错误向上抛出，避免被当成空配置。"""
+        query = self._get_client().table("configurations").select("*")
+        if tenant_id:
+            query = query.eq("tenant_id", tenant_id)
+        if project_id:
+            query = query.eq("project_id", project_id)
+        if status:
+            query = query.eq("status", status)
+        if type:
+            query = query.eq("type", type)
+        query = query.order("created_at", desc=True)
         try:
-            query = self._get_client().table("configurations").select("*")
-            if tenant_id:
-                query = query.eq("tenant_id", tenant_id)
-            if project_id:
-                query = query.eq("project_id", project_id)
-            if status:
-                query = query.eq("status", status)
-            if type:
-                query = query.eq("type", type)
-            query = query.order("created_at", desc=True)
             result = await self._run_sync(query.execute)
-            return result.data or []
-        except Exception as e:
-            logger.error(f"列出配置失败: {e}")
-            return []
+        except Exception as exc:
+            logger.error(f"列出配置失败: {exc}")
+            raise
+        return result.data or []
 
     async def get_configuration(self, configuration_id: str) -> Optional[Dict[str, Any]]:
         """按 ID 获取配置"""
