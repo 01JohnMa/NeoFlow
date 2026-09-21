@@ -135,22 +135,39 @@ def annotate_parse_provenance(
     requested = _requested_page_numbers(params.get("page_ranges"))
     expected = _pdf_page_count(file_path)
     provider_coverage = result.engine.get("coverage") if isinstance(result.engine, dict) else None
+    states = (provider_coverage or {}).get("page_states") or {}
+    provider_pages = set((provider_coverage or {}).get("reported_pages") or [])
     if requested is not None:
         status = "incomplete"
         reason = "page_ranges_requested"
     elif expected is None:
         status = "unknown"
         reason = "source_page_count_unavailable"
-    elif observed == list(range(1, expected + 1)):
+    elif expected is not None and provider_pages and provider_pages != set(range(1, expected + 1)):
+        status, reason = "incomplete", "provider_page_inventory_mismatch"
+    elif expected is not None and set(states) >= {str(n) for n in range(1, expected + 1)} and all(
+        states.get(str(n)) in ("parsed", "blank") for n in range(1, expected + 1)
+    ):
         status = "complete"
-        reason = "observed_all_physical_pages"
+        reason = "all_source_pages_represented"
     else:
         status = "incomplete"
         reason = "observed_page_set_mismatch"
 
     profile_payload = {
-        "parser": "mineru-normalizer-v1",
-        "params": params,
+        "parser": "mineru",
+        "normalizer": "mineru-normalizer-v2",
+        "params": {key: params.get(key) for key in (
+            "model_version", "method", "language", "enable_formula", "enable_table",
+        ) if key in params},
+        "watermark": {
+            "enabled": bool(params.get("remove_watermark")),
+            "threshold": (
+                getattr(settings, "PARSE_WATERMARK_REPEAT_THRESHOLD", None)
+                if isinstance(getattr(settings, "PARSE_WATERMARK_REPEAT_THRESHOLD", None), int)
+                else None
+            ),
+        },
     }
     profile_hash = hashlib.sha256(
         json.dumps(profile_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
@@ -161,15 +178,20 @@ def annotate_parse_provenance(
         coverage["status"] = "incomplete"
         coverage["reason"] = "page_ranges_requested"
     coverage.update({
-        "status": coverage.get("status") or status,
-        "reason": coverage.get("reason") or reason,
-        "expected_page_count": coverage.get("expected_page_count", expected),
+        "status": status,
+        "reason": reason,
+        "expected_page_count": expected if coverage.get("expected_page_count") is None else coverage.get("expected_page_count"),
         "requested_page_numbers": requested,
         "observed_page_numbers": coverage.get("observed_page_numbers", observed),
     })
+    source_hash = (
+        result.engine["source_document_hash"]
+        if isinstance(result.engine, dict) and "source_document_hash" in result.engine
+        else _sha256_file(file_path)
+    )
     result.engine = {
         **result.engine,
-        "source_document_hash": _sha256_file(file_path),
+        "source_document_hash": source_hash,
         "parse_profile_hash": profile_hash,
         "coverage": coverage,
     }
@@ -214,6 +236,7 @@ async def ensure_parse_result(
         logger.warning(f"自动解析失败: document_id={document_id}, error={exc}")
         return None
 
+    apply_parse_postprocess(result, params)
     annotate_parse_provenance(result, file_path, params)
     parse_data = result.to_dict()
     stored = await result_service.record_parse_result(

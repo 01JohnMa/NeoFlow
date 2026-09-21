@@ -179,6 +179,7 @@ def normalize_mineru_content(
     contexts = _build_page_contexts(middle_json)
 
     pages: Dict[int, Page] = {}
+    recognized_page_idxs: set[int] = set()
     # pdf_info is the provider's authoritative physical-page inventory. Create
     # entries before content items so blank pages are preserved explicitly.
     for page_idx, context in contexts.items():
@@ -208,6 +209,7 @@ def normalize_mineru_content(
         if block_type is None:
             warnings.append(f"忽略未知块类型: {item.get('type')}")
             continue
+        recognized_page_idxs.add(page_idx)
 
         context = contexts.get(page_idx)
         pixel_bbox = _scale_bbox(item.get("bbox"), context.page_size if context else None)
@@ -228,9 +230,19 @@ def normalize_mineru_content(
             confidence=confidence,
         ))
 
-    observed = sorted(page_no + 1 for page_no in pages)
-    expected = sorted(index + 1 for index in contexts)
-    coverage_status = "unknown" if not contexts else ("complete" if observed == expected else "incomplete")
+    observed = sorted(index + 1 for index, page in pages.items() if page.blocks)
+    reported_pages = sorted(index + 1 for index in contexts)
+    page_states = {}
+    for index in sorted(contexts):
+        number = index + 1
+        page = pages[number - 1]
+        if page.blocks:
+            page_states[str(number)] = "parsed"
+        elif index in recognized_page_idxs and not contexts[index].blocks:
+            page_states[str(number)] = "blank"
+        else:
+            page_states[str(number)] = "unknown"
+    coverage_status = "unknown" if not contexts else "incomplete"
     engine = {
         "name": "mineru",
         "backend": raw_backend or backend,
@@ -239,11 +251,12 @@ def normalize_mineru_content(
         "model_version": params.get("model_version"),
         "method": params.get("method"),
         "coverage": {
+            "version": 1,
             "status": coverage_status,
-            "expected_page_count": len(expected) if contexts else None,
+            "reported_pages": reported_pages,
+            "expected_page_count": None,
             "observed_page_numbers": observed,
-            "page_states": {str(number): ("blank_confirmed" if not pages[number - 1].blocks else "observed")
-                            for number in observed if number - 1 in pages},
+            "page_states": page_states,
             "provider": "pdf_info" if contexts else None,
         },
     }

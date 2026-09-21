@@ -1,6 +1,6 @@
 {
   "manifest_version": "1.0.0",
-  "status": "pre_run_frozen",
+  "status": "draft_until_profiles_frozen",
   "purpose": "#38 paired extraction evaluation; synthetic fixtures are runnable scaffolding, not provider acceptance",
   "implementation_commit": null,
   "configuration_revision_id": null,
@@ -8,12 +8,47 @@
   "provider": null,
   "model": null,
   "cases": [
-    {"case_id":"synthetic_born_digital","stratum":"born_digital","source":"corpus/synthetic_born_digital.json","gold":"gold/synthetic_born_digital.json","parse_result_id":null},
-    {"case_id":"synthetic_scanned","stratum":"scanned","source":"corpus/synthetic_scanned.json","gold":"gold/synthetic_scanned.json","parse_result_id":null},
-    {"case_id":"synthetic_mixed_table","stratum":"mixed_table","source":"corpus/synthetic_mixed_table.json","gold":"gold/synthetic_mixed_table.json","parse_result_id":null},
-    {"case_id":"synthetic_identifiers","stratum":"identifiers_dates","source":"corpus/synthetic_identifiers.json","gold":"gold/synthetic_identifiers.json","parse_result_id":null},
-    {"case_id":"synthetic_long_boundary","stratum":"long_context_boundary","source":"corpus/synthetic_long_boundary.json","gold":"gold/synthetic_long_boundary.json","parse_result_id":null}
+    {
+      "case_id": "synthetic_born_digital",
+      "stratum": "born_digital",
+      "source": "corpus/synthetic_born_digital.json",
+      "gold": "gold/synthetic_born_digital.json",
+      "parse_result_id": null
+    },
+    {
+      "case_id": "synthetic_scanned",
+      "stratum": "scanned",
+      "source": "corpus/synthetic_scanned.json",
+      "gold": "gold/synthetic_scanned.json",
+      "parse_result_id": null
+    },
+    {
+      "case_id": "synthetic_mixed_table",
+      "stratum": "mixed_table",
+      "source": "corpus/synthetic_mixed_table.json",
+      "gold": "gold/synthetic_mixed_table.json",
+      "parse_result_id": null
+    },
+    {
+      "case_id": "synthetic_identifiers",
+      "stratum": "identifiers_dates",
+      "source": "corpus/synthetic_identifiers.json",
+      "gold": "gold/synthetic_identifiers.json",
+      "parse_result_id": null
+    },
+    {
+      "case_id": "synthetic_long_boundary",
+      "stratum": "long_context_boundary",
+      "source": "corpus/synthetic_long_boundary.json",
+      "gold": "gold/synthetic_long_boundary.json",
+      "parse_result_id": null
+    }
   ],
-  "scenarios": ["cold_index","hot_index","first_parse","cross_configuration"],
+  "scenarios": [
+    "cold_index",
+    "hot_index",
+    "first_parse",
+    "cross_configuration"
+  ],
   "provenance": "All included documents and answers are synthetic and contain no provider output or personal contact data. Replace/extend only with authorized immutable sources before real runs."
 }

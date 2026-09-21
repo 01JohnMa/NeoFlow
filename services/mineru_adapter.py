@@ -13,6 +13,7 @@ zip 内含 full.md、*_content_list.json、layout.json（即 middle.json 等价�
 """
 
 import asyncio
+import hashlib
 import io
 import os
 import tempfile
@@ -27,6 +28,13 @@ from config.settings import settings
 from services.mineru_normalizer import normalize_mineru_output
 from services.parser_adapter import ParserAdapter, ParserAdapterError
 from services.parse_result import ParseResult
+
+def _file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 DEFAULT_MODEL_VERSION = "pipeline"
 DEFAULT_LANGUAGE = "ch"
@@ -121,6 +129,7 @@ class MinerUApiAdapter(ParserAdapter):
             raise MinerUApiError(f"待解析文件不存在: {file_path}")
 
         file_name = os.path.basename(file_path)
+        source_hash_before = _file_sha256(file_path)
         request_timeout = float(
             params.get("request_timeout_seconds") or DEFAULT_REQUEST_TIMEOUT_SECONDS
         )
@@ -141,6 +150,13 @@ class MinerUApiAdapter(ParserAdapter):
             with tempfile.TemporaryDirectory(prefix="neoflow-mineru-") as workdir:
                 await self._download_and_extract(client, zip_url, workdir)
                 result = await asyncio.to_thread(normalize_mineru_output, workdir, params)
+
+        source_hash_after = _file_sha256(file_path)
+        result.engine["source_document_hash"] = (
+            source_hash_before if source_hash_before == source_hash_after else None
+        )
+        if source_hash_before != source_hash_after:
+            result.warnings.append("源文件在解析期间发生变化，source_document_hash 不可用")
 
         logger.info(
             f"MinerU 解析完成: file={file_name} pages={len(result.pages)} "

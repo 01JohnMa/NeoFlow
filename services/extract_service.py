@@ -409,6 +409,19 @@ def _schema_at_pointer(schema: Dict[str, Any], pointer: str) -> Dict[str, Any]:
     return node if isinstance(node, dict) else {}
 
 
+def _path_is_required(schema: Dict[str, Any], pointer: str) -> bool:
+    node: Any = schema
+    tokens = [_unescape_pointer_token(token) for token in pointer.split("/") if token]
+    for token in tokens:
+        if not isinstance(node, dict):
+            return False
+        required = node.get("required") or []
+        if token not in required:
+            return False
+        node = (node.get("properties") or {}).get(token)
+    return True
+
+
 def _get_pointer(value: Any, pointer: str) -> Tuple[bool, Any]:
     current = value
     for token in [token for token in pointer.split("/") if token]:
@@ -739,6 +752,11 @@ async def _run_page_routed(
     payload: Dict[str, Any] = {}
     for path, value in locked.items():
         _set_pointer(payload, path, value)
+    for path, node in leaves:
+        if path in locked or not _path_is_required(schema, path):
+            continue
+        if not validate_value(node, None):
+            _set_pointer(payload, path, None)
     final_errors = validate_output("per_doc", schema, payload)
     if final_errors:
         raise ExtractFailure("final_validation_failed", str(final_errors[0]))
@@ -1010,6 +1028,8 @@ def build_engine(
     while len(serialized) > ENGINE_MAX_BYTES and engine["usage"]["calls"]:
         engine["usage"]["calls"] = engine["usage"]["calls"][:-1]
         serialized = json.dumps(engine, ensure_ascii=False).encode("utf-8")
+    if len(serialized) > ENGINE_MAX_BYTES:
+        raise ExtractFailure("engine_metadata_too_large")
     return engine
 
 

@@ -590,6 +590,11 @@ class ConfigurationService(SupabaseClientMixin):
             if configuration.get("type") == "extract"
             else normalize_definition(configuration.get("draft_definition"))
         )
+        # Freeze the effective compatibility default only in the new immutable
+        # Revision. Historical revisions and the editable draft remain untouched.
+        if configuration.get("type") == "extract":
+            definition = deepcopy(definition)
+            definition.setdefault("extraction_strategy", "full_document")
         if configuration.get("type") == "extract":
             from services.extract_service import (
                 ExtractFailure,

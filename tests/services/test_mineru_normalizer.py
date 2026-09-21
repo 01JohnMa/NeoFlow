@@ -95,8 +95,8 @@ class TestPipelineNormalization:
         assert result.engine["version"] == "3.4.4"
         assert result.engine["model_version"] == "pipeline"
         assert result.engine["method"] == "auto"
-        assert result.engine["coverage"]["status"] == "complete"
-        assert result.engine["coverage"]["observed_page_numbers"] == [1, 2]
+        assert result.engine["coverage"]["status"] == "incomplete"
+        assert result.engine["coverage"]["reported_pages"] == [1, 2]
         assert result.warnings == []
 
 
