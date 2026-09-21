@@ -60,6 +60,7 @@ jobs:
           (pathlib.Path(os.environ['RUNNER_TEMP'])/'inline-paths.json').write_text(json.dumps(paths))
           print('\n'.join(paths))
           PY
+          python "$GITHUB_WORKSPACE/delivery/.inline-delivery/fixups.py"
           git diff --check
       - name: Install frontend dependencies
         id: deps
@@ -87,8 +88,9 @@ jobs:
         working-directory: source/web
         run: |
           set -o pipefail
-          npm install --no-save --package-lock=false playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --prefix "$RUNNER_TEMP/inline-browser" --no-save --package-lock=false playwright@1.56.1
+          "$RUNNER_TEMP/inline-browser/node_modules/.bin/playwright" install --with-deps chromium
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/inline-browser/node_modules/playwright"
           npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/inline-vite.log" 2>&1 &
           vite_pid=$!
           trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
@@ -130,7 +132,7 @@ jobs:
               clean = re.sub(r'\x1b\[[0-9;]*m', '', file.read_text())
               lines = [line for line in clean.splitlines() if 'passed' in line or line.startswith(('PASS ', 'FAIL:'))]
               text += '\n```text\n'+'\n'.join(lines)+'\n```\n'
-          text += '\nOnly frontend code, isolated browser fixtures and documentation changed. No backend, execution semantics, legacy migration, seed writes or deployment. Browser API requests are mocked; no real database/model integration was performed. No package versions or lockfiles were changed.\n'
+          text += '\nOnly frontend code, isolated browser fixtures and documentation changed. No backend, execution semantics, legacy migration, seed writes or deployment. Browser API requests are mocked; no real database/model integration was performed. Browser tooling is installed separately from the locked application dependencies. No package versions or lockfiles were changed.\n'
           report.write_text(text)
           subprocess.check_call(['git','add','--',*paths,str(report)])
           PY
