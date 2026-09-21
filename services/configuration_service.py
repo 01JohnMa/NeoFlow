@@ -439,7 +439,13 @@ class ConfigurationService(SupabaseClientMixin):
         configs: List[Dict[str, Any]] = []
         for configuration in configurations:
             definition = await self._definition_for(configuration)
-            configs.append(build_extraction_config(configuration, definition))
+            try:
+                configs.append(build_extraction_config(configuration, definition))
+            except ConfigurationValidationError as exc:
+                logger.warning(
+                    "跳过无法校验的已发布抽取配置（历史定义不受新契约支持）: "
+                    f"id={configuration.get('id')} name={configuration.get('name')} error={exc}"
+                )
         return sorted(configs, key=lambda item: (item.get("name") or ""))
 
     async def create_configuration(

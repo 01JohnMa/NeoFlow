@@ -457,6 +457,28 @@ class TestExtractionConfig:
         assert created["id"] in ids and draft["id"] not in ids
 
     @pytest.mark.asyncio
+    async def test_published_listing_skips_legacy_definition(self, service):
+        svc, fake = service
+        created = await svc.create_configuration(_create(type="extract", definition=self.definition()))
+        await svc.publish_configuration(created["id"])
+        legacy_id = "legacy-0000-0000-0000-000000000000"
+        fake.tables["configurations"].append({
+            "id": legacy_id,
+            "tenant_id": TENANT_ID,
+            "project_id": "p",
+            "name": "检测报告",
+            "code": "inspection_report",
+            "type": "extract",
+            "status": "published",
+            "current_revision_id": None,
+            "draft_definition": {"fields": [{"field_key": "sample_name"}]},
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        })
+        ids = [c["id"] for c in await svc.list_published_extract_configurations(TENANT_ID)]
+        assert created["id"] in ids and legacy_id not in ids
+
+    @pytest.mark.asyncio
     async def test_invalid_schema_rejected_before_config_insert(self, service):
         svc, fake = service
         with pytest.raises(ConfigurationStateError):
