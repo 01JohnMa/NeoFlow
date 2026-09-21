@@ -169,6 +169,23 @@ async def test_unknown_or_partial_coverage_fails_before_embedding():
 
 
 @pytest.mark.asyncio
+async def test_incomplete_or_noncontiguous_coverage_fails_before_embedding():
+    provider = FakeEmbeddingProvider()
+    service = PageIndexService(store=InMemoryPageEmbeddingStore(), provider=provider)
+    profile = EmbeddingProfile(model="fake", version="test")
+    row = _row(_page(1, "摘要"), _page(3, "正文"), status="incomplete")
+    row["data"]["engine"]["coverage"]["observed_page_numbers"] = [1, 3]
+
+    with pytest.raises(PageIndexError) as exc:
+        await service.ensure_index(
+            row, tenant_id=TENANT_ID, document_id=DOCUMENT_ID, embedding_profile=profile
+        )
+
+    assert exc.value.reason == "parse_coverage_incomplete"
+    assert provider.document_calls == []
+
+
+@pytest.mark.asyncio
 async def test_identity_mismatch_is_rejected_before_provider_call():
     provider = FakeEmbeddingProvider()
     service = PageIndexService(store=InMemoryPageEmbeddingStore(), provider=provider)
