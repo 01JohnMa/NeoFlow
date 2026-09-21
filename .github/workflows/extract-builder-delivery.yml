@@ -1,4 +1,4 @@
-name: Validate schema-first Builder delivery
+name: Validate inline Extract editor
 on:
   push:
     branches: [codex/extract-schema-builder-delivery]
@@ -9,20 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      SUPABASE_URL: http://127.0.0.1:54321
-      SUPABASE_ANON_KEY: test-anon-key
-      SUPABASE_SERVICE_ROLE_KEY: test-service-key
-      LLM_API_KEY: test-key
-      VLM_API_KEY: test-key
-      LLM_BASE_URL: http://127.0.0.1:9/v1
-      VLM_BASE_URL: http://127.0.0.1:9/v1
+      VITE_SUPABASE_URL: http://127.0.0.1:54321
+      VITE_SUPABASE_ANON_KEY: test-anon-key
     steps:
       - uses: actions/checkout@v4.4.0
         with:
           path: delivery
       - uses: actions/checkout@v4.4.0
         with:
-          ref: 8b8945bf246981e431570ce7e6e56fd09fcb2024
+          ref: e001849eddaa7cc0b27e23dd4d84381d7090838d
           path: source
       - uses: actions/setup-python@v5
         with:
@@ -30,100 +25,121 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify delivery bytes and apply exact-baseline edits
+      - name: Apply verified frontend-only changes
         id: apply
         working-directory: source
         run: |
-          git switch -c neoflow2.0
           python - <<'PY'
-          import base64, hashlib, io, os, pathlib, tarfile
+          import base64, hashlib, io, json, os, pathlib, tarfile
           root = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
-          archive = base64.b64decode(''.join((root/'delivery'/'.builder-delivery'/f'part{i:02d}').read_text() for i in range(6)), validate=True)
-          assert hashlib.sha256(archive).hexdigest() == 'ce299bc113290df322407e5813cbe4922a78fb8d8f00939b34c33c9f219ca2d9'
-          destination = pathlib.Path(os.environ['RUNNER_TEMP'])/'builder-package'
-          destination.mkdir()
-          with tarfile.open(fileobj=io.BytesIO(archive), mode='r:xz') as bundle:
-              for member in bundle.getmembers():
-                  name = pathlib.PurePosixPath(member.name)
-                  assert member.isfile() and not name.is_absolute() and '..' not in name.parts
-              bundle.extractall(destination, filter='data')
+          data = base64.b64decode(''.join((root/'delivery'/'.inline-delivery'/f'part{i}').read_text() for i in range(3)), validate=True)
+          assert hashlib.sha256(data).hexdigest() == 'f151377cbf743f6b38808e228fae8703b0bbba0ec491a9ed980f24164842120e'
+          original = {
+            'web/src/components/extract/ExtractSchemaEditor.tsx': 'c31cb83ef79458e105a907c505c1f806cffa02ba',
+            'web/src/lib/extractSchema.ts': '956de657d8bc3d028710bb3a84bd71b43ffea367',
+            'web/src/pages/AdminFieldsTab.tsx': '666c2cb08849858ac8f9008afbb267f6aadcb57b',
+          }
+          paths = []
+          with tarfile.open(fileobj=io.BytesIO(data), mode='r:xz') as bundle:
+            for member in bundle.getmembers():
+              name = pathlib.PurePosixPath(member.name)
+              assert member.isfile() and not name.is_absolute() and '..' not in name.parts
+              assert member.name.startswith(('web/', 'docs/')) and member.name not in paths
+              destination = root/'source'/member.name
+              if member.name in original:
+                old = destination.read_bytes()
+                assert hashlib.sha1(b'blob '+str(len(old)).encode()+b'\0'+old).hexdigest() == original[member.name]
+              else:
+                assert not destination.exists(), member.name
+              contents = bundle.extractfile(member).read()
+              contents.decode('utf-8')
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(contents)
+              paths.append(member.name)
+          assert len(paths) == 9
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'inline-paths.json').write_text(json.dumps(paths))
+          print('\n'.join(paths))
           PY
-          python "$RUNNER_TEMP/builder-package/apply_changes.py" --repo "$GITHUB_WORKSPACE/source" --apply
-          python "$GITHUB_WORKSPACE/delivery/.builder-delivery/fixups.py"
           git diff --check
-      - name: Install backend dependencies
-        id: python_deps
-        working-directory: source
-        run: python -m pip install -r requirements.txt
-      - name: Backend regression (no database or live-provider tests)
-        id: python_tests
-        if: steps.apply.outcome == 'success' && steps.python_deps.outcome == 'success'
-        continue-on-error: true
-        working-directory: source
-        run: |
-          set -o pipefail
-          python -m pytest -q tests --ignore=tests/db --ignore=tests/services/test_mineru_live.py 2>&1 | tee "$RUNNER_TEMP/python-tests.log"
       - name: Install frontend dependencies
-        id: node_deps
-        if: always() && steps.apply.outcome == 'success'
+        id: deps
         working-directory: source/web
-        run: |
-          if test -f package-lock.json; then npm ci; else npm install --package-lock=false; fi
-      - name: Frontend tests
-        id: frontend_tests
-        if: always() && steps.apply.outcome == 'success' && steps.node_deps.outcome == 'success'
+        run: npm ci
+      - name: Frontend regression
+        id: tests
         continue-on-error: true
         working-directory: source/web
         run: |
           set -o pipefail
-          npm test 2>&1 | tee "$RUNNER_TEMP/frontend-tests.log"
-      - name: Typecheck and production build
+          npm test 2>&1 | tee "$RUNNER_TEMP/inline-tests.log"
+      - name: TypeScript and production build
         id: build
-        if: always() && steps.apply.outcome == 'success' && steps.node_deps.outcome == 'success'
+        if: always() && steps.deps.outcome == 'success'
         continue-on-error: true
         working-directory: source/web
         run: |
           set -o pipefail
-          npm run build 2>&1 | tee "$RUNNER_TEMP/frontend-build.log"
-      - name: Record candidate (never update the target branch here)
+          npm run build 2>&1 | tee "$RUNNER_TEMP/inline-build.log"
+      - name: Chromium interaction regression
+        id: browser
+        if: always() && steps.deps.outcome == 'success'
+        continue-on-error: true
+        working-directory: source/web
+        run: |
+          set -o pipefail
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+          npm run dev -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/inline-vite.log" 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4173/e2e/extract-editor.html >/dev/null && break; sleep 1; done
+          node e2e/extract-editor.cjs 2>&1 | tee "$RUNNER_TEMP/inline-browser.log"
+      - name: Show browser failure context
+        if: always() && steps.browser.outcome == 'failure'
+        run: |
+          cat "$RUNNER_TEMP/inline-vite.log" || true
+          tail -c 20000 /tmp/extract-editor-browser/failure.html || true
+      - name: Store browser failure artifacts
+        if: always() && steps.browser.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: extract-inline-browser-failure
+          path: /tmp/extract-editor-browser/
+          if-no-files-found: ignore
+      - name: Record candidate only; never update neoflow2.0 here
         id: candidate
         if: always() && steps.apply.outcome == 'success'
         working-directory: source
         env:
-          PYTHON_OUTCOME: ${{ steps.python_tests.outcome }}
-          FRONTEND_OUTCOME: ${{ steps.frontend_tests.outcome }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
+          BROWSER_OUTCOME: ${{ steps.browser.outcome }}
         run: |
           python - <<'PY'
-          import os, pathlib, re, subprocess, sys
-          package = pathlib.Path(os.environ['RUNNER_TEMP'])/'builder-package'
-          sys.path.insert(0, str(package))
-          from changes import EDITS
-          paths = list(EDITS) + [f.relative_to(package/'payload').as_posix() for f in (package/'payload').rglob('*') if f.is_file() and '__pycache__' not in f.parts and f.suffix != '.pyc']
-          paths.append('tests/test_sdk/test_orchestrator.py')
-          report = pathlib.Path('docs/extract-schema-builder-validation.md')
-          outcomes = {name: os.environ[key] for name, key in [('Backend regression', 'PYTHON_OUTCOME'), ('Frontend tests', 'FRONTEND_OUTCOME'), ('Production build', 'BUILD_OUTCOME')]}
-          text = '# Schema Builder delivery validation\n\nBase: `8b8945bf246981e431570ce7e6e56fd09fcb2024`.\n\n'
-          text += '\n'.join(f'- {name}: **{value}**' for name, value in outcomes.items())
-          text += f"\n\nRun: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n"
-          for name in ['python-tests.log', 'frontend-tests.log']:
-              log = pathlib.Path(os.environ['RUNNER_TEMP'])/name
-              if log.exists():
-                  clean = re.sub(r'\x1b\[[0-9;]*m', '', log.read_text())
-                  summaries = [line for line in clean.splitlines() if re.search(r'\b\d+ passed\b', line)]
-                  text += f'\n{name}:\n\n```text\n' + '\n'.join(summaries[-3:]) + '\n```\n'
-          text += '\nExact source blob checks, unique edit anchors and frozen execution AST guard were checked before applying. SDK regression assertions now enforce draft-only creation and schema.description instead of automatic publishing and legacy prompt wrappers.\n'
-          text += '\nNo legacy configuration conversion, database writes, seed execution or deployment. Browser, live model and database integration were not performed.\n'
-          text += '\nDependency audit warnings and bundle-size/deprecation warnings are not resolved by this feature; see the linked run. No dependency versions or lockfiles were changed.\n'
+          import json, os, pathlib, re, subprocess
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          paths = json.loads((temp/'inline-paths.json').read_text())
+          report = pathlib.Path('docs/extract-inline-editor-validation.md')
+          text = '# Inline Extract editor validation\n\nBase: `e001849eddaa7cc0b27e23dd4d84381d7090838d`.\n\n'
+          for label, env in [('Vitest','TEST_OUTCOME'),('TypeScript and production build','BUILD_OUTCOME'),('Chromium interactions','BROWSER_OUTCOME')]:
+            text += f'- {label}: **{os.environ[env]}**\n'
+          text += f"\nRun: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n"
+          for name in ['inline-tests.log', 'inline-browser.log']:
+            file = temp/name
+            if file.exists():
+              clean = re.sub(r'\x1b\[[0-9;]*m', '', file.read_text())
+              lines = [line for line in clean.splitlines() if 'passed' in line or line.startswith(('PASS ', 'FAIL:'))]
+              text += '\n```text\n'+'\n'.join(lines)+'\n```\n'
+          text += '\nOnly frontend code, isolated browser fixtures and documentation changed. No backend, execution semantics, legacy migration, seed writes or deployment. Browser API requests are mocked; no real database/model integration was performed. No package versions or lockfiles were changed.\n'
           report.write_text(text)
-          subprocess.check_call(['git', 'add', '--', *paths, str(report)])
+          subprocess.check_call(['git','add','--',*paths,str(report)])
           PY
           git diff --cached --check
           git diff --cached --stat
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat(extract): schema-first Builder and immutable result view; remove legacy fields fallback'
-          candidate="codex/extract-schema-builder-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git commit -m 'feat(extract): inline tree schema editing with sticky save and contextual field actions'
+          candidate="codex/extract-inline-editor-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           git push origin "HEAD:refs/heads/$candidate"
           echo "Candidate: $candidate" >> "$GITHUB_STEP_SUMMARY"
           git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
@@ -131,7 +147,7 @@ jobs:
         if: always()
         run: |
           test '${{ steps.apply.outcome }}' = success
-          test '${{ steps.python_tests.outcome }}' = success
-          test '${{ steps.frontend_tests.outcome }}' = success
+          test '${{ steps.tests.outcome }}' = success
           test '${{ steps.build.outcome }}' = success
+          test '${{ steps.browser.outcome }}' = success
           test '${{ steps.candidate.outcome }}' = success
