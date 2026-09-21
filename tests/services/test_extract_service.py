@@ -15,7 +15,6 @@ from services.extract_service import (
     build_execution_spec,
     build_engine,
     handle_extract_job,
-    legacy_fields_to_schema,
     plan_units,
     resolve_extract_spec,
     validate_output,
@@ -192,22 +191,14 @@ class TestResolveSpec:
         spec = resolve_extract_spec({"execution_spec": None}, revision=revision)
         assert spec["target"] == "per_page"
 
-    def test_legacy_fields_fallback(self):
-        fields = [
-            {"field_key": "report_no", "field_label": "报告编号", "field_type": "text", "is_required": True},
-            {"field_key": "sampling_date", "field_label": "抽样日期", "field_type": "date"},
-        ]
-        job = _job(
-            execution_spec={
-                "capability": "extract",
-                "spec_version": "1",
-                "effective_params": {"target": "per_doc", "fields": fields},
-            }
-        )
-        spec = resolve_extract_spec(job)
-        assert spec["schema_source"] == "legacy_fields"
-        assert spec["data_schema"]["required"] == ["report_no"]
-        assert spec["data_schema"]["properties"]["sampling_date"]["format"] == "date"
+    def test_fields_only_is_rejected_without_conversion(self):
+        job = _job(execution_spec={
+            "capability": "extract", "spec_version": "1",
+            "effective_params": {"fields": [{"field_key": "old", "field_type": "text"}]},
+        })
+        with pytest.raises(ExtractFailure) as exc:
+            resolve_extract_spec(job)
+        assert exc.value.reason == "schema_missing"
 
     def test_per_table_row_rejected(self):
         job = _job(

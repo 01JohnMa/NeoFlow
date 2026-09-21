@@ -26,6 +26,7 @@ from services.extract_service import (
     resolve_extract_spec,
 )
 from services.result_service import result_service
+from services.extract_result_view import resolve_result_view
 from services.supabase_service import supabase_service
 
 router = APIRouter(tags=["抽取能力"])
@@ -46,7 +47,7 @@ async def _load_definition_and_spec(
     """返回 (revision_id, execution_spec)；两者按配置状态二选一。
 
     快照原样保留 target/data_schema 的取值与存在性，非法显式值在这里被
-    resolve_extract_spec 拒绝（422、零 Job），不会被 legacy 回退掩盖。
+    resolve_extract_spec 拒绝（422、零 Job）；不支持 fields 回退。
     """
     if configuration.get("status") == "published":
         revision_id = configuration.get("current_revision_id")
@@ -116,6 +117,27 @@ async def create_extract_jobs(
     }
 
 
+async def _result_response(row: Dict[str, Any], job: Optional[Dict[str, Any]], user: CurrentUser):
+    """Add a read-only display projection; never hide raw data on projection errors."""
+    try:
+        if not job or not await _can_access_job(job, user):
+            view = {"status": "unavailable", "reason": "job_unavailable"}
+        else:
+            view = await resolve_result_view(job, row, configuration_service.get_revision)
+    except Exception:
+        # Schema/metadata retrieval is separate from access to the already-authorized result.
+        view = {"status": "unavailable", "reason": "view_load_failed"}
+    return {
+        "success": True,
+        "result_id": row.get("id"),
+        "job_id": row.get("job_id"),
+        "config_revision_id": row.get("config_revision_id"),
+        "data": row.get("data"),
+        "engine": row.get("engine"),
+        "view": view,
+    }
+
+
 @router.get("/documents/{document_id}/extract-result")
 async def get_document_extract_result(
     document_id: str,
@@ -135,14 +157,13 @@ async def get_document_extract_result(
     if not rows:
         raise HTTPException(status_code=404, detail="抽取结果不存在")
     row = rows[0]
-    return {
-        "success": True,
-        "result_id": row.get("id"),
-        "job_id": row.get("job_id"),
-        "config_revision_id": row.get("config_revision_id"),
-        "data": row.get("data"),
-        "engine": row.get("engine"),
-    }
+    # The document is already authorized. Failure to load display metadata is not
+    # failure to retrieve its raw result.
+    try:
+        job = await get_job(str(row.get("job_id") or ""))
+    except Exception:
+        job = None
+    return await _result_response(row, job, user)
 
 
 @router.get("/jobs/{job_id}/extract-result")
@@ -162,12 +183,4 @@ async def get_job_extract_result(
     )
     if not rows:
         raise HTTPException(status_code=404, detail="该任务没有正式抽取结果")
-    row = rows[0]
-    return {
-        "success": True,
-        "result_id": row.get("id"),
-        "job_id": row.get("job_id"),
-        "config_revision_id": row.get("config_revision_id"),
-        "data": row.get("data"),
-        "engine": row.get("engine"),
-    }
+    return await _result_response(rows[0], job, user)

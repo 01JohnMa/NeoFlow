@@ -127,14 +127,8 @@ describe('configurationDefinitionPreview', () => {
     expect(preview).toEqual({ kind: 'schema', schema: { type: 'object' } })
   })
 
-  it('仅 fields 非空时才按旧版配置展示字段数', () => {
-    expect(configurationDefinitionPreview({ draft_definition: { fields: [1, 2] } })).toEqual({
-      kind: 'legacy',
-      fieldCount: 2,
-    })
-    expect(configurationDefinitionPreview({ draft_definition: { fields: [] } })).toEqual({
-      kind: 'empty',
-    })
+  it('缺少 schema 时不推导其他字段格式', () => {
+    expect(configurationDefinitionPreview({ draft_definition: {} })).toEqual({ kind: 'empty' })
   })
 
   it('draft_definition 缺失时按已发布模板处理', () => {

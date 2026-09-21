@@ -1,6 +1,8 @@
 import pytest
 
-from services.configuration_service import normalize_definition
+from unittest.mock import AsyncMock
+
+from services.extract_configuration import validate_extract_definition
 from sdk.agents.orchestrator import SDKOrchestrator
 from sdk.models import (
     ConfirmTemplateRequest,
@@ -59,133 +61,74 @@ async def test_analyze_uses_parse_markdown(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_commit_creates_and_publishes_configuration(monkeypatch):
-    captured_payload = {}
-    captured_publish = {}
-
-    async def fake_create_configuration(payload, created_by=None):
-        captured_payload["payload"] = payload
-        captured_payload["created_by"] = created_by
-        return {"id": "config-1", "status": "draft", "tenant_id": payload["tenant_id"]}
-
-    async def fake_publish_configuration(configuration_id, created_by=None):
-        captured_publish["configuration_id"] = configuration_id
-        captured_publish["created_by"] = created_by
-        return {
-            "configuration": {"id": configuration_id, "status": "published"},
-            "revision": {"id": "revision-1", "revision_number": 1},
-        }
-
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.configuration_service.create_configuration",
-        fake_create_configuration,
-    )
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.configuration_service.publish_configuration",
-        fake_publish_configuration,
-    )
-
+async def test_commit_creates_schema_draft_without_publishing(monkeypatch):
+    create = AsyncMock(return_value={"id": "config-1", "status": "draft", "tenant_id": "tenant-1"})
+    publish = AsyncMock()
+    monkeypatch.setattr("sdk.agents.orchestrator.configuration_service.create_configuration", create)
+    monkeypatch.setattr("sdk.agents.orchestrator.configuration_service.publish_configuration", publish)
     session = _build_session(
         parse_mode="vlm",
         state=SDKSessionState.TEMPLATE_CONFIRMED,
         confirmed_template=ConfirmTemplateRequest(
-            template_name="出货单",
-            template_code="shipment_report",
-            fields=[
-                {
-                    "field_key": "order_no",
-                    "field_label": "订单号",
-                    "field_type": "text",
-                    "extraction_hint": "从订单号标签后提取",
-                    "sample_value": "NOZS0311046",
-                }
-            ],
+            template_name="出货单", template_code="shipment_report",
+            fields=[{
+                "field_key": "order_no", "field_label": "订单号", "field_type": "text",
+                "extraction_hint": "从订单号标签后提取", "sample_value": "NOZS0311046",
+            }],
         ),
-        prompt="抽取订单号 {markdown}",
+        prompt="仅从订单号标签后的原文提取，有歧义时省略。",
     )
-
     result = await SDKOrchestrator().commit(session)
-
-    payload = captured_payload["payload"]
+    create.assert_awaited_once()
+    publish.assert_not_awaited()
+    payload = create.await_args.args[0]
+    assert create.await_args.kwargs["created_by"] == session.user_id
     assert payload["tenant_id"] == "tenant-1"
     assert payload["name"] == "出货单"
     assert payload["code"] == "shipment_report"
     assert payload["type"] == "extract"
-    assert captured_payload["created_by"] == session.user_id
-    assert captured_publish["configuration_id"] == "config-1"
-    assert captured_publish["created_by"] == session.user_id
-
-    raw_definition = payload["definition"]
-    assert "output_mode" not in raw_definition
-    assert "excel" not in raw_definition
-    assert "push_attachment" not in raw_definition
-    assert "auto_approve" not in raw_definition
-    assert "feishu" not in raw_definition
-
-    definition = normalize_definition(raw_definition)
-    assert definition["extraction_prompt"] == "抽取订单号 {markdown}"
-    assert definition["parse"]["model_version"] == "vlm"
-    assert "per_page_extraction" not in definition
-    assert definition["fields"] == [
-        {
-            "field_key": "order_no",
-            "field_label": "订单号",
-            "field_type": "text",
-            "extraction_hint": "从订单号标签后提取",
-            "sort_order": 0,
-            "is_required": False,
-            "default_value": None,
-            "source_doc_type": None,
-        }
-    ]
-    assert "examples" not in definition
-
+    definition = validate_extract_definition(payload["definition"])
+    assert set(definition) == {"data_schema", "target", "ui"}
+    assert definition["target"] == "per_doc"
+    assert definition["data_schema"] == {
+        "type": "object", "additionalProperties": False,
+        "description": session.prompt,
+        "properties": {"order_no": {"type": "string", "description": "从订单号标签后提取"}},
+    }
+    assert definition["ui"] == {"/properties/order_no": {"label": "订单号", "order": 0}}
+    assert "NOZS0311046" not in str(definition)
     assert result.configuration_id == "config-1"
-    assert result.revision_id == "revision-1"
-    assert result.revision_number == 1
+    assert result.tenant_id == "tenant-1"
+    assert result.status == "draft"
+    assert result.revision_id is None and result.revision_number is None
     assert result.field_count == 1
     assert session.state == SDKSessionState.COMMITTED
 
 
 @pytest.mark.asyncio
-async def test_commit_uses_fallback_prompt_when_missing(monkeypatch):
-    captured_payload = {}
-
-    async def fake_create_configuration(payload, created_by=None):
-        captured_payload.update(payload)
-        return {"id": "config-2"}
-
-    async def fake_publish_configuration(configuration_id, created_by=None):
-        return {"configuration": {"id": configuration_id}, "revision": {"id": "rev-2"}}
-
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.configuration_service.create_configuration",
-        fake_create_configuration,
-    )
-    monkeypatch.setattr(
-        "sdk.agents.orchestrator.configuration_service.publish_configuration",
-        fake_publish_configuration,
-    )
-
+async def test_commit_uses_fallback_schema_description_when_missing(monkeypatch):
+    create = AsyncMock(return_value={"id": "config-2"})
+    publish = AsyncMock()
+    monkeypatch.setattr("sdk.agents.orchestrator.configuration_service.create_configuration", create)
+    monkeypatch.setattr("sdk.agents.orchestrator.configuration_service.publish_configuration", publish)
     session = _build_session(
-        id="session-2",
-        user_id="user-1",
-        state=SDKSessionState.TEMPLATE_CONFIRMED,
+        id="session-2", user_id="user-1", state=SDKSessionState.TEMPLATE_CONFIRMED,
         confirmed_template=ConfirmTemplateRequest(
-            template_name="检测报告",
-            template_code="inspection_report",
-            fields=[
-                {"field_key": "sample_name", "field_label": "样品名称"},
-            ],
+            template_name="检测报告", template_code="inspection_report",
+            fields=[{"field_key": "sample_name", "field_label": "样品名称"}],
         ),
     )
-
     result = await SDKOrchestrator().commit(session)
-
-    assert "sample_name" in captured_payload["definition"]["extraction_prompt"]
-    assert "output_mode" not in captured_payload["definition"]
-    assert "excel" not in captured_payload["definition"]
-    assert result.revision_id == "rev-2"
+    create.assert_awaited_once()
+    publish.assert_not_awaited()
+    definition = validate_extract_definition(create.await_args.args[0]["definition"])
+    assert set(definition) == {"data_schema", "target", "ui"}
+    assert definition["data_schema"]["properties"]["sample_name"]["type"] == "string"
+    description = definition["data_schema"]["description"]
+    assert "可选字段省略" in description
+    assert "{markdown}" not in description
+    assert result.status == "draft"
+    assert result.revision_id is None and result.revision_number is None
 
 
 @pytest.mark.asyncio
@@ -236,7 +179,7 @@ async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
     async def fake_run_prompt_agent(confirmed, *, model_profile):
         captured["confirmed"] = confirmed
         captured["model_profile"] = model_profile
-        return "请提取字段：sample_name\n{markdown}"
+        return "仅依据样品名称标签后的原文提取 sample_name"
 
     monkeypatch.setattr(
         "sdk.agents.orchestrator.run_prompt_agent",
@@ -265,7 +208,7 @@ async def test_generate_prompt_passes_model_profile_to_agent(monkeypatch):
         model_profile=model_profile,
     )
 
-    assert result == "请提取字段：sample_name\n{markdown}"
+    assert result == "仅依据样品名称标签后的原文提取 sample_name"
     assert captured["confirmed"] is session.confirmed_template
     assert captured["model_profile"] is model_profile
 
@@ -338,5 +281,5 @@ async def test_generate_prompt_keeps_fallback_without_model_profile(monkeypatch)
 
     result = await SDKOrchestrator().generate_prompt(session)
 
-    assert "解析文本" in result
-    assert "{markdown}" in result
+    assert "可选字段省略" in result
+    assert "{markdown}" not in result

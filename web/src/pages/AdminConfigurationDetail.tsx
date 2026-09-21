@@ -39,6 +39,7 @@ export function ConfigurationDetail({
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [confirmArchive, setConfirmArchive] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editorDirty, setEditorDirty] = useState(false)
 
   const loadRevisions = useCallback(async () => {
     setRevisionsLoading(true)
@@ -82,6 +83,7 @@ export function ConfigurationDetail({
   )
 
   const handlePublish = async () => {
+    if (editorDirty) { setError('请先保存字段草稿，再发布。'); return }
     setActionLoading('publish')
     setError(null)
     try {
@@ -121,7 +123,7 @@ export function ConfigurationDetail({
   if (!configuration) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={() => { if (!editorDirty || window.confirm('字段草稿尚未保存，确定离开？')) onBack() }}>
           <ArrowLeft className="h-4 w-4 mr-1" />
           返回配置列表
         </Button>
@@ -131,7 +133,9 @@ export function ConfigurationDetail({
   }
 
   const definition = configuration.draft_definition
-  const fieldsCount = definition?.fields?.length ?? 0
+  const fieldsCount = configuration.type === 'extract'
+    ? Object.keys(definition?.data_schema?.properties ?? {}).length
+    : definition?.fields?.length ?? 0
   const hasUnpublishedChanges =
     configuration.status === 'draft' && Boolean(configuration.current_revision_id)
 
@@ -144,7 +148,7 @@ export function ConfigurationDetail({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon-sm" onClick={onBack} title="返回配置列表">
+          <Button variant="ghost" size="icon-sm" onClick={() => { if (!editorDirty || window.confirm('字段草稿尚未保存，确定离开？')) onBack() }} title="返回配置列表">
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
@@ -168,7 +172,7 @@ export function ConfigurationDetail({
             <Button
               size="sm"
               variant="secondary"
-              disabled={actionLoading !== null}
+              disabled={actionLoading !== null || editorDirty}
               onClick={() => setConfirmArchive(true)}
             >
               <Archive className="h-4 w-4 mr-1" />
@@ -178,7 +182,7 @@ export function ConfigurationDetail({
           {configuration.status === 'draft' && (
             <Button
               size="sm"
-              disabled={actionLoading !== null}
+              disabled={actionLoading !== null || editorDirty}
               loading={actionLoading === 'publish'}
               onClick={handlePublish}
             >
@@ -210,7 +214,7 @@ export function ConfigurationDetail({
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => { if (tab.key === activeTab) return; if (!editorDirty || window.confirm('字段草稿尚未保存，确定切换？')) { setEditorDirty(false); setActiveTab(tab.key) } }}
               className={cn(
                 'rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200',
                 activeTab === tab.key
@@ -230,7 +234,7 @@ export function ConfigurationDetail({
         )}
 
         {activeTab === 'fields' && (
-          <FieldsTab configuration={configuration} onUpdated={handleUpdated} />
+          <FieldsTab configuration={configuration} onUpdated={handleUpdated} onDirtyChange={setEditorDirty} />
         )}
         {activeTab === 'revisions' && (
           <RevisionsTab

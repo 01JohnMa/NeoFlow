@@ -10,6 +10,7 @@ from services.configuration_service import (
     configuration_service,
     ConfigurationNotFound,
     ConfigurationStateError,
+    ConfigurationValidationError,
 )
 from api.dependencies.auth import get_current_user, CurrentUser
 from api.exceptions import AuthorizationError
@@ -36,6 +37,10 @@ class ConfigurationFieldModel(BaseModel):
 
 class ConfigurationDefinitionModel(BaseModel):
     model_config = ConfigDict(extra="allow")
+
+    data_schema: Optional[Dict[str, Any]] = None
+    target: Optional[str] = None
+    ui: Optional[Dict[str, Any]] = None
 
     fields: List[ConfigurationFieldModel] = Field(default_factory=list)
     extraction_prompt: Optional[str] = None
@@ -130,10 +135,15 @@ async def create_configuration(
     payload = request.model_dump(exclude_unset=True)
     payload["tenant_id"] = tenant_id
 
-    configuration = await configuration_service.create_configuration(
-        payload,
-        created_by=user.user_id,
-    )
+    try:
+        configuration = await configuration_service.create_configuration(
+            payload,
+            created_by=user.user_id,
+        )
+    except ConfigurationValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ConfigurationStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "data": configuration}
 
 
@@ -171,6 +181,8 @@ async def update_configuration(
         updated = await configuration_service.update_configuration(configuration_id, data)
     except ConfigurationNotFound:
         raise HTTPException(status_code=404, detail="配置不存在")
+    except ConfigurationValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except ConfigurationStateError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -193,6 +205,8 @@ async def publish_configuration(
         )
     except ConfigurationNotFound:
         raise HTTPException(status_code=404, detail="配置不存在")
+    except ConfigurationValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except ConfigurationStateError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

@@ -1,3 +1,4 @@
+import { ExtractResultView } from '@/components/extract/ExtractResultView'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -84,74 +85,6 @@ function engineSummary(engine?: ExtractEngine | null): string | null {
   const requests = engine.usage?.requests
   if (typeof requests === 'number') parts.push(`usage.requests: ${requests}`)
   return parts.length ? parts.join(' · ') : null
-}
-
-function JsonNode({ name, value, depth }: { name?: string; value: unknown; depth: number }) {
-  const pad = { paddingLeft: `${depth * 12}px` }
-  const label =
-    name === undefined ? null : <span className="text-primary-400">{name}: </span>
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return (
-        <div style={pad}>
-          {label}
-          <span className="text-text-muted">[]</span>
-        </div>
-      )
-    }
-    return (
-      <div>
-        <div style={pad}>
-          {label}
-          <span className="text-text-secondary">[</span>
-        </div>
-        {value.map((item, index) => (
-          <JsonNode key={index} name={String(index)} value={item} depth={depth + 1} />
-        ))}
-        <div style={pad}>
-          <span className="text-text-secondary">]</span>
-        </div>
-      </div>
-    )
-  }
-
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-    if (entries.length === 0) {
-      return (
-        <div style={pad}>
-          {label}
-          <span className="text-text-muted">{'{}'}</span>
-        </div>
-      )
-    }
-    return (
-      <div>
-        <div style={pad}>
-          {label}
-          <span className="text-text-secondary">{'{'}</span>
-        </div>
-        {entries.map(([key, entry]) => (
-          <JsonNode key={key} name={key} value={entry} depth={depth + 1} />
-        ))}
-        <div style={pad}>
-          <span className="text-text-secondary">{'}'}</span>
-        </div>
-      </div>
-    )
-  }
-
-  const display =
-    value === null ? 'null' : typeof value === 'string' ? JSON.stringify(value) : String(value)
-  return (
-    <div style={pad}>
-      {label}
-      <span className={typeof value === 'number' ? 'text-accent-400' : 'text-text-primary'}>
-        {display}
-      </span>
-    </div>
-  )
 }
 
 function HistoryDrawer({
@@ -356,8 +289,8 @@ export function ExtractPlayground() {
     staleTime: 15000,
   })
   const result = resultQuery.data || null
-  // 任务失败时不展示任何 JSON（即使后端残留了正式结果）
-  const displayableResult = result && selectedJob?.status !== 'failed' ? result : null
+  // 只有已完成任务展示正式结果；状态未加载、进行中和失败均不伪装成功。
+  const displayableResult = result && selectedJob?.status === 'completed' ? result : null
 
   // 选中结果变化（Run / 切换文档 / 打开 History）时同步 ?job=<selectedJobId>
   useEffect(() => {
@@ -586,10 +519,6 @@ export function ExtractPlayground() {
                         <pre className="max-h-40 overflow-auto rounded-lg border border-border-default bg-bg-secondary p-3 font-mono text-[11px] leading-relaxed text-text-secondary">
                           {JSON.stringify(definitionPreview.schema, null, 2)}
                         </pre>
-                      ) : definitionPreview.kind === 'legacy' ? (
-                        <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
-                          旧版配置：运行时按字段自动转换（{definitionPreview.fieldCount} 个字段）
-                        </p>
                       ) : definitionPreview.kind === 'empty' ? (
                         <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
                           配置没有可预览的定义
@@ -835,15 +764,19 @@ export function ExtractPlayground() {
               <p className="py-10 text-center text-sm text-text-muted">
                 {selectedJob?.status === 'queued' || selectedJob?.status === 'processing'
                   ? '抽取进行中，完成后自动展示'
-                  : '该任务没有正式结果（失败或进行中）'}
+                  : selectedJob?.status === 'failed' ? '抽取失败，没有正式结果'
+                    : selectedJob?.status === 'completed' ? '任务已完成，但正式结果暂不可用，请刷新重试'
+                      : '正在读取任务状态'}
               </p>
             )}
             {displayableResult && (
               <>
                 {summary && <p className="mb-2 text-xs text-text-muted">{summary}</p>}
-                <div className="overflow-auto rounded-lg border border-border-default bg-bg-secondary p-3 font-mono text-xs leading-relaxed">
-                  <JsonNode value={displayableResult.data} depth={0} />
-                </div>
+                <ExtractResultView
+                  key={displayableResult.job_id}
+                  data={displayableResult.data}
+                  view={displayableResult.view}
+                />
               </>
             )}
           </div>

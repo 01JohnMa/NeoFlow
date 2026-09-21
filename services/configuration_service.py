@@ -9,6 +9,12 @@ from typing import Optional, Dict, Any, List
 from loguru import logger
 
 from services.base import SupabaseClientMixin
+from services.extract_configuration import (
+    ExtractConfigurationError,
+    empty_extract_definition,
+    merge_extract_definition,
+    validate_extract_definition,
+)
 
 CONFIGURATION_TYPES = ("extract", "classify", "split", "composite")
 
@@ -80,6 +86,24 @@ class ConfigurationStateError(ConfigurationError):
     """配置生命周期状态不允许当前操作"""
 
 
+class ConfigurationValidationError(ConfigurationStateError):
+    """Configuration content is invalid (HTTP 422), not a lifecycle conflict."""
+
+
+def _validated_extract_definition(definition: Any) -> Dict[str, Any]:
+    try:
+        return validate_extract_definition(definition)
+    except ExtractConfigurationError as exc:
+        raise ConfigurationValidationError(str(exc)) from exc
+
+
+def _merged_extract_definition(base: Any, patch: Any) -> Dict[str, Any]:
+    try:
+        return merge_extract_definition(base, patch)
+    except ExtractConfigurationError as exc:
+        raise ConfigurationValidationError(str(exc)) from exc
+
+
 def normalize_field(field: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """补齐单个字段的默认键，保留额外键。"""
     field = field or {}
@@ -146,9 +170,17 @@ def build_extraction_config(
 
     这是工作流读取配置的唯一形态：字段、prompt 与各能力参数都在这里归一化。
     """
-    definition = normalize_definition(
-        definition if definition is not None else configuration.get("draft_definition")
-    )
+    selected = definition if definition is not None else configuration.get("draft_definition")
+    if configuration.get("type") == "extract":
+        validated = _validated_extract_definition(selected)
+        return {
+            **{key: configuration.get(key) for key in (
+                "id", "tenant_id", "project_id", "name", "code", "description", "type", "status"
+            )},
+            "revision_id": configuration.get("current_revision_id"),
+            **validated,
+        }
+    definition = normalize_definition(selected)
     return {
         "id": configuration["id"],
         "tenant_id": configuration.get("tenant_id"),
@@ -437,6 +469,15 @@ class ConfigurationService(SupabaseClientMixin):
         if config_type not in CONFIGURATION_TYPES:
             raise ConfigurationStateError(f"不支持的配置类型: {config_type}")
 
+        raw_definition = data.get("definition")
+        if config_type == "extract":
+            # An explicitly new empty draft, not conversion of a stored configuration.
+            definition = _validated_extract_definition(
+                empty_extract_definition() if raw_definition is None or raw_definition == {} else raw_definition
+            )
+        else:
+            definition = normalize_definition(raw_definition)
+
         payload = {
             "tenant_id": tenant_id,
             "project_id": project_id,
@@ -445,7 +486,7 @@ class ConfigurationService(SupabaseClientMixin):
             "description": data.get("description"),
             "type": config_type,
             "status": "draft",
-            "draft_definition": normalize_definition(data.get("definition")),
+            "draft_definition": definition,
             "created_by": created_by,
         }
 
@@ -482,11 +523,21 @@ class ConfigurationService(SupabaseClientMixin):
         if data.get("type") is not None and data["type"] not in CONFIGURATION_TYPES:
             raise ConfigurationStateError(f"不支持的配置类型: {data['type']}")
 
-        if data.get("definition") is not None:
-            payload["draft_definition"] = merge_definition(
-                configuration.get("draft_definition"),
-                data["definition"],
-            )
+        effective_type = data.get("type") or configuration.get("type")
+        if "definition" in data:
+            if effective_type == "extract":
+                payload["draft_definition"] = _merged_extract_definition(
+                    configuration.get("draft_definition"), data["definition"],
+                )
+            elif data["definition"] is not None:
+                payload["draft_definition"] = merge_definition(
+                    configuration.get("draft_definition"), data["definition"],
+                )
+            if "draft_definition" in payload and configuration["status"] == "published":
+                payload["status"] = "draft"
+        elif effective_type == "extract" and configuration.get("type") != "extract":
+            # Changing the type must not make an invalid existing definition executable.
+            payload["draft_definition"] = _validated_extract_definition(configuration.get("draft_definition"))
             if configuration["status"] == "published":
                 payload["status"] = "draft"
 
@@ -528,7 +579,11 @@ class ConfigurationService(SupabaseClientMixin):
                 f"配置类型 {configuration.get('type')} 尚未实现，暂不可发布"
             )
 
-        definition = normalize_definition(configuration.get("draft_definition"))
+        definition = (
+            _validated_extract_definition(configuration.get("draft_definition"))
+            if configuration.get("type") == "extract"
+            else normalize_definition(configuration.get("draft_definition"))
+        )
         if configuration.get("type") == "extract":
             from services.extract_service import (
                 ExtractFailure,

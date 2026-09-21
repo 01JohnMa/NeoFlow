@@ -1,3 +1,4 @@
+import { ExtractSchemaEditor } from '@/components/extract/ExtractSchemaEditor'
 import { useState } from 'react'
 import * as configurationsApi from '@/services/configurations'
 import type {
@@ -124,7 +125,7 @@ function toConfigurationField(
   }
 }
 
-export function FieldsTab({
+function FlatFieldsTab({
   configuration,
   onUpdated,
 }: {
@@ -315,5 +316,26 @@ export function FieldsTab({
         onConfirm={handleDelete}
       />
     </div>
+  )
+}
+
+/** Extract edits the schema directly. Flat fields are only for other operation types. */
+export function FieldsTab({ configuration, onUpdated, onDirtyChange }: {
+  configuration: Configuration
+  onUpdated: (configuration: Configuration) => void
+  onDirtyChange?: (dirty: boolean) => void
+}) {
+  if (configuration.type !== 'extract') return <FlatFieldsTab configuration={configuration} onUpdated={onUpdated} />
+  return (
+    <ExtractSchemaEditor
+      key={`${configuration.id}:${configuration.updated_at}`}
+      definition={configuration.draft_definition}
+      readOnly={configuration.status === 'archived'}
+      onDirtyChange={onDirtyChange}
+      onSave={async (definition) => {
+        const updated = await configurationsApi.updateConfiguration(configuration.id, { definition })
+        onUpdated(updated)
+      }}
+    />
   )
 }

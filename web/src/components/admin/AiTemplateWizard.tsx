@@ -38,7 +38,7 @@ const steps = [
   { key: 'upload', label: '上传样例' },
   { key: 'analyze', label: 'AI 分析' },
   { key: 'confirm', label: '确认配置' },
-  { key: 'commit', label: '发布配置' },
+  { key: 'commit', label: '保存草稿' },
 ]
 
 const createEmptyField = (index: number): SDKDetectedField => ({
@@ -226,7 +226,7 @@ export function AiTemplateWizard({
   }
 
   const handleCommit = () => {
-    if (!session || !canCommit) return
+    if (!session || !canCommit || commitResult || loadingAction) return
     void runAction('commit', async () => {
       await confirmCurrentTemplate()
       let finalPrompt = prompt
@@ -593,22 +593,22 @@ export function AiTemplateWizard({
                   loading={loadingAction === 'prompt'}
                 >
                   <Sparkles className="h-4 w-4" />
-                  生成 Prompt
+                  生成抽取说明
                 </Button>
                 <Button
                   size="sm"
                   onClick={handleCommit}
-                  disabled={!canCommit}
+                  disabled={!canCommit || !!commitResult || loadingAction !== null}
                   loading={loadingAction === 'commit'}
                 >
-                  创建并发布配置
+                  保存为配置草稿
                 </Button>
               </div>
 
               {prompt && (
                 <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="text-sm font-medium text-text-primary">Prompt 预览</div>
+                    <div className="text-sm font-medium text-text-primary">整体抽取说明（根 schema.description）</div>
                     {!promptIsCurrent && (
                       <span className="text-xs text-warning-400">配置已更新</span>
                     )}
@@ -629,8 +629,8 @@ export function AiTemplateWizard({
 
           {commitResult && (
             <div className="rounded-lg border border-success-500/30 bg-success-500/10 px-4 py-3 text-sm text-success-500">
-              已创建并发布配置 {commitResult.configuration_id}（修订 #
-              {commitResult.revision_number}），包含 {commitResult.field_count} 个字段。
+              已创建配置草稿 {commitResult.configuration_id}，包含 {commitResult.field_count} 个字段。
+              可在 Builder 添加枚举和对象列表，确认后再发布。
             </div>
           )}
         </div>

@@ -1,0 +1,509 @@
+{
+  "name": "立项基本信息-药物注册类",
+  "code": "PRJ_BASIC_INFO_DRUG_REGISTRATION",
+  "description": "38 字段契约；仅文档有依据的字段返回。产品列表行内仅 name 必填。",
+  "type": "extract",
+  "definition": {
+    "target": "per_doc",
+    "data_schema": {
+      "type": "object",
+      "description": "只依据文档提取立项基本信息。可选字段无依据则省略，不输出 null 或空值占位。场景名称不是文档证据，不自动填入试验类型或注册类型。所有日期必须有完整年月日依据，不补全日期。仅输出以字段键为属性的 JSON 对象，不输出 fields/value/confidence/source 包装。",
+      "properties": {
+        "registration_type": {
+          "type": "string",
+          "enum": [
+            "注册类",
+            "非注册类"
+          ],
+          "description": "注册类型；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "trial_type": {
+          "type": "string",
+          "enum": [
+            "药物",
+            "器械",
+            "体外诊断试剂",
+            "其它"
+          ],
+          "description": "试验类型；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "trial_phase": {
+          "type": "string",
+          "enum": [
+            "I期",
+            "II期",
+            "III期",
+            "IV期",
+            "BE",
+            "其他"
+          ],
+          "description": "试验分期；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "blinding_method": {
+          "type": "string",
+          "enum": [
+            "开放",
+            "单盲",
+            "双盲",
+            "双盲双模拟"
+          ],
+          "description": "盲法；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "planned_start_date": {
+          "type": "string",
+          "format": "date",
+          "description": "计划开始日期；仅在原文有完整年月日时输出 YYYY-MM-DD。只提供年月或年份时省略，不补月初、月末或任意日期。"
+        },
+        "planned_end_date": {
+          "type": "string",
+          "format": "date",
+          "description": "计划结束日期；仅在原文有完整年月日时输出 YYYY-MM-DD。只提供年月或年份时省略，不补月初、月末或任意日期。"
+        },
+        "planned_subject_count": {
+          "type": "number",
+          "description": "总设计例数纯数字，不带单位。"
+        },
+        "project_name": {
+          "type": "string",
+          "description": "研究项目完整名称，通常在方案封面。"
+        },
+        "project_short_name": {
+          "type": "string",
+          "description": "项目简称。"
+        },
+        "registration_no": {
+          "type": "string",
+          "description": "临床研究登记号，如 ChiCTR/CTR 开头。"
+        },
+        "registration_date": {
+          "type": "string",
+          "format": "date",
+          "description": "登记日期；仅在原文有完整年月日时输出 YYYY-MM-DD。只提供年月或年份时省略，不补月初、月末或任意日期。"
+        },
+        "project_scope": {
+          "type": "string",
+          "description": "如「国内多中心」。"
+        },
+        "nmpa_info": {
+          "type": "string",
+          "description": "药监部门批件号/通知书号及状态。"
+        },
+        "indication": {
+          "type": "string",
+          "description": "适应症"
+        },
+        "multisite_flag": {
+          "type": "string",
+          "enum": [
+            "是",
+            "否"
+          ],
+          "description": "是否多中心；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "human_resource_review": {
+          "type": "string",
+          "description": "人类遗传资源采集/出境等备案情况描述。"
+        },
+        "insurance_flag": {
+          "type": "string",
+          "enum": [
+            "是",
+            "否"
+          ],
+          "description": "是否购买保险；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "project_owner": {
+          "type": "string",
+          "description": "项目负责人姓名。"
+        },
+        "project_owner_phone": {
+          "type": "string",
+          "description": "原文中的手机号，保留字符串。"
+        },
+        "project_owner_email": {
+          "type": "string",
+          "description": "原文中的邮箱。"
+        },
+        "protocol_no": {
+          "type": "string",
+          "description": "试验方案编号。"
+        },
+        "protocol_name": {
+          "type": "string",
+          "description": "方案名称"
+        },
+        "protocol_version": {
+          "type": "string",
+          "description": "如 V2.1。"
+        },
+        "study_objective": {
+          "type": "string",
+          "description": "试验目的章节摘录。"
+        },
+        "study_design": {
+          "type": "string",
+          "description": "试验设计类型描述。"
+        },
+        "sample_size": {
+          "type": "string",
+          "description": "可含单位，如「48例」。"
+        },
+        "inclusion_criteria": {
+          "type": "string",
+          "description": "入选标准逐条。"
+        },
+        "exclusion_criteria": {
+          "type": "string",
+          "description": "排除标准逐条。"
+        },
+        "study_group": {
+          "type": "string",
+          "description": "分组与用药安排的原文表述。"
+        },
+        "primary_endpoint": {
+          "type": "string",
+          "description": "主要终点指标"
+        },
+        "secondary_endpoint": {
+          "type": "string",
+          "description": "次要终点指标"
+        },
+        "drug_cn_name": {
+          "type": "string",
+          "description": "研究产品中文名。"
+        },
+        "drug_en_name": {
+          "type": "string",
+          "description": "研究产品英文名，不以参考文献商品名代替。"
+        },
+        "drug_registration_class": {
+          "type": "string",
+          "enum": [
+            "化学药",
+            "治疗用生物制品",
+            "预防用生物制品",
+            "中药",
+            "天然药物"
+          ],
+          "description": "药物注册分类；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "dosage_form": {
+          "type": "string",
+          "enum": [
+            "片剂",
+            "胶囊剂",
+            "颗粒剂",
+            "注射液",
+            "冻干粉针剂",
+            "口服溶液",
+            "乳膏剂",
+            "贴剂",
+            "其他"
+          ],
+          "description": "剂型；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+        },
+        "specification_model": {
+          "type": "string",
+          "description": "规格或型号。"
+        },
+        "combination_products": {
+          "type": "array",
+          "description": "每行一个原文有依据的联合产品；应急用药不自动视为联合产品。 无依据时省略整个字段；行内无依据的可选子字段省略，不填空串。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "原文有依据的产品名称。"
+              },
+              "name_en": {
+                "type": "string",
+                "description": "原文有依据才输出。"
+              },
+              "specification_model": {
+                "type": "string",
+                "description": "原文有依据才输出。"
+              },
+              "dosage_form": {
+                "type": "string",
+                "enum": [
+                  "片剂",
+                  "胶囊剂",
+                  "颗粒剂",
+                  "注射液",
+                  "冻干粉针剂",
+                  "口服溶液",
+                  "乳膏剂",
+                  "贴剂",
+                  "其他"
+                ],
+                "description": "剂型；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+              },
+              "drug_registration_class": {
+                "type": "string",
+                "enum": [
+                  "化学药",
+                  "治疗用生物制品",
+                  "预防用生物制品",
+                  "中药",
+                  "天然药物"
+                ],
+                "description": "药物注册分类；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "control_products": {
+          "type": "array",
+          "description": "每行一个原文有依据的对照产品。 无依据时省略整个字段；行内无依据的可选子字段省略，不填空串。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "原文有依据的产品名称。"
+              },
+              "name_en": {
+                "type": "string",
+                "description": "原文有依据才输出。"
+              },
+              "specification_model": {
+                "type": "string",
+                "description": "原文有依据才输出。"
+              },
+              "dosage_form": {
+                "type": "string",
+                "enum": [
+                  "片剂",
+                  "胶囊剂",
+                  "颗粒剂",
+                  "注射液",
+                  "冻干粉针剂",
+                  "口服溶液",
+                  "乳膏剂",
+                  "贴剂",
+                  "其他"
+                ],
+                "description": "剂型；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+              },
+              "drug_registration_class": {
+                "type": "string",
+                "enum": [
+                  "化学药",
+                  "治疗用生物制品",
+                  "预防用生物制品",
+                  "中药",
+                  "天然药物"
+                ],
+                "description": "药物注册分类；仅有明确依据时归一到候选值，一字不差；无法归一时省略，不猜测「其他」。"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui": {
+      "/properties/registration_type": {
+        "label": "注册类型",
+        "order": 0
+      },
+      "/properties/trial_type": {
+        "label": "试验类型",
+        "order": 1
+      },
+      "/properties/trial_phase": {
+        "label": "试验分期",
+        "order": 2
+      },
+      "/properties/blinding_method": {
+        "label": "盲法",
+        "order": 3
+      },
+      "/properties/planned_start_date": {
+        "label": "计划开始日期",
+        "order": 4
+      },
+      "/properties/planned_end_date": {
+        "label": "计划结束日期",
+        "order": 5
+      },
+      "/properties/planned_subject_count": {
+        "label": "试验总设计例数",
+        "order": 6
+      },
+      "/properties/project_name": {
+        "label": "项目名称",
+        "order": 7
+      },
+      "/properties/project_short_name": {
+        "label": "项目简称",
+        "order": 8
+      },
+      "/properties/registration_no": {
+        "label": "登记号",
+        "order": 9
+      },
+      "/properties/registration_date": {
+        "label": "登记日期",
+        "order": 10
+      },
+      "/properties/project_scope": {
+        "label": "项目范围",
+        "order": 11
+      },
+      "/properties/nmpa_info": {
+        "label": "NMPA信息",
+        "order": 12
+      },
+      "/properties/indication": {
+        "label": "适应症",
+        "order": 13
+      },
+      "/properties/multisite_flag": {
+        "label": "是否多中心",
+        "order": 14
+      },
+      "/properties/human_resource_review": {
+        "label": "人类遗传资源审核备案情况",
+        "order": 15
+      },
+      "/properties/insurance_flag": {
+        "label": "是否购买保险",
+        "order": 16
+      },
+      "/properties/project_owner": {
+        "label": "项目负责人",
+        "order": 17
+      },
+      "/properties/project_owner_phone": {
+        "label": "项目负责人手机号",
+        "order": 18
+      },
+      "/properties/project_owner_email": {
+        "label": "项目负责人邮箱",
+        "order": 19
+      },
+      "/properties/protocol_no": {
+        "label": "试验方案号",
+        "order": 20
+      },
+      "/properties/protocol_name": {
+        "label": "方案名称",
+        "order": 21
+      },
+      "/properties/protocol_version": {
+        "label": "方案版本号",
+        "order": 22
+      },
+      "/properties/study_objective": {
+        "label": "试验目的",
+        "order": 23
+      },
+      "/properties/study_design": {
+        "label": "试验设计",
+        "order": 24
+      },
+      "/properties/sample_size": {
+        "label": "样本量",
+        "order": 25
+      },
+      "/properties/inclusion_criteria": {
+        "label": "入选标准",
+        "order": 26
+      },
+      "/properties/exclusion_criteria": {
+        "label": "排除标准",
+        "order": 27
+      },
+      "/properties/study_group": {
+        "label": "试验分组",
+        "order": 28
+      },
+      "/properties/primary_endpoint": {
+        "label": "主要终点指标",
+        "order": 29
+      },
+      "/properties/secondary_endpoint": {
+        "label": "次要终点指标",
+        "order": 30
+      },
+      "/properties/drug_cn_name": {
+        "label": "研究产品中文名称",
+        "order": 31
+      },
+      "/properties/drug_en_name": {
+        "label": "研究产品英文名称",
+        "order": 32
+      },
+      "/properties/drug_registration_class": {
+        "label": "药物注册分类",
+        "order": 33
+      },
+      "/properties/dosage_form": {
+        "label": "剂型",
+        "order": 34
+      },
+      "/properties/specification_model": {
+        "label": "规格/型号",
+        "order": 35
+      },
+      "/properties/combination_products": {
+        "label": "联合产品",
+        "order": 36
+      },
+      "/properties/combination_products/items/properties/name": {
+        "label": "产品名称",
+        "order": 0
+      },
+      "/properties/combination_products/items/properties/name_en": {
+        "label": "产品英文名",
+        "order": 1
+      },
+      "/properties/combination_products/items/properties/specification_model": {
+        "label": "规格/型号",
+        "order": 2
+      },
+      "/properties/combination_products/items/properties/dosage_form": {
+        "label": "剂型",
+        "order": 3
+      },
+      "/properties/combination_products/items/properties/drug_registration_class": {
+        "label": "药物注册分类",
+        "order": 4
+      },
+      "/properties/control_products": {
+        "label": "对照产品",
+        "order": 37
+      },
+      "/properties/control_products/items/properties/name": {
+        "label": "产品名称",
+        "order": 0
+      },
+      "/properties/control_products/items/properties/name_en": {
+        "label": "产品英文名",
+        "order": 1
+      },
+      "/properties/control_products/items/properties/specification_model": {
+        "label": "规格/型号",
+        "order": 2
+      },
+      "/properties/control_products/items/properties/dosage_form": {
+        "label": "剂型",
+        "order": 3
+      },
+      "/properties/control_products/items/properties/drug_registration_class": {
+        "label": "药物注册分类",
+        "order": 4
+      }
+    }
+  }
+}

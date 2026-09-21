@@ -59,11 +59,10 @@ export function resolveSelectedConfigId(
 
 export type ConfigurationDefinitionPreview =
   | { kind: 'schema'; schema: unknown }
-  | { kind: 'legacy'; fieldCount: number }
   | { kind: 'empty' }
   | { kind: 'published-template' }
 
-/** 配置定义预览：schema > 旧版字段 > 无可预览定义 > 已发布模板（定义在执行时读取） */
+/** 配置定义预览只读 data_schema，不推导历史 fields。 */
 export function configurationDefinitionPreview(
   config: Pick<ExtractConfiguration, 'draft_definition'> | null | undefined,
 ): ConfigurationDefinitionPreview {
@@ -72,7 +71,5 @@ export function configurationDefinitionPreview(
   if (definition.data_schema !== undefined && definition.data_schema !== null) {
     return { kind: 'schema', schema: definition.data_schema }
   }
-  const fieldCount = definition.fields?.length ?? 0
-  if (fieldCount > 0) return { kind: 'legacy', fieldCount }
   return { kind: 'empty' }
 }
