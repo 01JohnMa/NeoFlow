@@ -54,6 +54,10 @@ _Avoid_: tier, model version, OCR mode
 The result unit of one Extraction run — the whole document (`per_doc`) or each page (`per_page`); `per_table_row` is reserved by the contract but not yet delivered (executions reject it explicitly). It selects the outer shape of the Extraction Result, never the schema of one instance. Chosen in the Configuration, never inferred from content.
 _Avoid_: granularity, chunking strategy, field scope
 
+**Extraction Strategy**:
+The page-selection strategy for an Extract run: `full_document` keeps the current whole-ParseResult behavior, while `page_routed` is an optional `per_doc` strategy that selects relevant pages before the LLM call. It changes context selection, not the Field Schema, Extraction Target, or Parse Mode, and is frozen with the Revision or Job snapshot.
+_Avoid_: Parse Mode, Extraction Target, Configuration Type
+
 ## Configurations and fields
 
 **Configuration**:
