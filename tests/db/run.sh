@@ -93,6 +93,9 @@ psql_gate -f "$ROOT/tests/db/test_parse_admission.sql"
 echo "[gate] Extract 预算/交卷契约冒烟"
 psql_gate -f "$ROOT/tests/db/test_extract_commit.sql"
 
+echo "[gate] Page Index 缓存约束冒烟"
+psql_gate -f "$ROOT/tests/db/test_page_index_cache.sql"
+
 echo "[gate] 并发认领不变量"
 psql_gate -f "$ROOT/tests/db/setup_claim_jobs.sql"
 psql_gate -c "DO \$\$ BEGIN FOR i IN 1..40 LOOP PERFORM 1 FROM claim_next_processing_job('gate-worker-a', 1800); END LOOP; END \$\$;" &
