@@ -1,0 +1,127 @@
+name: Validate schema-first Builder delivery
+on:
+  push:
+    branches: [codex/extract-schema-builder-delivery]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_ANON_KEY: test-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: test-service-key
+      LLM_API_KEY: test-key
+      VLM_API_KEY: test-key
+      LLM_BASE_URL: http://127.0.0.1:9/v1
+      VLM_BASE_URL: http://127.0.0.1:9/v1
+    steps:
+      - uses: actions/checkout@v4.4.0
+        with:
+          path: delivery
+      - uses: actions/checkout@v4.4.0
+        with:
+          ref: 8b8945bf246981e431570ce7e6e56fd09fcb2024
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify delivery bytes and apply exact-baseline edits
+        id: apply
+        working-directory: source
+        run: |
+          git switch -c neoflow2.0
+          python - <<'PY'
+          import base64, hashlib, io, os, pathlib, tarfile
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          archive = base64.b64decode(''.join((root/'delivery'/'.builder-delivery'/f'part{i:02d}').read_text() for i in range(6)), validate=True)
+          assert hashlib.sha256(archive).hexdigest() == 'ce299bc113290df322407e5813cbe4922a78fb8d8f00939b34c33c9f219ca2d9'
+          destination = pathlib.Path(os.environ['RUNNER_TEMP'])/'builder-package'
+          destination.mkdir()
+          with tarfile.open(fileobj=io.BytesIO(archive), mode='r:xz') as bundle:
+              for member in bundle.getmembers():
+                  name = pathlib.PurePosixPath(member.name)
+                  assert member.isfile() and not name.is_absolute() and '..' not in name.parts
+              bundle.extractall(destination, filter='data')
+          PY
+          python "$RUNNER_TEMP/builder-package/apply_changes.py" --repo "$GITHUB_WORKSPACE/source" --apply
+          git diff --check
+      - name: Install backend dependencies
+        id: python_deps
+        working-directory: source
+        run: python -m pip install -r requirements.txt
+      - name: Backend regression (no database or live-provider tests)
+        id: python_tests
+        if: steps.apply.outcome == 'success' && steps.python_deps.outcome == 'success'
+        continue-on-error: true
+        working-directory: source
+        run: |
+          set -o pipefail
+          python -m pytest -q tests --ignore=tests/db --ignore=tests/services/test_mineru_live.py 2>&1 | tee "$RUNNER_TEMP/python-tests.log"
+      - name: Install frontend dependencies
+        id: node_deps
+        if: always() && steps.apply.outcome == 'success'
+        working-directory: source/web
+        run: |
+          if test -f package-lock.json; then npm ci; else npm install --package-lock=false; fi
+      - name: Frontend tests
+        id: frontend_tests
+        if: always() && steps.apply.outcome == 'success' && steps.node_deps.outcome == 'success'
+        continue-on-error: true
+        working-directory: source/web
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/frontend-tests.log"
+      - name: Typecheck and production build
+        id: build
+        if: always() && steps.apply.outcome == 'success' && steps.node_deps.outcome == 'success'
+        continue-on-error: true
+        working-directory: source/web
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/frontend-build.log"
+      - name: Record candidate (never update the target branch here)
+        id: candidate
+        if: always() && steps.apply.outcome == 'success'
+        working-directory: source
+        env:
+          PYTHON_OUTCOME: ${{ steps.python_tests.outcome }}
+          FRONTEND_OUTCOME: ${{ steps.frontend_tests.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, subprocess, sys
+          package = pathlib.Path(os.environ['RUNNER_TEMP'])/'builder-package'
+          sys.path.insert(0, str(package))
+          from changes import EDITS
+          paths = list(EDITS) + [f.relative_to(package/'payload').as_posix() for f in (package/'payload').rglob('*') if f.is_file() and '__pycache__' not in f.parts and f.suffix != '.pyc']
+          report = pathlib.Path('docs/extract-schema-builder-validation.md')
+          outcomes = {name: os.environ[key] for name, key in [('Backend regression', 'PYTHON_OUTCOME'), ('Frontend tests', 'FRONTEND_OUTCOME'), ('Production build', 'BUILD_OUTCOME')]}
+          text = '# Schema Builder delivery validation\n\nBase: `8b8945bf246981e431570ce7e6e56fd09fcb2024`.\n\n'
+          text += '\n'.join(f'- {name}: **{value}**' for name, value in outcomes.items())
+          text += f"\n\nRun: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n"
+          text += '\nExact source blob checks, unique edit anchors and frozen execution AST guard were checked before applying. No legacy configuration conversion, database writes, seed execution or deployment. Browser, live model and database integration were not performed.\n'
+          report.write_text(text)
+          subprocess.check_call(['git', 'add', '--', *paths, str(report)])
+          PY
+          git diff --cached --check
+          git diff --cached --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(extract): schema-first Builder and immutable result view; remove legacy fields fallback'
+          candidate="codex/extract-schema-builder-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git push origin "HEAD:refs/heads/$candidate"
+          echo "Candidate: $candidate" >> "$GITHUB_STEP_SUMMARY"
+          git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
+      - name: Validation gate
+        if: always()
+        run: |
+          test '${{ steps.apply.outcome }}' = success
+          test '${{ steps.python_tests.outcome }}' = success
+          test '${{ steps.frontend_tests.outcome }}' = success
+          test '${{ steps.build.outcome }}' = success
+          test '${{ steps.candidate.outcome }}' = success
