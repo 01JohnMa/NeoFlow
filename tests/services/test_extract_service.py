@@ -310,6 +310,51 @@ class TestValidateOutput:
         issues = validate_output("per_page", SCHEMA, [{"report_no": "ok"}, {"conclusion": None}])
         assert issues and issues[0]["json_path"] == "$[1]"
 
+    def test_routed_evidence_requires_quote_and_matches_block(self):
+        schema = {
+            "type": "object",
+            "properties": {"report_no": {"type": "string"}},
+            "additionalProperties": False,
+        }
+        refs = {1: {"text": "page text", "blocks": {"b1": "R1 block"}}}
+
+        accepted, _ = extract_service._validate_candidate_values(
+            schema,
+            {"report_no": "R1"},
+            {"/report_no": [{"page_no": 1, "block_id": "b1"}]},
+            ["/report_no"],
+            refs,
+            {},
+        )
+        assert accepted == {}
+
+        accepted, _ = extract_service._validate_candidate_values(
+            schema,
+            {"report_no": "R1"},
+            {"/report_no": [{"page_no": 1, "block_id": "b1", "quote": "R1 block"}]},
+            ["/report_no"],
+            refs,
+            {},
+        )
+        assert accepted == {"/report_no": "R1"}
+
+    def test_routed_unknown_write_path_is_rejected(self):
+        schema = {
+            "type": "object",
+            "properties": {"report_no": {"type": "string"}},
+            "additionalProperties": False,
+        }
+        with pytest.raises(ExtractFailure) as exc:
+            extract_service._validate_candidate_values(
+                schema,
+                {"unknown": "value"},
+                {"/unknown": [{"page_no": 1, "quote": "value"}]},
+                ["/report_no"],
+                {1: {"text": "value", "blocks": {}}},
+                {},
+            )
+        assert exc.value.reason == "routed_write_path_invalid"
+
 
 class TestHandleExtract:
     @pytest.mark.asyncio

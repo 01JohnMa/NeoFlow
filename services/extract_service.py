@@ -501,6 +501,31 @@ def _evidence_refs(evidence: Any, path: str) -> List[Dict[str, Any]]:
     return []
 
 
+def _value_paths(value: Any, path: str = "") -> List[str]:
+    """Return leaf JSON-pointer paths while treating arrays as atomic values."""
+    if isinstance(value, dict):
+        paths: List[str] = []
+        for key, child in value.items():
+            child_path = f"{path}/{_escape_pointer_token(str(key))}"
+            paths.extend(_value_paths(child, child_path))
+        return paths or ([path] if path else [])
+    return [path] if path else []
+
+
+def _direct_value_supported(node: Dict[str, Any], value: Any, quote: str) -> bool:
+    """Apply only deterministic support checks; semantic paraphrases remain model-judged."""
+    if isinstance(value, (dict, list)):
+        return True
+    if node.get("format") == "date" or isinstance(value, (int, float)) or (
+        isinstance(value, str) and any(char.isdigit() for char in value)
+    ):
+        value_digits = "".join(char for char in str(value) if char.isdigit())
+        quote_digits = "".join(char for char in quote if char.isdigit())
+        if value_digits:
+            return value_digits in quote_digits
+    return True
+
+
 def _validate_candidate_values(
     schema: Dict[str, Any],
     values: Any,
@@ -514,6 +539,13 @@ def _validate_candidate_values(
     accepted: Dict[str, Any] = {}
     accepted_evidence: Dict[str, Any] = {}
     allowed = set(allowed_paths)
+    known = {path for path, _ in _schema_leaves(schema)}
+    for value_path in _value_paths(values):
+        if value_path in known:
+            continue
+        if any(path.startswith(value_path + "/") for path in known):
+            continue
+        raise ExtractFailure("routed_write_path_invalid", value_path)
     for path, node in _schema_leaves(schema):
         if path not in allowed:
             continue
@@ -531,11 +563,19 @@ def _validate_candidate_values(
             if not page:
                 continue
             quote = str(ref.get("quote") or "").strip()
+            if not quote:
+                continue
             block_id = str(ref.get("block_id") or "")
             if block_id and block_id not in page.get("blocks", {}):
                 continue
-            haystack = str(page.get("text") or "")
+            haystack = (
+                str(page.get("blocks", {}).get(block_id) or "")
+                if block_id
+                else str(page.get("text") or "")
+            )
             if quote and " ".join(quote.split()) not in " ".join(haystack.split()):
+                continue
+            if not _direct_value_supported(node, candidate, quote):
                 continue
             valid_refs.append({"page_no": page_no, "block_id": block_id or None, "quote": quote})
         if not valid_refs:
