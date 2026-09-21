@@ -1,8 +1,8 @@
 import type { ExtractSchema, ExtractSchemaUi } from '../types/extractSchema'
 
-export type BuilderType = 'text' | 'date' | 'number' | 'boolean' | 'enum' | 'object-list'
+export type BuilderType = 'text' | 'date' | 'number' | 'boolean' | 'enum' | 'object' | 'object-list'
 export const BUILDER_TYPES: Record<BuilderType, string> = {
-  text: '文本', date: '日期', number: '数值', boolean: '布尔', enum: '枚举', 'object-list': '对象列表',
+  text: '文本', date: '日期', number: '数值', boolean: '布尔', enum: '枚举', object: '对象', 'object-list': '对象列表',
 }
 export const own = (value: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key)
@@ -47,6 +47,7 @@ export function orderedProperties(
 }
 
 export function builderType(node: ExtractSchema): BuilderType | undefined {
+  if (node.type === 'object') return 'object'
   if (node.type === 'array' && node.items?.type === 'object') return 'object-list'
   if (node.type === 'string') {
     if (node.enum) return 'enum'
@@ -68,11 +69,11 @@ export function builderIssue(schema: ExtractSchema): string | null {
       if (!isRecord(field)) return `${child}：Schema 节点必须是对象`
       const kind = builderType(field)
       if (!kind) return `${child}：该结构请在 JSON 视图编辑`
-      if (kind === 'object-list') {
-        if (!allowLists) return `${child}：Builder 不支持继续嵌套列表`
-        const unsupported = Object.keys(field).find((name) => !['type', 'items', 'description'].includes(name))
+      if (kind === 'object-list' || kind === 'object') {
+        if (!allowLists) return `${child}：Builder 仅支持一层对象或对象列表`
+        const unsupported = kind === 'object-list' && Object.keys(field).find((name) => !['type', 'items', 'description'].includes(name))
         if (unsupported) return `${child}：请在 JSON 视图编辑 ${unsupported}`
-        const issue = objectIssue(field.items!, `${child}/items`, false)
+        const issue = objectIssue(kind === 'object' ? field : field.items!, kind === 'object' ? child : `${child}/items`, false)
         if (issue) return issue
       } else {
         const allowed = ['type', 'description', ...(kind === 'date' ? ['format'] : []), ...(kind === 'enum' ? ['enum'] : [])]
@@ -89,6 +90,7 @@ export function builderIssue(schema: ExtractSchema): string | null {
 }
 
 export function newFieldSchema(kind: BuilderType): ExtractSchema {
+  if (kind === 'object') return { type: 'object', properties: {}, additionalProperties: false }
   if (kind === 'object-list') return {
     type: 'array', items: { type: 'object', properties: {}, additionalProperties: false },
   }

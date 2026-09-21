@@ -1,0 +1,48 @@
+# Extract Builder：行内与树形编辑
+
+基线：`e001849eddaa7cc0b27e23dd4d84381d7090838d`。
+
+## 交互契约
+
+- 键名、标签、类型和必填直接在当前行修改；抽取说明和枚举候选在当前行下展开。无逐字段“应用”步骤。
+- 对象与对象列表的子字段紧跟父行，可折叠、就地添加。Builder 仍只创建一层容器，子字段为标量／枚举；更复杂结构使用 JSON。
+- 行内“更多”提供复制整个字段（含子字段、枚举、必填、说明与展示标签）、下方插入、移动和删除。副本独立，不创建共享类型注册表。
+- 候选值支持一行一个批量粘贴，保留拼写；重复值与内部空行报错。最后一个换行符不视为额外候选。
+- 本地草稿允许输入暂时不完整。错误就地显示，不锁其他字段；有错时禁止整体保存，底部错误入口定位对应字段。
+- 底部保存条始终在滚动视口内；Ctrl/Cmd+S 包含尚未失焦的最新输入。单行 Enter 结束输入，但不会拦截中文输入法的选词回车。
+- 保存失败保留全部输入。保存成功保留滚动、展开状态与搜索；父组件更新 `updated_at` 不再重新挂载编辑器。
+- 搜索匹配标签／键名，保留父级上下文；当前编辑行不会因为自身内容修改而从搜索结果中突然消失。
+- 保存草稿与发布仍分离，不自动保存到服务器、不自动发布。
+
+## 数据与边界
+
+`data_schema` 仍是唯一结构契约，`ui` 只包含标签与顺序。暂时非法的键名与枚举文本仅保存在前端输入缓冲区，不持久化为 fields。整体保存／进入 JSON 时，原 schema 树按输入缓冲原子更新：包括父子同时改名、同级交换键名、required 与展示路径更新。
+
+不修改后端、Job 快照、claim/commit、Parse 绑定、执行 target、修复环与结果只读语义；不增加历史格式转换，也不改动种子业务数据。
+
+## 验证
+
+常规前端检查：
+
+```sh
+cd web
+npm ci
+npm test
+npm run build
+```
+
+独立浏览器测试使用真实 `FieldsTab` 与配置保存客户端，通过 Playwright 拦截所有配置 API 请求，不接入数据库／模型。测试页面只由 Vite 开发服务提供，不是应用路由或生产构建入口。
+
+```sh
+cd web
+# 独立浏览器测试 profile；不修改 package.json 或 lockfile。
+npm install --prefix /tmp/neoflow-editor-browser --no-save --package-lock=false playwright@1.56.1
+/tmp/neoflow-editor-browser/node_modules/.bin/playwright install chromium
+VITE_SUPABASE_URL=http://127.0.0.1:54321 \
+VITE_SUPABASE_ANON_KEY=test-anon-key \
+  npm run dev -- --host 127.0.0.1 --port 4173
+# 另一个终端，在 web 目录：
+PLAYWRIGHT_MODULE=/tmp/neoflow-editor-browser/node_modules/playwright node e2e/extract-editor.cjs
+```
+
+覆盖：第 38 行连续编辑与保存位置；无中间保存添加五个子字段；深复制隔离；非法键名与 JSON；保存失败重试；搜索与父级状态；容器转换确认；中文输入法；只读配置。

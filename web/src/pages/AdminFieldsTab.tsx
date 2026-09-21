@@ -328,7 +328,7 @@ export function FieldsTab({ configuration, onUpdated, onDirtyChange }: {
   if (configuration.type !== 'extract') return <FlatFieldsTab configuration={configuration} onUpdated={onUpdated} />
   return (
     <ExtractSchemaEditor
-      key={`${configuration.id}:${configuration.updated_at}`}
+      key={configuration.id}
       definition={configuration.draft_definition}
       readOnly={configuration.status === 'archived'}
       onDirtyChange={onDirtyChange}
