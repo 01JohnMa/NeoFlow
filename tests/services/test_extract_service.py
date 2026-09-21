@@ -20,6 +20,7 @@ from services.extract_service import (
     validate_output,
 )
 from services.llm_invoke import LLMResult
+from services.page_index import PageCandidate, PageIndexPage, PageIndexSnapshot
 
 JOB_ID = "99999999-9999-4999-8999-999999999999"
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -287,6 +288,22 @@ class TestPlanUnits:
         assert units[0]["source"] == "正文\n<table>表格</table>\nx^2"
         assert units[1]["source"] == ""
 
+    def test_page_source_keeps_table_body_when_markdown_has_caption_only(self):
+        data = {
+            "markdown": "",
+            "pages": [{
+                "page_no": 1,
+                "markdown": "Table caption",
+                "blocks": [{
+                    "type": "table",
+                    "text": "Table caption",
+                    "table_html": "<table><tr><td>Phone</td><td>13800138000</td></tr></table>",
+                    "reading_order": 1,
+                }],
+            }],
+        }
+        assert "13800138000" in plan_units("per_page", data)[0]["source"]
+
 
 class TestValidateOutput:
     def test_per_page_reports_item_path(self):
@@ -295,6 +312,73 @@ class TestValidateOutput:
 
 
 class TestHandleExtract:
+    @pytest.mark.asyncio
+    async def test_page_routed_runs_two_passes_and_persists_evidence(self, monkeypatch):
+        schema = {
+            "type": "object",
+            "properties": {
+                "report_no": {"type": "string"},
+                "conclusion": {"type": "string"},
+            },
+            "required": ["report_no", "conclusion"],
+            "additionalProperties": False,
+        }
+        parse_row = _parse_row({
+            "markdown": "",
+            "pages": [
+                {"page_no": 1, "markdown": "R1 page", "blocks": []},
+                {"page_no": 2, "markdown": "ok page", "blocks": []},
+            ],
+        })
+
+        class FakePageIndex:
+            async def ensure_index(self, *args, **kwargs):
+                return PageIndexSnapshot(
+                    tenant_id=TENANT_ID,
+                    document_id=DOCUMENT_ID,
+                    parse_result_id=RESULT_ID,
+                    source_document_hash="source",
+                    text_profile_hash="text",
+                    embedding_profile_hash="embedding",
+                    pages=[
+                        PageIndexPage(1, "parsed", "R1 page", "t1", None, [1.0, 0.0]),
+                        PageIndexPage(2, "parsed", "ok page", "t2", None, [0.0, 1.0]),
+                    ],
+                )
+
+            async def retrieve(self, snapshot, *, query, **kwargs):
+                page = 1 if "report_no" in query else 2
+                return [PageCandidate(page, 1.0, ["vector"])]
+
+        _patch_env(
+            monkeypatch,
+            parse_row=parse_row,
+            llm_responses=[
+                _llm_result('{"values":{"report_no":"R1"},"evidence":{"/report_no":[{"page_no":1,"quote":"R1"}]},"unresolved":["/conclusion"]}'),
+                _llm_result('{"values":{"conclusion":"ok"},"evidence":{"/conclusion":[{"page_no":2,"quote":"ok"}]},"unresolved":[]}'),
+            ],
+        )
+        monkeypatch.setattr(extract_service.settings, "EXTRACT_PAGE_ROUTED_ENABLED", True)
+        monkeypatch.setattr(extract_service, "page_index_service", FakePageIndex())
+        job = _job(execution_spec={
+            "capability": "extract",
+            "spec_version": "1",
+            "effective_params": {
+                "target": "per_doc",
+                "data_schema": schema,
+                "extraction_strategy": "page_routed",
+            },
+        })
+
+        result = await handle_extract_job(job)
+
+        assert result == {"report_no": "R1", "conclusion": "ok"}
+        payload, engine = _committed_ok()
+        assert payload == result
+        assert engine["extraction_strategy"] == "page_routed"
+        assert engine["page_routed"]["passes"] == 2
+        assert engine["page_routed"]["evidence"]["/report_no"][0]["page_no"] == 1
+
     @pytest.mark.asyncio
     async def test_heartbeat_error_marks_claim_lost_without_bubbling(self, monkeypatch):
         stop = extract_service.asyncio.Event()

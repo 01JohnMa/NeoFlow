@@ -1,0 +1,27 @@
+{
+  "case_id": "synthetic_mixed_table",
+  "stratum": "mixed_table",
+  "synthetic": true,
+  "pages": [
+    {
+      "page_number": 1,
+      "state": "parsed",
+      "text": "Synthetic page 1 for synthetic_mixed_table. protocol_id: SYN-003."
+    },
+    {
+      "page_number": 2,
+      "state": "parsed",
+      "text": "Synthetic page 2 for synthetic_mixed_table. title: Table Evidence Trial."
+    },
+    {
+      "page_number": 3,
+      "state": "parsed",
+      "text": "Synthetic page 3 for synthetic_mixed_table."
+    },
+    {
+      "page_number": 4,
+      "state": "parsed",
+      "text": "Synthetic page 4 for synthetic_mixed_table. dose: 25 mg."
+    }
+  ]
+}

@@ -179,6 +179,12 @@ def normalize_mineru_content(
     contexts = _build_page_contexts(middle_json)
 
     pages: Dict[int, Page] = {}
+    # pdf_info is the provider's authoritative physical-page inventory. Create
+    # entries before content items so blank pages are preserved explicitly.
+    for page_idx, context in contexts.items():
+        width, height, coordinate_space = _page_size(context.page_size, warnings, page_idx)
+        pages[page_idx] = Page(page_no=page_idx + 1, width=width, height=height,
+                                coordinate_space=coordinate_space)
     for item in content_items:
         if not isinstance(item, dict):
             warnings.append("忽略非对象 content_list 条目")
@@ -222,6 +228,9 @@ def normalize_mineru_content(
             confidence=confidence,
         ))
 
+    observed = sorted(page_no + 1 for page_no in pages)
+    expected = sorted(index + 1 for index in contexts)
+    coverage_status = "unknown" if not contexts else ("complete" if observed == expected else "incomplete")
     engine = {
         "name": "mineru",
         "backend": raw_backend or backend,
@@ -229,6 +238,14 @@ def normalize_mineru_content(
         "version": (middle_json or {}).get("_version_name"),
         "model_version": params.get("model_version"),
         "method": params.get("method"),
+        "coverage": {
+            "status": coverage_status,
+            "expected_page_count": len(expected) if contexts else None,
+            "observed_page_numbers": observed,
+            "page_states": {str(number): ("blank_confirmed" if not pages[number - 1].blocks else "observed")
+                            for number in observed if number - 1 in pages},
+            "provider": "pdf_info" if contexts else None,
+        },
     }
     engine = {key: value for key, value in engine.items() if value not in (None, "")}
 

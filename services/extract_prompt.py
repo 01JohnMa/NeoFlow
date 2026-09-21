@@ -54,6 +54,44 @@ def build_extract_messages(
     ]
 
 
+ROUTED_RULES = RULES + """
+7. 返回一个 JSON 对象，顶层只能有 values、evidence、unresolved 三个键。
+8. values 只填写允许写入的字段路径；没有依据的字段不要编造。
+9. evidence 是内部证据：每个字段路径对应一个数组，元素可包含 page_no、block_id、quote。
+10. evidence 中的页码和 block_id 必须来自原文标记；quote 必须是原文中的连续片段。
+"""
+
+
+def build_routed_messages(
+    *,
+    schema: Dict[str, Any],
+    target: str,
+    source_text: str,
+    allowed_paths: List[str],
+    unit_label: str = "",
+) -> List[Dict[str, str]]:
+    """Build the internal values/evidence envelope used by page-routed Extract."""
+    if target != "per_doc":
+        raise ValueError(f"page-routed only supports per_doc: {target}")
+    path_text = "\n".join(f"- {path}" for path in allowed_paths) or "- (none)"
+    user_content = (
+        "## Schema\n"
+        + json.dumps(schema, ensure_ascii=False, indent=2)
+        + "\n\n## Allowed field paths\n"
+        + path_text
+        + "\n\n## Output contract\n"
+        + '{"values": {}, "evidence": {}, "unresolved": []}'
+        + "\n"
+        + (f"\n## 执行单元\n{unit_label}\n" if unit_label else "")
+        + "\n## 原文（带物理页/block 标记）\n"
+        + source_text
+    )
+    return [
+        {"role": "system", "content": ROUTED_RULES},
+        {"role": "user", "content": user_content},
+    ]
+
+
 def build_repair_messages(
     messages: List[Dict[str, str]],
     previous_output: str,

@@ -85,6 +85,7 @@ echo "[gate] 应用 Extract 迁移 026-028"
 psql_gate -f "$ROOT/supabase/migrations/026_extract_execution.sql" >/dev/null
 psql_gate -f "$ROOT/supabase/migrations/027_extract_commit_hardening.sql" >/dev/null
 psql_gate -f "$ROOT/supabase/migrations/028_extract_engine_required.sql" >/dev/null
+psql_gate -f "$ROOT/supabase/migrations/029_page_index_embeddings.sql" >/dev/null
 
 echo "[gate] 受理/交卷/删除冒烟"
 psql_gate -f "$ROOT/tests/db/test_parse_admission.sql"

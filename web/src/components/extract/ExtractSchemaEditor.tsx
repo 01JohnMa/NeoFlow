@@ -13,7 +13,7 @@ import {
 import type { ExtractAuthoringDefinition, ExtractSchema, ExtractSchemaUi } from '@/types/extractSchema'
 
 interface Props {
-  definition: { data_schema?: unknown; ui?: unknown; target?: unknown }
+  definition: { data_schema?: unknown; ui?: unknown; target?: unknown; extraction_strategy?: unknown }
   readOnly?: boolean
   onSave: (definition: ExtractAuthoringDefinition) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
@@ -22,6 +22,7 @@ interface Draft {
   schema: ExtractSchema | null
   ui: ExtractSchemaUi
   target: 'per_doc' | 'per_page'
+  extraction_strategy: 'full_document' | 'page_routed'
   buffers: InlineBuffers
 }
 const control = 'w-full rounded-md border border-border-default bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50'
@@ -33,6 +34,7 @@ function initialDraft(definition: Props['definition']): Draft {
     schema: isRecord(definition.data_schema) ? clone(definition.data_schema) as ExtractSchema : null,
     ui: isRecord(definition.ui) ? clone(definition.ui) as ExtractSchemaUi : {},
     target: definition.target === 'per_page' ? 'per_page' : 'per_doc', buffers: {},
+    extraction_strategy: definition.extraction_strategy === 'page_routed' ? 'page_routed' : 'full_document',
   }
 }
 function issue(schema: ExtractSchema | null): string | null {
@@ -147,9 +149,9 @@ export function ExtractSchemaEditor({ definition, readOnly = false, onSave, onDi
         : current.schema ? materializeDraft(current.schema, current.ui, current.buffers) : null
       if (!next) throw new Error('缺少 data_schema，请新建配置')
       const ui = pruneUi(next.schema, next.ui)
-      await onSave({ data_schema: next.schema, ui, target: current.target })
+      await onSave({ data_schema: next.schema, ui, target: current.target, extraction_strategy: current.extraction_strategy })
       remapVisual((p) => next.paths[p] ?? p)
-      const saved: Draft = { schema: next.schema, ui, target: current.target, buffers: {} }
+      const saved: Draft = { schema: next.schema, ui, target: current.target, extraction_strategy: current.extraction_strategy, buffers: {} }
       live.current = saved; baseline.current = saved; setDraft(saved)
       rawRef.current = JSON.stringify(next.schema, null, 2); setRaw(rawRef.current); setDirty(false)
     } catch (err) { setError(errorText(err)) }
@@ -313,7 +315,8 @@ export function ExtractSchemaEditor({ definition, readOnly = false, onSave, onDi
       <details className="rounded-lg border border-border-default p-3">
         <summary className="cursor-pointer text-sm text-text-secondary">整体抽取说明与目标 <span className="ml-2 text-xs text-text-muted">{draft.target === 'per_doc' ? '整份文档' : '逐页'}</span></summary>
         <div className="mt-3 space-y-3">
-          <label className="block space-y-1 text-sm"><span>抽取目标</span><select aria-label="抽取目标" className={control} value={draft.target} disabled={locked} onChange={(event) => { const target = event.target.value as Draft['target']; change((current) => ({ ...current, target })) }}><option value="per_doc">整份文档 · 一个实例</option><option value="per_page">逐页 · 每页一个实例</option></select></label>
+          <label className="block space-y-1 text-sm"><span>抽取目标</span><select aria-label="抽取目标" className={control} value={draft.target} disabled={locked} onChange={(event) => { const target = event.target.value as Draft['target']; change((current) => ({ ...current, target, extraction_strategy: target === 'per_page' ? 'full_document' : current.extraction_strategy })) }}><option value="per_doc">整份文档 · 一个实例</option><option value="per_page">逐页 · 每页一个实例</option></select></label>
+          <label className="block space-y-1 text-sm"><span>页面策略</span><select aria-label="页面策略" className={control} value={draft.extraction_strategy} disabled={locked} onChange={(event) => { const extraction_strategy = event.target.value as Draft['extraction_strategy']; change((current) => ({ ...current, extraction_strategy })) }}><option value="full_document">完整文档</option><option value="page_routed" disabled={draft.target !== 'per_doc'}>按页面路由（仅整份文档）</option></select></label>
           {mode === 'builder' && <label className="block space-y-1 text-sm"><span>整体抽取说明</span><textarea aria-label="整体抽取说明" className={control} rows={3} value={draft.schema?.description ?? ''} disabled={locked} onChange={(event) => { const description = event.target.value; change((current) => ({ ...current, schema: { ...current.schema, description } })) }} /></label>}
           <p className="text-xs text-text-muted">说明写入 schema.description。找不到依据的可选字段省略；必填不代表允许编造。</p>
         </div>

@@ -1,0 +1,28 @@
+{
+  "case_id": "synthetic_identifiers",
+  "fields": {
+    "protocol_id": {
+      "value": "SYN-004",
+      "required": true,
+      "evidence_pages": [
+        1
+      ]
+    },
+    "effective_date": {
+      "value": "2026-01-15",
+      "required": true,
+      "evidence_pages": [
+        2
+      ]
+    },
+    "contact_phone": {
+      "value": "+86-000-0000",
+      "required": true,
+      "evidence_pages": [
+        2
+      ]
+    }
+  },
+  "absent_fields": [],
+  "notes": "Synthetic gold; freeze before provider runs."
+}

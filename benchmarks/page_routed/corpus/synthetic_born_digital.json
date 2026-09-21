@@ -1,0 +1,17 @@
+{
+  "case_id": "synthetic_born_digital",
+  "stratum": "born_digital",
+  "synthetic": true,
+  "pages": [
+    {
+      "page_number": 1,
+      "state": "parsed",
+      "text": "Synthetic page 1 for synthetic_born_digital. protocol_id: SYN-001."
+    },
+    {
+      "page_number": 2,
+      "state": "parsed",
+      "text": "Synthetic page 2 for synthetic_born_digital. title: Synthetic Device Study. sponsor: Example Labs."
+    }
+  ]
+}

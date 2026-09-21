@@ -1,0 +1,28 @@
+{
+  "case_id": "synthetic_scanned",
+  "fields": {
+    "protocol_id": {
+      "value": "SYN-002",
+      "required": true,
+      "evidence_pages": [
+        1
+      ]
+    },
+    "title": {
+      "value": "Scanned Sample Protocol",
+      "required": true,
+      "evidence_pages": [
+        3
+      ]
+    },
+    "sponsor": {
+      "value": "Paper Labs",
+      "required": true,
+      "evidence_pages": [
+        3
+      ]
+    }
+  },
+  "absent_fields": [],
+  "notes": "Synthetic gold; freeze before provider runs."
+}

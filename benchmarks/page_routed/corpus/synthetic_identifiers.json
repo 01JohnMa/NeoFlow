@@ -1,0 +1,17 @@
+{
+  "case_id": "synthetic_identifiers",
+  "stratum": "identifiers_dates",
+  "synthetic": true,
+  "pages": [
+    {
+      "page_number": 1,
+      "state": "parsed",
+      "text": "Synthetic page 1 for synthetic_identifiers. protocol_id: SYN-004."
+    },
+    {
+      "page_number": 2,
+      "state": "parsed",
+      "text": "Synthetic page 2 for synthetic_identifiers. effective_date: 2026-01-15. contact_phone: +86-000-0000."
+    }
+  ]
+}

@@ -5,6 +5,12 @@
 """
 
 import asyncio
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -18,6 +24,7 @@ from services.result_service import result_service
 
 
 SUPPORTED_PARSE_MODES = ("pipeline", "vlm")
+_PAGE_RANGE_TOKEN = re.compile(r"^(\d+)(?:-(\d+))?$")
 
 
 def normalize_parse_mode(mode: Optional[str]) -> str:
@@ -61,6 +68,114 @@ def build_parse_params(
     return params
 
 
+def _sha256_file(file_path: str) -> Optional[str]:
+    """Return a stable source identity when the local file is readable."""
+    try:
+        digest = hashlib.sha256()
+        with open(file_path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _pdf_page_count(file_path: str) -> Optional[int]:
+    """Use the optional Poppler tool when available; unknown is safer than guessed."""
+    if not file_path.lower().endswith(".pdf"):
+        return None
+    pdfinfo = shutil.which("pdfinfo")
+    if not pdfinfo:
+        return None
+    try:
+        result = subprocess.run(
+            [pdfinfo, file_path],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("Pages:"):
+            try:
+                value = int(line.split(":", 1)[1].strip())
+                return value if value > 0 else None
+            except ValueError:
+                return None
+    return None
+
+
+def _requested_page_numbers(page_ranges: Any) -> Optional[list[int]]:
+    if not page_ranges:
+        return None
+    pages: set[int] = set()
+    for raw in str(page_ranges).split(","):
+        match = _PAGE_RANGE_TOKEN.match(raw.strip())
+        if not match:
+            return None
+        start = int(match.group(1))
+        end = int(match.group(2) or start)
+        if end < start:
+            return None
+        pages.update(range(start, end + 1))
+    return sorted(pages)
+
+
+def annotate_parse_provenance(
+    result: ParseResult,
+    file_path: str,
+    params: Dict[str, Any],
+) -> ParseResult:
+    """Attach immutable source/profile/coverage facts to a newly produced ParseResult."""
+    observed = sorted({int(page.page_no) for page in result.pages if page.page_no is not None})
+    requested = _requested_page_numbers(params.get("page_ranges"))
+    expected = _pdf_page_count(file_path)
+    provider_coverage = result.engine.get("coverage") if isinstance(result.engine, dict) else None
+    if requested is not None:
+        status = "incomplete"
+        reason = "page_ranges_requested"
+    elif expected is None:
+        status = "unknown"
+        reason = "source_page_count_unavailable"
+    elif observed == list(range(1, expected + 1)):
+        status = "complete"
+        reason = "observed_all_physical_pages"
+    else:
+        status = "incomplete"
+        reason = "observed_page_set_mismatch"
+
+    profile_payload = {
+        "parser": "mineru-normalizer-v1",
+        "params": params,
+    }
+    profile_hash = hashlib.sha256(
+        json.dumps(profile_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    coverage = dict(provider_coverage or {})
+    # Provider pdf_info coverage wins; local inspection is only a fallback.
+    if requested is not None:
+        coverage["status"] = "incomplete"
+        coverage["reason"] = "page_ranges_requested"
+    coverage.update({
+        "status": coverage.get("status") or status,
+        "reason": coverage.get("reason") or reason,
+        "expected_page_count": coverage.get("expected_page_count", expected),
+        "requested_page_numbers": requested,
+        "observed_page_numbers": coverage.get("observed_page_numbers", observed),
+    })
+    result.engine = {
+        **result.engine,
+        "source_document_hash": _sha256_file(file_path),
+        "parse_profile_hash": profile_hash,
+        "coverage": coverage,
+    }
+    return result
+
+
 async def ensure_parse_result(
     *,
     document_id: str,
@@ -99,6 +214,7 @@ async def ensure_parse_result(
         logger.warning(f"自动解析失败: document_id={document_id}, error={exc}")
         return None
 
+    annotate_parse_provenance(result, file_path, params)
     parse_data = result.to_dict()
     stored = await result_service.record_parse_result(
         tenant_id=tenant_id,
@@ -235,6 +351,7 @@ async def _handle_parameterized_parse_job(
             await heartbeat
 
     apply_parse_postprocess(result, params)
+    annotate_parse_provenance(result, document["file_path"], params)
 
     if not await update_job_if_owned(job_id, worker_id, attempts, "saving"):
         # 解析期间认领失效：不得提交产物

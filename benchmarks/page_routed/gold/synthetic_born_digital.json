@@ -1,0 +1,28 @@
+{
+  "case_id": "synthetic_born_digital",
+  "fields": {
+    "protocol_id": {
+      "value": "SYN-001",
+      "required": true,
+      "evidence_pages": [
+        1
+      ]
+    },
+    "title": {
+      "value": "Synthetic Device Study",
+      "required": true,
+      "evidence_pages": [
+        2
+      ]
+    },
+    "sponsor": {
+      "value": "Example Labs",
+      "required": true,
+      "evidence_pages": [
+        2
+      ]
+    }
+  },
+  "absent_fields": [],
+  "notes": "Synthetic gold; freeze before provider runs."
+}

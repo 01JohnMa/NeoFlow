@@ -82,6 +82,21 @@ class Settings(BaseSettings):
     LLM_CONTEXT_WINDOW_TOKENS: int = 128000
     LLM_MAX_OUTPUT_TOKENS: int = 8000
 
+    # ============ Document Page Index embeddings (#36) ============
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_BASE_URL: str = ""
+    EMBEDDING_MODEL: str = ""
+    EMBEDDING_DIMENSION: int = 0
+    EMBEDDING_TIMEOUT_SECONDS: float = 30.0
+    EMBEDDING_NORMALIZE: bool = True
+    EMBEDDING_PROFILE_VERSION: str = "embedding-profile-1"
+    EMBEDDING_QUERY_INSTRUCTION: str = ""
+    EMBEDDING_DOCUMENT_INSTRUCTION: str = ""
+
+    PAGE_ROUTED_TOP_K: int = 5
+    PAGE_ROUTED_NEIGHBOR_PAGES: int = 1
+    PAGE_ROUTED_MAX_PAGES: int = 20
+
     # ============ MinerU 解析（#8；key 由本地 .env 提供，不入库） ============
     MINERU_API_KEY: str = ""
     MINERU_BASE_URL: str = "https://mineru.net"

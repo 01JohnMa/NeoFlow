@@ -1,0 +1,28 @@
+{
+  "case_id": "synthetic_long_boundary",
+  "fields": {
+    "protocol_id": {
+      "value": "SYN-005",
+      "required": true,
+      "evidence_pages": [
+        1
+      ]
+    },
+    "title": {
+      "value": "Boundary Protocol",
+      "required": true,
+      "evidence_pages": [
+        12
+      ]
+    },
+    "endpoint": {
+      "value": "Primary endpoint text",
+      "required": true,
+      "evidence_pages": [
+        13
+      ]
+    }
+  },
+  "absent_fields": [],
+  "notes": "Synthetic gold; freeze before provider runs."
+}

@@ -1,0 +1,11 @@
+{
+  "rubric_version":"1.0.0",
+  "frozen_before_runs":true,
+  "normalization":{"trim_strings":true,"case_sensitive":true,"date_formats":["YYYY-MM-DD"],"numeric_string_equal":false},
+  "metrics":{"field_correctness":"correct fields / gold fields expected (required + optional present/absent)","unsupported_fill":"filled fields not supported by gold / filled fields","abstention":"correctly absent or null fields / gold absent-or-null fields","evidence_recall":"gold evidence pages retrieved / annotated evidence pages","reference_validity":"valid cited pages / all cited pages"},
+  "denominators":{"include_failed_jobs":true,"include_timeouts":true,"include_schema_invalid":true,"include_evidence_invalid":true,"include_context_overflow":true},
+  "quality_gate":{"per_stratum":"page_routed field correctness must not decrease vs full_document; unsupported fills must not increase","statistical_tolerance":null,"rollout_threshold_authorized":false},
+  "safety_gates":["no_tenant_binding_violation","no_successful_invalid_schema","no_successful_missing_or_invalid_required_evidence"],
+  "decision":"Missing approved rollout thresholds or provider evidence is NO_GO for expansion; this rubric does not invent speed/cost thresholds.",
+  "evidence_rules":"A cited page must belong to the bound parse_result_id and contain a non-empty citation. Alternative pages must be listed in gold; semantically related pages alone do not count."
+}

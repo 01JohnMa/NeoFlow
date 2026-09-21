@@ -1,0 +1,28 @@
+{
+  "case_id": "synthetic_mixed_table",
+  "fields": {
+    "protocol_id": {
+      "value": "SYN-003",
+      "required": true,
+      "evidence_pages": [
+        1
+      ]
+    },
+    "title": {
+      "value": "Table Evidence Trial",
+      "required": true,
+      "evidence_pages": [
+        2
+      ]
+    },
+    "dose": {
+      "value": "25 mg",
+      "required": true,
+      "evidence_pages": [
+        4
+      ]
+    }
+  },
+  "absent_fields": [],
+  "notes": "Synthetic gold; freeze before provider runs."
+}

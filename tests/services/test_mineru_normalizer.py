@@ -89,14 +89,14 @@ class TestPipelineNormalization:
         result = _normalize("pipeline")
 
         assert "NeoFlow Annual Report" in result.markdown
-        assert result.engine == {
-            "name": "mineru",
-            "backend": "pipeline",
-            "effort": "medium",
-            "version": "3.4.4",
-            "model_version": "pipeline",
-            "method": "auto",
-        }
+        assert result.engine["name"] == "mineru"
+        assert result.engine["backend"] == "pipeline"
+        assert result.engine["effort"] == "medium"
+        assert result.engine["version"] == "3.4.4"
+        assert result.engine["model_version"] == "pipeline"
+        assert result.engine["method"] == "auto"
+        assert result.engine["coverage"]["status"] == "complete"
+        assert result.engine["coverage"]["observed_page_numbers"] == [1, 2]
         assert result.warnings == []
 
 
