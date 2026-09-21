@@ -49,6 +49,7 @@ jobs:
               bundle.extractall(destination, filter='data')
           PY
           python "$RUNNER_TEMP/builder-package/apply_changes.py" --repo "$GITHUB_WORKSPACE/source" --apply
+          python "$GITHUB_WORKSPACE/delivery/.builder-delivery/fixups.py"
           git diff --check
       - name: Install backend dependencies
         id: python_deps
@@ -94,17 +95,26 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: |
           python - <<'PY'
-          import os, pathlib, subprocess, sys
+          import os, pathlib, re, subprocess, sys
           package = pathlib.Path(os.environ['RUNNER_TEMP'])/'builder-package'
           sys.path.insert(0, str(package))
           from changes import EDITS
           paths = list(EDITS) + [f.relative_to(package/'payload').as_posix() for f in (package/'payload').rglob('*') if f.is_file() and '__pycache__' not in f.parts and f.suffix != '.pyc']
+          paths.append('tests/test_sdk/test_orchestrator.py')
           report = pathlib.Path('docs/extract-schema-builder-validation.md')
           outcomes = {name: os.environ[key] for name, key in [('Backend regression', 'PYTHON_OUTCOME'), ('Frontend tests', 'FRONTEND_OUTCOME'), ('Production build', 'BUILD_OUTCOME')]}
           text = '# Schema Builder delivery validation\n\nBase: `8b8945bf246981e431570ce7e6e56fd09fcb2024`.\n\n'
           text += '\n'.join(f'- {name}: **{value}**' for name, value in outcomes.items())
           text += f"\n\nRun: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n"
-          text += '\nExact source blob checks, unique edit anchors and frozen execution AST guard were checked before applying. No legacy configuration conversion, database writes, seed execution or deployment. Browser, live model and database integration were not performed.\n'
+          for name in ['python-tests.log', 'frontend-tests.log']:
+              log = pathlib.Path(os.environ['RUNNER_TEMP'])/name
+              if log.exists():
+                  clean = re.sub(r'\x1b\[[0-9;]*m', '', log.read_text())
+                  summaries = [line for line in clean.splitlines() if re.search(r'\b\d+ passed\b', line)]
+                  text += f'\n{name}:\n\n```text\n' + '\n'.join(summaries[-3:]) + '\n```\n'
+          text += '\nExact source blob checks, unique edit anchors and frozen execution AST guard were checked before applying. SDK regression assertions now enforce draft-only creation and schema.description instead of automatic publishing and legacy prompt wrappers.\n'
+          text += '\nNo legacy configuration conversion, database writes, seed execution or deployment. Browser, live model and database integration were not performed.\n'
+          text += '\nDependency audit warnings and bundle-size/deprecation warnings are not resolved by this feature; see the linked run. No dependency versions or lockfiles were changed.\n'
           report.write_text(text)
           subprocess.check_call(['git', 'add', '--', *paths, str(report)])
           PY
