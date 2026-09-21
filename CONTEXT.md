@@ -42,6 +42,10 @@ _Avoid_: raw JSON, business table row, per-page sample
 The page- and block-structured markdown produced for one Document by Parsing, and the sole input to Extraction. Stored per Document and reused by every Configuration that consumes that Document.
 _Avoid_: OCR text, raw text
 
+**Document Page Index**:
+A derived page-level retrieval artifact that maps a Document's extraction questions to candidate physical pages. It helps route work to Parse pages, but it is not a Parse Result, field value, or authoritative extraction evidence.
+_Avoid_: canonical ParseResult, Extraction Result, business answer
+
 **Parse Mode**:
 The parsing pipeline a Parse job runs — fast (`pipeline`) or high-precision (`vlm`). It is never inferred from document content; it may be supplied by the caller or defaulted by tenant policy.
 _Avoid_: tier, model version, OCR mode
@@ -80,6 +84,10 @@ _Avoid_: dynamic database column, ad hoc field mapping
 A value for one schema field in an Extraction Result.
 _Avoid_: untyped dictionary entry
 
+**Extraction Evidence**:
+A page or extraction-attempt reference stored beside an Extraction Result to explain a Field Value. It is operational metadata and never part of schema-shaped values.
+_Avoid_: value wrapper, schema property
+
 ## Composite processing
 
 **Composite Extraction**:
@@ -91,5 +99,5 @@ A deferred business concept. NeoFlow 2.0 does not use it as a Result, review, or
 _Avoid_: per-page sample, implicit sample key
 
 **Provenance**:
-The source document, page, or extraction attempt that explains where a Field Value came from. Field-level sources are not part of the NeoFlow 2.0 contract; when they arrive they attach beside the result, never inside its schema-shaped values.
+The source document, page, or extraction attempt that explains where a Field Value came from. Field-level provenance attaches beside the result, never inside its schema-shaped values.
 _Avoid_: debug metadata

@@ -1,6 +1,6 @@
 # Extract schema is a JSON Schema subset; draft runs freeze a Job-level snapshot
 
-**Status: accepted**
+**Status: accepted (amended by ADR-0010)**
 
 Extract's schema contract is a JSON Schema subset (Draft 2020-12), stored on the Configuration definition as `data_schema`: nested objects and arrays, `enum`, `format: date`, and `description` as the extraction guidance. The previous flat Field Schema (field_key/label/type/hint plus review and output mappings) is retired: review and external outputs left NeoFlow 2.0 (#31), so its remaining jobs — nesting, enums, and machine-checkable constraints — are exactly what a schema subset does better, with no translation layer. Unsupported keywords are rejected at publish/submit time rather than silently ignored, and the schema is never rewritten to fit a provider's strict mode.
 
@@ -21,5 +21,5 @@ The execution snapshot preserves whether `target` and `data_schema` were provide
 - `description` is the only steering text; the prompt serializes the whole schema, so nesting and `enum` values reach the model with no hand-maintained field table.
 - Missing/null semantics follow the full schema: a field is omitted when optional and absent, `null` only when the complete field schema accepts it, and a missing required non-null field is a validation failure — never a fabricated placeholder.
 - The Extraction Result's `data` is schema-shaped JSON (object or array); there is no field_meta, review state, or output mapping.
-- Long-document two-phase extraction is a deferred hypothesis: documents beyond the model context fail explicitly until evaluation shows chunk-and-collect actually improves quality.
+- Long-document `per_doc` routing through a Document Page Index is defined by ADR-0010; broader chunk-and-collect semantics remain outside this decision.
 - Usage is recorded for diagnostics only; metering and billing belong to the integrating AI middle platform (ADR-0008).
