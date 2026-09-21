@@ -7,7 +7,7 @@
     "target": "per_doc",
     "data_schema": {
       "type": "object",
-      "description": "只依据文档提取立项基本信息。可选字段无依据则省略，不输出 null 或空值占位。场景名称不是文档证据，不自动填入试验类型或注册类型。所有日期必须有完整年月日依据，不补全日期。仅输出以字段键为属性的 JSON 对象，不输出 fields/value/confidence/source 包装。",
+      "description": "只依据文档提取立项基本信息。可选字段无依据则省略，不输出 null 或空值占位。场景名称不是文档证据，不自动填入试验类型或注册类型。仅输出以字段键为属性的 JSON 对象，不输出 fields/value/confidence/source 包装。",
       "properties": {
         "registration_type": {
           "type": "string",
@@ -52,12 +52,12 @@
         "planned_start_date": {
           "type": "string",
           "format": "date",
-          "description": "计划开始日期；仅在原文有完整年月日时输出 YYYY-MM-DD。只提供年月或年份时省略，不补月初、月末或任意日期。"
+          "description": "计划开始日期；格式 YYYY-MM-DD。"
         },
         "planned_end_date": {
           "type": "string",
           "format": "date",
-          "description": "计划结束日期；仅在原文有完整年月日时输出 YYYY-MM-DD。只提供年月或年份时省略，不补月初、月末或任意日期。"
+          "description": "计划结束日期；格式 YYYY-MM-DD。"
         },
         "planned_subject_count": {
           "type": "number",
@@ -78,7 +78,7 @@
         "registration_date": {
           "type": "string",
           "format": "date",
-          "description": "登记日期；仅在原文有完整年月日时输出 YYYY-MM-DD。只提供年月或年份时省略，不补月初、月末或任意日期。"
+          "description": "登记日期；格式 YYYY-MM-DD。"
         },
         "project_scope": {
           "type": "string",
