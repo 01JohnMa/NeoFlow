@@ -398,148 +398,83 @@ class TestDefinitionHelpers:
 
 
 class TestExtractionConfig:
-    def test_build_extraction_config_maps_definition_and_defaults(self):
-        configuration = {
-            "id": "c-1",
-            "tenant_id": TENANT_ID,
-            "name": "检测报告",
-            "code": "inspection_report",
-            "type": "extract",
-            "status": "published",
-            "current_revision_id": "r-1",
-            "draft_definition": {
-                "fields": [{"field_key": "a", "field_label": "A"}],
-                "examples": [{"example_input": "输入", "example_output": {"a": 1}}],
-                "extraction_prompt": "请抽取字段",
-                "parse": {"model_version": "vlm", "method": "ocr"},
-                "classify": {"rules": ["invoice"]},
-                "split": {"categories": ["contract"]},
-                "per_page_extraction": True,
-            },
-        }
+    @staticmethod
+    def definition(description="v1"):
+        return {"target": "per_doc", "data_schema": {
+            "type": "object", "properties": {"sample_name": {"type": "string"}},
+            "description": description, "additionalProperties": False,
+        }, "ui": {"/properties/sample_name": {"label": "样品名称", "order": 0}}}
 
-        config = build_extraction_config(configuration)
-
-        assert config["id"] == "c-1"
-        assert config["revision_id"] == "r-1"
-        assert config["fields"][0]["field_key"] == "a"
-        assert config["fields"][0]["field_type"] == "text"
-        assert "examples" not in config
-        assert config["extraction_prompt"] == "请抽取字段"
-        assert "per_page_extraction" not in config
-        assert config["parse"]["model_version"] == "vlm"
-        assert config["parse"]["method"] == "ocr"
-        assert config["parse"]["backend"] == "mineru-api"
-        assert config["classify"]["rules"] == ["invoice"]
-        assert config["split"]["categories"] == ["contract"]
-        assert "cleaner_module" not in config
-
-    def test_build_extraction_config_empty_uses_defaults(self):
-        config = build_extraction_config({"id": "c-1", "draft_definition": {}})
-        assert config["fields"] == []
-        assert "examples" not in config
-        assert config["parse"]["backend"] == "mineru-api"
-        assert config["classify"]["rules"] == []
-        assert config["split"]["categories"] == []
-        assert "cleaner_module" not in config
+    def test_build_extraction_config_has_only_canonical_contract(self):
+        definition = self.definition()
+        config = build_extraction_config({"id": "c", "type": "extract",
+            "current_revision_id": "r", "draft_definition": definition})
+        assert config["data_schema"] == definition["data_schema"]
+        assert config["revision_id"] == "r"
+        assert "fields" not in config and "extraction_prompt" not in config
+        assert "parse" not in config
 
     @pytest.mark.asyncio
-    async def test_get_extraction_configuration_prefers_published_revision(self, service):
+    async def test_new_empty_draft_has_explicit_schema(self, service):
         svc, _ = service
-        created = await svc.create_configuration(_create(
-            type="extract",
-            definition={
-                "fields": [{"field_key": "sample_name", "field_label": "样品名称"}],
-                "extraction_prompt": "v1",
-            },
-        ))
-        published = await svc.publish_configuration(created["id"])
-        await svc.update_configuration(created["id"], {"definition": {"extraction_prompt": "draft-v2"}})
-
-        config = await svc.get_extraction_configuration(created["id"])
-        assert config["extraction_prompt"] == "v1"
-        assert config["revision_id"] == published["revision"]["id"]
+        created = await svc.create_configuration(_create(type="extract"))
+        assert set(created["draft_definition"]) == {"target", "data_schema", "ui"}
+        assert created["draft_definition"]["data_schema"]["properties"] == {}
 
     @pytest.mark.asyncio
-    async def test_get_extraction_configuration_by_revision_pins_definition(self, service):
+    async def test_revision_and_draft_do_not_share_mutable_contract(self, service):
         svc, _ = service
-        created = await svc.create_configuration(_create(
-            type="extract",
-            definition={
-                "fields": [{"field_key": "sample_name", "field_label": "样品名称"}],
-                "extraction_prompt": "v1",
-            },
-        ))
-        published = await svc.publish_configuration(created["id"])
-        await svc.update_configuration(created["id"], {"definition": {"extraction_prompt": "v2"}})
+        created = await svc.create_configuration(_create(type="extract", definition=self.definition()))
+        first = await svc.publish_configuration(created["id"])
+        await svc.update_configuration(created["id"], {"definition": self.definition("v2")})
+        before_publish = await svc.get_extraction_configuration(created["id"])
+        assert before_publish["data_schema"]["description"] == "v1"
         second = await svc.publish_configuration(created["id"])
-
-        old = await svc.get_extraction_configuration_by_revision(published["revision"]["id"])
+        old = await svc.get_extraction_configuration_by_revision(first["revision"]["id"])
         new = await svc.get_extraction_configuration_by_revision(second["revision"]["id"])
-        assert old["extraction_prompt"] == "v1"
-        assert new["extraction_prompt"] == "v2"
-        assert old["revision_id"] == published["revision"]["id"]
+        assert old["data_schema"]["description"] == "v1"
+        assert new["data_schema"]["description"] == "v2"
+        assert old["revision_id"] == first["revision"]["id"]
 
     @pytest.mark.asyncio
-    async def test_resolve_extraction_configuration_by_config_id_code_and_name(self, service):
+    async def test_resolve_id_code_name_respects_tenant(self, service):
         svc, _ = service
-        created = await svc.create_configuration(
-            _create(
-                name="检测报告",
-                code="inspection_report",
-                type="extract",
-                definition={"fields": [{"field_key": "sample_name", "field_label": "样品名称"}]},
-            )
-        )
+        created = await svc.create_configuration(_create(name="检测报告", code="inspection_report",
+            type="extract", definition=self.definition()))
         await svc.publish_configuration(created["id"])
-
-        by_id = await svc.resolve_extraction_configuration(TENANT_ID, created["id"])
-        by_code = await svc.resolve_extraction_configuration(TENANT_ID, "inspection_report")
-        by_name = await svc.resolve_extraction_configuration(TENANT_ID, "检测报告")
-
-        assert by_id["id"] == created["id"]
-        assert by_code["id"] == created["id"]
-        assert by_name["id"] == created["id"]
+        for key in (created["id"], "inspection_report", "检测报告"):
+            result = await svc.resolve_extraction_configuration(TENANT_ID, key)
+            assert result["id"] == created["id"]
         assert await svc.resolve_extraction_configuration(OTHER_TENANT_ID, created["id"]) is None
 
     @pytest.mark.asyncio
-    async def test_list_published_extract_configurations(self, service):
+    async def test_published_listing_excludes_drafts(self, service):
         svc, _ = service
-        created = await svc.create_configuration(
-            _create(
-                name="检测报告",
-                code="inspection_report",
-                type="extract",
-                definition={"fields": [{"field_key": "sample_name", "field_label": "样品名称"}]},
-            )
-        )
+        created = await svc.create_configuration(_create(type="extract", definition=self.definition()))
         await svc.publish_configuration(created["id"])
-
-        draft = await svc.create_configuration(
-            _create(name="草稿配置", code="draft_only", type="extract")
-        )
-
-        published_configs = await svc.list_published_extract_configurations(TENANT_ID)
-        ids = [c["id"] for c in published_configs]
-        assert created["id"] in ids
-        assert draft["id"] not in ids
+        draft = await svc.create_configuration(_create(name="草稿", type="extract"))
+        ids = [c["id"] for c in await svc.list_published_extract_configurations(TENANT_ID)]
+        assert created["id"] in ids and draft["id"] not in ids
 
     @pytest.mark.asyncio
-    async def test_publish_extract_without_schema_or_fields_rejected(self, service):
-        svc, _ = service
-        created = await svc.create_configuration(
-            _create(type="extract", definition={"extraction_prompt": "no schema"})
-        )
-
+    async def test_invalid_schema_rejected_before_config_insert(self, service):
+        svc, fake = service
         with pytest.raises(ConfigurationStateError):
-            await svc.publish_configuration(created["id"])
+            await svc.create_configuration(_create(type="extract", definition={"data_schema": {"anyOf": []}}))
+        assert not fake.tables.get("configurations")
 
     @pytest.mark.asyncio
-    async def test_publish_extract_with_invalid_schema_rejected(self, service):
-        svc, _ = service
-        created = await svc.create_configuration(
-            _create(type="extract", definition={"data_schema": {"anyOf": []}})
-        )
+    async def test_old_fields_are_not_converted(self, service):
+        svc, fake = service
+        with pytest.raises(ConfigurationStateError):
+            await svc.create_configuration(_create(type="extract", definition={"fields": [{"field_key": "old"}]}))
+        assert not fake.tables.get("configurations")
 
+    @pytest.mark.asyncio
+    async def test_publish_checks_stored_definition_again(self, service):
+        svc, fake = service
+        created = await svc.create_configuration(_create(type="extract", definition=self.definition()))
+        fake.tables["configurations"][0]["draft_definition"] = {"fields": []}
         with pytest.raises(ConfigurationStateError):
             await svc.publish_configuration(created["id"])
+        assert not fake.tables.get("configuration_revisions")

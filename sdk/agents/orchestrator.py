@@ -3,6 +3,7 @@
 from typing import Any, Dict
 
 from services.configuration_service import configuration_service
+from services.extract_configuration import draft_fields_definition
 from sdk.agents.doc_analyzer_agent import analyze_document as run_doc_analyzer
 from sdk.agents.prompt_agent import build_fallback_prompt, generate_prompt as run_prompt_agent
 from sdk.models import (
@@ -20,22 +21,8 @@ def build_configuration_definition(
     confirmed: ConfirmTemplateRequest,
     prompt: str,
 ) -> Dict[str, Any]:
-    """把向导确认的模板草稿映射为 Configuration definition。"""
-    fields = [
-        {
-            "field_key": field.field_key,
-            "field_label": field.field_label,
-            "field_type": field.field_type,
-            "extraction_hint": field.extraction_hint,
-            "sort_order": index,
-        }
-        for index, field in enumerate(confirmed.fields)
-    ]
-    return {
-        "fields": fields,
-        "extraction_prompt": prompt,
-        "parse": {"model_version": session.parse_mode},
-    }
+    """Materialize a new confirmed proposal as schema, never as stored fields."""
+    return draft_fields_definition([field.model_dump() for field in confirmed.fields], prompt)
 
 
 class SDKOrchestrator:
@@ -91,18 +78,14 @@ class SDKOrchestrator:
             },
             created_by=session.user_id,
         )
-        published = await configuration_service.publish_configuration(
-            configuration["id"],
-            created_by=session.user_id,
-        )
-        revision = published.get("revision") or {}
 
         session.state = SDKSessionState.COMMITTED
         return CommitResult(
             tenant_id=tenant_id,
             configuration_id=configuration["id"],
-            revision_id=revision.get("id", ""),
-            revision_number=revision.get("revision_number", 1),
+            revision_id=None,
+            revision_number=None,
+            status="draft",
             field_count=len(confirmed.fields),
         )
 

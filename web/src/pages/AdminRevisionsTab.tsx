@@ -50,8 +50,8 @@ export function RevisionsTab({
               </span>
             </div>
             <p className="mt-2 text-xs text-text-muted">
-              {definition?.fields?.length ?? 0} 个字段
-              {definition?.extraction_prompt ? ' · 含提取 Prompt' : ''}
+              {definition?.data_schema ? Object.keys(definition.data_schema.properties ?? {}).length : definition?.fields?.length ?? 0} 个字段
+              {definition?.data_schema?.description || definition?.extraction_prompt ? ' · 含抽取说明' : ''}
             </p>
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-primary-400 hover:text-primary-300">

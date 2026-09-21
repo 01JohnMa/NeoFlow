@@ -1,3 +1,4 @@
+import type { ExtractResultView } from '@/types/extractSchema'
 import api from './api'
 import type { ProcessingJob } from '@/types'
 
@@ -34,12 +35,12 @@ export interface ExtractResultResponse {
   job_id: string
   data: unknown
   engine?: ExtractEngine | null
+  view?: ExtractResultView | null
 }
 
 export interface ExtractConfigurationDefinition {
   target?: string
   data_schema?: unknown
-  fields?: unknown[]
 }
 
 export interface ExtractConfiguration {

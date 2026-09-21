@@ -1,3 +1,5 @@
+import type { ExtractSchema, ExtractSchemaUi } from './extractSchema'
+
 // ============ Configuration Types ============
 
 export type ConfigurationType = 'extract' | 'classify' | 'split' | 'composite'
@@ -26,8 +28,12 @@ export interface ConfigurationParseSection {
 }
 
 export interface ConfigurationDefinition {
-  fields: ConfigurationField[]
-  extraction_prompt: string | null
+  data_schema?: ExtractSchema
+  target?: 'per_doc' | 'per_page'
+  ui?: ExtractSchemaUi
+  // Other operation types still have their own configuration sections.
+  fields?: ConfigurationField[]
+  extraction_prompt?: string | null
   parse?: ConfigurationParseSection
 }
 
@@ -116,9 +122,10 @@ export interface SDKConfirmTemplatePayload {
 export interface SDKCommitResult {
   tenant_id: string
   configuration_id: string
-  revision_id: string
-  revision_number: number
+  revision_id: string | null
+  revision_number: number | null
   field_count: number
+  status: 'draft'
 }
 
 export interface SDKSession {

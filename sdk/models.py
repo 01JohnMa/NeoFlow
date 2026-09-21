@@ -70,9 +70,10 @@ class SDKModelProfileRequest(BaseModel):
 class CommitResult(BaseModel):
     tenant_id: str
     configuration_id: str
-    revision_id: str
-    revision_number: int = 1
+    revision_id: Optional[str] = None
+    revision_number: Optional[int] = None
     field_count: int = 0
+    status: str = "draft"
 
 
 class SDKSession(BaseModel):

@@ -8,7 +8,7 @@ An **Extraction Target** selects the result unit: the whole document (`per_doc`)
 
 A draft Configuration may be run without publishing: the run freezes an **execution snapshot** on the Job (schema, target, engine parameters) instead of creating a Revision. Published runs still pin a Revision (ADR-0007). This keeps the Configuration the single authoring home while letting the playground iterate without polluting revision history.
 
-The execution snapshot preserves whether `target` and `data_schema` were provided. Missing `target` defaults to `per_doc`, and a missing `data_schema` may use the legacy `fields` compatibility path. Explicit `null` values are invalid and must fail closed instead of triggering a default or legacy fallback. A successful Extract Result always stores an object-shaped `engine` value.
+The execution snapshot preserves whether `target` and `data_schema` were provided. Missing `target` defaults to `per_doc`. `data_schema` is required; the legacy `fields` fallback is removed. Explicit `null` values are invalid and must fail closed. Existing fields-only configurations are not migrated or converted; create a new schema configuration. The Builder edits `data_schema` directly; separate `ui` labels/order have no extraction semantics. A successful Extract Result always stores an object-shaped `engine` value.
 
 ## Considered Options
 

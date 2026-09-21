@@ -56,14 +56,6 @@ ENGINE_MAX_BYTES = 16384
 ENGINE_MAX_CALLS = 20
 EXTRACT_SAMPLE_KEY = "extract"
 
-LEGACY_TYPE_MAP = {
-    "text": {"type": "string"},
-    "date": {"type": "string", "format": "date"},
-    "number": {"type": "number"},
-    "boolean": {"type": "boolean"},
-}
-
-
 class ExtractFailure(Exception):
     """可解释的执行失败（reason 进 Job error，不发正式结果）。"""
 
@@ -82,7 +74,7 @@ def build_execution_spec(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]
     definition = definition if isinstance(definition, dict) else {}
     effective_params = {
         key: definition[key]
-        for key in ("target", "data_schema", "fields")
+        for key in ("target", "data_schema")
         if key in definition
     }
     return {
@@ -116,52 +108,17 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     target = params["target"] if "target" in params else "per_doc"
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ExtractFailure("target_not_supported", str(target))
-
-    schema_source = "data_schema"
-    if "data_schema" in params:
-        schema = params["data_schema"]
-        if not isinstance(schema, dict):
-            raise ExtractFailure("schema_invalid", "data_schema 必须是 JSON 对象")
-    else:
-        fields = params.get("fields")
-        if isinstance(fields, list) and fields:
-            schema = legacy_fields_to_schema(fields)
-            schema_source = "legacy_fields"
-        else:
-            raise ExtractFailure("schema_missing")
-
+    if "data_schema" not in params:
+        raise ExtractFailure("schema_missing", "缺少 data_schema；不再支持 fields 回退")
+    schema = params["data_schema"]
+    if not isinstance(schema, dict):
+        raise ExtractFailure("schema_invalid", "data_schema 必须是 JSON 对象")
     errors = check_schema(schema)
     if errors:
         raise ExtractFailure("schema_invalid", errors[0])
+    return {"target": target, "data_schema": schema, "schema_source": "data_schema"}
 
-    return {"target": target, "data_schema": schema, "schema_source": schema_source}
 
-
-def legacy_fields_to_schema(fields: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """把旧扁平字段模型转成 JSON Schema（历史配置兼容执行视图）。"""
-    properties: Dict[str, Any] = {}
-    required: List[str] = []
-    for field in fields:
-        key = str(field.get("field_key") or "").strip()
-        if not key:
-            continue
-        spec = dict(LEGACY_TYPE_MAP.get(str(field.get("field_type") or "text"), {"type": "string"}))
-        description = str(field.get("extraction_hint") or "").strip() or str(
-            field.get("field_label") or key
-        )
-        spec["description"] = description
-        properties[key] = spec
-        if field.get("is_required"):
-            required.append(key)
-
-    schema: Dict[str, Any] = {
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": False,
-    }
-    if required:
-        schema["required"] = required
-    return schema
 
 
 def plan_units(target: str, parse_data: Dict[str, Any]) -> List[Dict[str, Any]]:
