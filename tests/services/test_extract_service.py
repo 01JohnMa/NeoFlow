@@ -186,10 +186,42 @@ class TestResolveSpec:
         spec = resolve_extract_spec(_job())
         assert spec["target"] == "per_doc"
         assert spec["schema_source"] == "data_schema"
+        assert spec["extraction_strategy"] == "full_document"
 
         revision = {"definition": {"target": "per_page", "data_schema": SCHEMA}}
         spec = resolve_extract_spec({"execution_spec": None}, revision=revision)
         assert spec["target"] == "per_page"
+        assert spec["extraction_strategy"] == "full_document"
+
+    def test_page_routed_is_valid_for_per_doc_but_not_available_by_default(self):
+        job = _job(execution_spec={
+            "capability": "extract",
+            "spec_version": "1",
+            "effective_params": {
+                "target": "per_doc",
+                "data_schema": SCHEMA,
+                "extraction_strategy": "page_routed",
+            },
+        })
+        spec = resolve_extract_spec(job)
+        assert spec["extraction_strategy"] == "page_routed"
+        with pytest.raises(ExtractFailure) as exc:
+            extract_service.ensure_extract_strategy_available(spec)
+        assert exc.value.reason == "strategy_unavailable"
+
+    def test_page_routed_per_page_is_rejected(self):
+        job = _job(execution_spec={
+            "capability": "extract",
+            "spec_version": "1",
+            "effective_params": {
+                "target": "per_page",
+                "data_schema": SCHEMA,
+                "extraction_strategy": "page_routed",
+            },
+        })
+        with pytest.raises(ExtractFailure) as exc:
+            resolve_extract_spec(job)
+        assert exc.value.reason == "strategy_target_not_supported"
 
     def test_fields_only_is_rejected_without_conversion(self):
         job = _job(execution_spec={
@@ -300,6 +332,7 @@ class TestHandleExtract:
         data, engine = _committed_ok()
         assert data == payload
         assert engine["target"] == "per_doc"
+        assert engine["extraction_strategy"] == "full_document"
         assert engine["usage"]["requests"] == 1
         assert engine["usage"]["input_tokens"] == 10
         assert captured == []

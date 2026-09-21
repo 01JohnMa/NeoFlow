@@ -14,6 +14,9 @@ class ExtractConfigurationError(ValueError):
     """An invalid authoring definition; report to the caller instead of normalizing it away."""
 
 
+EXTRACTION_STRATEGIES = ("full_document", "page_routed")
+
+
 def escape_pointer_token(token: str) -> str:
     return token.replace("~", "~0").replace("/", "~1")
 
@@ -33,6 +36,7 @@ def empty_extract_definition() -> Dict[str, Any]:
         "target": "per_doc",
         "data_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "ui": {},
+        "extraction_strategy": "full_document",
     }
 
 
@@ -44,10 +48,10 @@ def validate_extract_definition(definition: Any) -> Dict[str, Any]:
     """
     if not isinstance(definition, dict):
         raise ExtractConfigurationError("Extract definition 必须是 JSON 对象")
-    unknown = set(definition) - {"target", "data_schema", "ui"}
+    unknown = set(definition) - {"target", "data_schema", "ui", "extraction_strategy"}
     if unknown:
         raise ExtractConfigurationError(
-            "Extract 只接受 target/data_schema/ui，不支持这些配置键："
+            "Extract 只接受 target/data_schema/ui/extraction_strategy，不支持这些配置键："
             + ", ".join(sorted(unknown))
         )
     if "data_schema" not in definition:
@@ -58,6 +62,17 @@ def validate_extract_definition(definition: Any) -> Dict[str, Any]:
     target = definition.get("target", "per_doc")
     if not isinstance(target, str) or target not in {"per_doc", "per_page"}:
         raise ExtractConfigurationError("target 只支持 per_doc/per_page")
+
+    if "extraction_strategy" in definition:
+        strategy = definition["extraction_strategy"]
+        if not isinstance(strategy, str) or strategy not in EXTRACTION_STRATEGIES:
+            raise ExtractConfigurationError(
+                "extraction_strategy 只支持 full_document/page_routed"
+            )
+        if strategy == "page_routed" and target != "per_doc":
+            raise ExtractConfigurationError(
+                "page_routed 只支持 per_doc target"
+            )
 
     schema = definition["data_schema"]
     ui = definition.get("ui", {})

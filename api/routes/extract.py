@@ -23,6 +23,7 @@ from services.configuration_service import configuration_service
 from services.extract_service import (
     ExtractFailure,
     build_execution_spec,
+    ensure_extract_strategy_available,
     resolve_extract_spec,
 )
 from services.result_service import result_service
@@ -55,11 +56,13 @@ async def _load_definition_and_spec(
         if not revision:
             raise HTTPException(status_code=409, detail="配置没有可用的已发布修订")
         spec = build_execution_spec(revision.get("definition") or {})
-        resolve_extract_spec({"execution_spec": spec})
+        resolved = resolve_extract_spec({"execution_spec": spec})
+        ensure_extract_strategy_available(resolved)
         return revision["id"], spec
 
     spec = build_execution_spec(configuration.get("draft_definition") or {})
-    resolve_extract_spec({"execution_spec": spec})
+    resolved = resolve_extract_spec({"execution_spec": spec})
+    ensure_extract_strategy_available(resolved)
     return None, spec
 
 

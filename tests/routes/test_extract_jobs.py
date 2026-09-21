@@ -149,6 +149,25 @@ class TestCreateExtractJobs:
         assert "target_not_supported" in resp.json()["error"]
         mod.create_job.assert_not_awaited()
 
+    def test_page_routed_is_rejected_when_advanced_execution_unavailable(self, client, monkeypatch):
+        mod = _patch(
+            monkeypatch,
+            _draft_config(definition={
+                "target": "per_doc",
+                "data_schema": SCHEMA,
+                "extraction_strategy": "page_routed",
+            }),
+        )
+
+        resp = client.post(
+            "/api/extract/jobs",
+            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+        )
+
+        assert resp.status_code == 409
+        assert "strategy_unavailable" in resp.json()["error"]
+        mod.create_job.assert_not_awaited()
+
     def test_explicit_null_schema_rejected_instead_of_legacy_fallback(self, client, monkeypatch):
         bad = _draft_config(
             definition={

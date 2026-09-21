@@ -51,6 +51,9 @@ from services.supabase_service import supabase_service
 EXTRACT_CAPABILITY = "extract"
 SPEC_VERSION = "1"
 SUPPORTED_TARGETS = ("per_doc", "per_page")
+FULL_DOCUMENT_STRATEGY = "full_document"
+PAGE_ROUTED_STRATEGY = "page_routed"
+SUPPORTED_STRATEGIES = (FULL_DOCUMENT_STRATEGY, PAGE_ROUTED_STRATEGY)
 MAX_REQUESTS_PER_UNIT = 3
 ENGINE_MAX_BYTES = 16384
 ENGINE_MAX_CALLS = 20
@@ -74,7 +77,7 @@ def build_execution_spec(definition: Optional[Dict[str, Any]]) -> Dict[str, Any]
     definition = definition if isinstance(definition, dict) else {}
     effective_params = {
         key: definition[key]
-        for key in ("target", "data_schema")
+        for key in ("target", "data_schema", "extraction_strategy")
         if key in definition
     }
     return {
@@ -108,6 +111,11 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     target = params["target"] if "target" in params else "per_doc"
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ExtractFailure("target_not_supported", str(target))
+    strategy = params["extraction_strategy"] if "extraction_strategy" in params else FULL_DOCUMENT_STRATEGY
+    if not isinstance(strategy, str) or strategy not in SUPPORTED_STRATEGIES:
+        raise ExtractFailure("strategy_invalid", str(strategy))
+    if strategy == PAGE_ROUTED_STRATEGY and target != "per_doc":
+        raise ExtractFailure("strategy_target_not_supported", f"{strategy}/{target}")
     if "data_schema" not in params:
         raise ExtractFailure("schema_missing", "缺少 data_schema；不再支持 fields 回退")
     schema = params["data_schema"]
@@ -116,7 +124,19 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     errors = check_schema(schema)
     if errors:
         raise ExtractFailure("schema_invalid", errors[0])
-    return {"target": target, "data_schema": schema, "schema_source": "data_schema"}
+    return {
+        "target": target,
+        "data_schema": schema,
+        "schema_source": "data_schema",
+        "extraction_strategy": strategy,
+    }
+
+
+def ensure_extract_strategy_available(spec: Dict[str, Any]) -> None:
+    """Reject advanced execution explicitly; never silently run full_document."""
+    if spec.get("extraction_strategy") == PAGE_ROUTED_STRATEGY:
+        if not settings.EXTRACT_PAGE_ROUTED_ENABLED:
+            raise ExtractFailure("strategy_unavailable", PAGE_ROUTED_STRATEGY)
 
 
 
@@ -582,6 +602,7 @@ def build_engine(
     engine: Dict[str, Any] = {
         "name": "neoflow-extract",
         "target": spec["target"],
+        "extraction_strategy": spec.get("extraction_strategy", FULL_DOCUMENT_STRATEGY),
         "schema_hash": schema_hash(spec["data_schema"]),
         "schema_source": spec["schema_source"],
         "prompt_version": "v1",
@@ -723,6 +744,7 @@ async def handle_extract_job(
 
     try:
         spec = resolve_extract_spec(job, revision, configuration)
+        ensure_extract_strategy_available(spec)
         document_ids = [str(item) for item in (job.get("document_ids") or []) if item]
         if len(document_ids) != 1:
             raise ExtractFailure("document_count_invalid")

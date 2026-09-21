@@ -41,6 +41,7 @@ class ConfigurationDefinitionModel(BaseModel):
     data_schema: Optional[Dict[str, Any]] = None
     target: Optional[str] = None
     ui: Optional[Dict[str, Any]] = None
+    extraction_strategy: Optional[Literal["full_document", "page_routed"]] = None
 
     fields: List[ConfigurationFieldModel] = Field(default_factory=list)
     extraction_prompt: Optional[str] = None

@@ -19,9 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_empty_new_draft_is_explicit_schema():
     value = empty_extract_definition()
-    assert set(value) == {'target', 'data_schema', 'ui'}
+    assert set(value) == {'target', 'data_schema', 'ui', 'extraction_strategy'}
     assert validate_extract_definition(value) == value
     assert value['data_schema']['properties'] == {}
+    assert value['extraction_strategy'] == 'full_document'
 
 
 @pytest.mark.parametrize('definition', [None, [], {}, {'fields': []}, {'data_schema': None},
@@ -36,6 +37,21 @@ def test_invalid_or_legacy_definition_is_rejected(definition):
 def test_explicit_invalid_target_is_not_defaulted(target):
     with pytest.raises(ExtractConfigurationError):
         validate_extract_definition({**empty_extract_definition(), 'target': target})
+
+
+@pytest.mark.parametrize('strategy', [None, '', False, 'unknown'])
+def test_explicit_invalid_extraction_strategy_is_not_defaulted(strategy):
+    with pytest.raises(ExtractConfigurationError):
+        validate_extract_definition({**empty_extract_definition(), 'extraction_strategy': strategy})
+
+
+def test_page_routed_strategy_requires_per_doc():
+    with pytest.raises(ExtractConfigurationError):
+        validate_extract_definition({
+            **empty_extract_definition(),
+            'target': 'per_page',
+            'extraction_strategy': 'page_routed',
+        })
 
 
 def test_raw_execution_subset_is_not_narrowed_to_builder_profile():
@@ -85,7 +101,7 @@ def test_schema_replacement_is_not_recursive_merge_and_rejects_stale_ui():
 def test_ai_proposal_materializes_once_without_persisted_fields_or_example_values():
     fields = [{'field_key': 'date', 'field_label': '日期', 'field_type': 'date', 'sample_value': 'private'}]
     result = draft_fields_definition(fields, '全局规则')
-    assert set(result) == {'target', 'data_schema', 'ui'}
+    assert set(result) == {'target', 'data_schema', 'ui', 'extraction_strategy'}
     assert result['data_schema']['description'] == '全局规则'
     assert 'private' not in json.dumps(result)
     assert 'required' not in result['data_schema']

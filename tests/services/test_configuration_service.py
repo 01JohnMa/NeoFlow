@@ -418,7 +418,10 @@ class TestExtractionConfig:
     async def test_new_empty_draft_has_explicit_schema(self, service):
         svc, _ = service
         created = await svc.create_configuration(_create(type="extract"))
-        assert set(created["draft_definition"]) == {"target", "data_schema", "ui"}
+        assert set(created["draft_definition"]) == {
+            "target", "data_schema", "ui", "extraction_strategy"
+        }
+        assert created["draft_definition"]["extraction_strategy"] == "full_document"
         assert created["draft_definition"]["data_schema"]["properties"] == {}
 
     @pytest.mark.asyncio
