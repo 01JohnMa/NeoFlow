@@ -40,6 +40,17 @@ The supplied [`4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json`](../t
 
 The source-first replay is one field below the full-document baseline under the business-normalized rule, matches the legacy route, and has no extra unsupported value. `progressive_parse_routed` has no executable run yet and is intentionally absent from this table.
 
+## Description-adjusted rerun (2026-09-22)
+
+The seed schema descriptions were tightened for issuer/document details, date month-to-day normalization, project scope, group/treatment completeness, list preservation, table products, and direct evidence for research-product English names. Both current executable strategies were then rerun from the same Document and compared with the same gold:
+
+| Run | Job | Worker time | Requests | Exact | Mismatch | Gold missing | Extra |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `full_document` | `d5df9b3d-203a-4e68-a3c2-731f02da8fbe` | 39.06s | 1 | 23/28 | 5 | 0 | 0 |
+| legacy `page_routed` | `f1c1cd33-2af5-4d50-ada5-9f4088e5eb63` | 142.72s | 6 | 19/28 | 7 | 2 | 0 |
+
+The description changes improved the full-document run from 20/28 to 23/28: both dates, project scope, and control products are now present. Remaining full-document differences are `nmpa_info`, `protocol_version`, `exclusion_criteria`, `study_group`, and `secondary_endpoint`; these require normalization or structured/list extraction rather than more page routing. The legacy route still misses both dates despite its 37-page selection, which points to its staged unresolved/field handling and date normalization path.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
