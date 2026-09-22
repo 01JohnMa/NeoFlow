@@ -771,6 +771,7 @@ async def _run_page_routed(
     locked: Dict[str, Any] = {}
     evidence_by_path: Dict[str, Any] = {}
     selected_pages: set[int] = set()
+    examined_pages: set[int] = set()
     calls: List[Dict[str, Any]] = []
     pass_count = 0
     parse_data = parse_row.get("data") or {}
@@ -778,7 +779,7 @@ async def _run_page_routed(
     while unresolved and pass_count < 2:
         pass_count += 1
         queries = {
-            path: _field_query(path, node)
+            path: _field_query(path, node, schema)
             for path, node in leaves
             if path in unresolved
         }
@@ -794,13 +795,16 @@ async def _run_page_routed(
             )
         except PageIndexError as exc:
             raise ExtractFailure(exc.reason, exc.message) from exc
-        for candidates in candidates_by_path.values():
-            selected_pages.update(candidate.page_no for candidate in candidates)
-
-        if not selected_pages:
+        pass_pages = set(_select_candidate_pages(
+            candidates_by_path,
+            settings.PAGE_ROUTED_MAX_PAGES,
+            examined_pages,
+        ))
+        if not pass_pages:
             break
-        selected_pages = set(sorted(selected_pages)[: settings.PAGE_ROUTED_MAX_PAGES])
-        source_text, page_refs = _routed_source(parse_data, sorted(selected_pages))
+        examined_pages.update(pass_pages)
+        selected_pages.update(pass_pages)
+        source_text, page_refs = _routed_source(parse_data, sorted(pass_pages))
         if not source_text.strip():
             break
         messages = build_routed_messages(

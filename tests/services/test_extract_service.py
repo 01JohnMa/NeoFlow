@@ -382,6 +382,16 @@ class TestValidateOutput:
                     schema, values, {}, ["/person/age"], {}, {"/person/name": "original"},
                 )
 
+    def test_candidate_page_budget_round_robins_fields_and_prefers_unexamined_pages(self):
+        candidates = {
+            "/phone": [PageCandidate(34, 1.0), PageCandidate(2, 0.9)],
+            "/protocol": [PageCandidate(35, 1.0), PageCandidate(3, 0.9)],
+        }
+        first = extract_service._select_candidate_pages(candidates, 2, set())
+        second = extract_service._select_candidate_pages(candidates, 2, {34, 35})
+        assert first == [34, 35]
+        assert second == [2, 3]
+
 
 class TestHandleExtract:
     @pytest.mark.asyncio
