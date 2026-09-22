@@ -134,7 +134,7 @@
         },
         "protocol_version": {
           "type": "string",
-          "description": "如 V2.1。"
+          "description": "方案版本号；将「第1.0版」「1.0版」等同义写法归一为「V1.0」格式；只保留原文直接给出的版本号，不补日期。"
         },
         "study_objective": {
           "type": "string",
