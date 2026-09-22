@@ -68,6 +68,7 @@ SUPPORTED_STRATEGIES = (FULL_DOCUMENT_STRATEGY, PAGE_ROUTED_STRATEGY)
 MAX_REQUESTS_PER_UNIT = 3
 ENGINE_MAX_BYTES = 16384
 ENGINE_MAX_CALLS = 20
+EVIDENCE_QUOTE_MAX_CHARS = 240
 EXTRACT_SAMPLE_KEY = "extract"
 page_index_service = PageIndexService()
 
@@ -633,7 +634,8 @@ def _validate_candidate_values(
                 continue
             if not _direct_value_supported(node, candidate, quote, path):
                 continue
-            valid_refs.append({"page_no": page_no, "block_id": block_id or None, "quote": quote,
+            valid_refs.append({"page_no": page_no, "block_id": block_id or None,
+                               "quote": quote[:EVIDENCE_QUOTE_MAX_CHARS],
                                "validation_kind": _direct_value_kind(node, candidate, path)})
         if not valid_refs:
             continue
@@ -897,7 +899,7 @@ async def _run_page_routed(
         "unresolved": unresolved,
         "index_profile": snapshot.embedding_profile_hash,
     }
-    if len(json.dumps(routed_meta, ensure_ascii=False).encode("utf-8")) > ENGINE_MAX_BYTES // 2:
+    if len(json.dumps(routed_meta, ensure_ascii=False).encode("utf-8")) > ENGINE_MAX_BYTES:
         raise ExtractFailure("evidence_limit_exceeded")
     return payload, routed_meta, calls, usage
 

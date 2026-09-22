@@ -382,6 +382,16 @@ class TestValidateOutput:
                     schema, values, {}, ["/person/age"], {}, {"/person/name": "original"},
                 )
 
+    def test_evidence_quote_is_compacted_after_validation(self):
+        schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+        quote = "正文 " + ("长文本 " * 200)
+        accepted, evidence = extract_service._validate_candidate_values(
+            schema, {"summary": "正文"}, {"/summary": [{"page_no": 1, "quote": quote}]},
+            ["/summary"], {1: {"text": quote, "blocks": {}}}, {},
+        )
+        assert accepted == {"/summary": "正文"}
+        assert len(evidence["/summary"][0]["quote"]) <= extract_service.EVIDENCE_QUOTE_MAX_CHARS
+
     def test_candidate_page_budget_round_robins_fields_and_prefers_unexamined_pages(self):
         candidates = {
             "/phone": [PageCandidate(34, 1.0), PageCandidate(2, 0.9)],
