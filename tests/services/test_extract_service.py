@@ -20,7 +20,7 @@ from services.extract_service import (
     validate_output,
 )
 from services.llm_invoke import LLMResult
-from services.page_index import PageCandidate, PageIndexPage, PageIndexSnapshot
+from services.page_index import PageCandidate, PageIndexPage, PageIndexSnapshot, PageIndexService, InMemoryPageEmbeddingStore
 
 JOB_ID = "99999999-9999-4999-8999-999999999999"
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -355,6 +355,32 @@ class TestValidateOutput:
                 {},
             )
         assert exc.value.reason == "routed_write_path_invalid"
+
+    @pytest.mark.parametrize("node,value,quote", [
+        ({"type": ["string", "null"]}, None, "No answer in this section"),
+        ({"type": "array", "items": {"type": "string"}}, [], "a few items"),
+        ({"type": "number"}, 12, "Quantity 312"),
+        ({"type": "number"}, -12, "Quantity 12"),
+        ({"type": "string"}, "WRONG12", "Report RIGHT12"),
+    ])
+    def test_routed_null_empty_or_unsupported_literal_is_not_locked(self, node, value, quote):
+        schema = {"type": "object", "properties": {"report_no": node}}
+        accepted, _ = extract_service._validate_candidate_values(
+            schema, {"report_no": value},
+            {"/report_no": [{"page_no": 1, "quote": quote}]},
+            ["/report_no"], {1: {"text": quote, "blocks": {}}}, {},
+        )
+        assert accepted == {}
+
+    def test_repair_cannot_overwrite_locked_parent(self):
+        schema = {"type": "object", "properties": {"person": {
+            "type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}},
+        }}}
+        for values in ({"person": None}, {"person": {"name": "changed"}}):
+            with pytest.raises(ExtractFailure, match="field_conflict"):
+                extract_service._validate_candidate_values(
+                    schema, values, {}, ["/person/age"], {}, {"/person/name": "original"},
+                )
 
 
 class TestHandleExtract:

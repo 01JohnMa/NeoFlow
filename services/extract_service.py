@@ -13,8 +13,11 @@
 
 import asyncio
 import json
+import re
+import unicodedata
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Dict, List, Optional, Tuple
+from decimal import Decimal
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 from loguru import logger
@@ -50,6 +53,7 @@ from services.page_index import (
     PageCandidate,
     PageIndexError,
     PageIndexService,
+    html_to_text,
 )
 from services.parse_service import ensure_parse_result
 from services.result_service import result_service
@@ -446,10 +450,31 @@ def _set_pointer(value: Dict[str, Any], pointer: str, item: Any) -> None:
     current[tokens[-1]] = item
 
 
-def _field_query(path: str, node: Dict[str, Any]) -> str:
+def _field_query(path: str, node: Dict[str, Any], schema: Optional[Dict[str, Any]] = None) -> str:
     enum = node.get("enum")
     enum_text = " ".join(str(item) for item in enum) if isinstance(enum, list) else ""
-    return " ".join(part for part in (path, node.get("description", ""), enum_text) if part)
+    parents = []
+    parent = schema or {}
+    for token in path.split("/")[1:-1]:
+        parent = (parent.get("properties") or {}).get(_unescape_pointer_token(token), {})
+        if parent.get("description"):
+            parents.append(parent["description"])
+    return " ".join(part for part in (path, *parents, node.get("description", ""), enum_text) if part)
+
+
+def _select_candidate_pages(
+    candidates: Dict[str, List[PageCandidate]], limit: int, examined: set[int],
+) -> List[int]:
+    """Share the page budget across fields by retrieval rank; revisit pages last."""
+    ranked: List[int] = []
+    field_lists = [candidates[key] for key in sorted(candidates)]
+    for rank in range(max((len(items) for items in field_lists), default=0)):
+        for items in field_lists:
+            if rank < len(items) and items[rank].page_no not in ranked:
+                ranked.append(items[rank].page_no)
+    fresh = [page for page in ranked if page not in examined]
+    revisited = [page for page in ranked if page in examined]
+    return (fresh + revisited)[:limit]
 
 
 def _routed_source(parse_data: Dict[str, Any], page_numbers: Sequence[int]) -> Tuple[str, Dict[int, Dict[str, Any]]]:
@@ -462,8 +487,8 @@ def _routed_source(parse_data: Dict[str, Any], page_numbers: Sequence[int]) -> T
     )
     for page in pages:
         page_no = int(page.get("page_no"))
-        page_lines = [f"[[physical_page:{page_no}]]"]
-        lines.extend(page_lines)
+        page_lines: List[str] = []
+        lines.append(f"[[physical_page:{page_no}]]")
         page_blocks: Dict[str, str] = {}
         markdown = page.get("markdown")
         if isinstance(markdown, str) and markdown.strip():
@@ -482,7 +507,6 @@ def _routed_source(parse_data: Dict[str, Any], page_numbers: Sequence[int]) -> T
             if block_id:
                 page_blocks[block_id] = block_text
                 marker = f"[[physical_page:{page_no} block:{block_id}]]"
-                page_lines.append(marker)
                 lines.append(marker)
             page_lines.append(block_text)
             lines.append(block_text)
@@ -512,17 +536,37 @@ def _value_paths(value: Any, path: str = "") -> List[str]:
     return [path] if path else []
 
 
-def _direct_value_supported(node: Dict[str, Any], value: Any, quote: str) -> bool:
-    """Apply only deterministic support checks; semantic paraphrases remain model-judged."""
-    if isinstance(value, (dict, list)):
-        return True
-    if node.get("format") == "date" or isinstance(value, (int, float)) or (
-        isinstance(value, str) and any(char.isdigit() for char in value)
+def _evidence_text(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", html_to_text(value)).split())
+
+
+def _direct_value_kind(node: Dict[str, Any], value: Any, path: str) -> str:
+    if node.get("format") == "date":
+        return "date_match"
+    if type(value) in (int, float):
+        return "number_match"
+    if isinstance(value, str) and re.search(
+        r"(?:^|[_/])(id|no|code|phone|email|version|identifier)$|编号|手机号|电话号码|邮箱",
+        path, re.IGNORECASE,
     ):
-        value_digits = "".join(char for char in str(value) if char.isdigit())
-        quote_digits = "".join(char for char in quote if char.isdigit())
-        if value_digits:
-            return value_digits in quote_digits
+        return "identifier_match"
+    return "quote_presence_only"
+
+
+def _direct_value_supported(node: Dict[str, Any], value: Any, quote: str, path: str = "") -> bool:
+    """Apply only deterministic support checks; semantic paraphrases remain model-judged."""
+    kind = _direct_value_kind(node, value, path)
+    text = _evidence_text(quote)
+    if kind == "number_match":
+        numbers = re.findall(r"(?<![\w.+-])[+-]?\d+(?:,\d{3})*(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\d.])", text)
+        return any(Decimal(token.replace(",", "")) == Decimal(str(value)) for token in numbers)
+    if kind == "date_match":
+        dates = re.findall(r"(?<!\d)(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})(?:日)?(?!\d)", text)
+        return any(f"{int(year):04d}-{int(month):02d}-{int(day):02d}" == value for year, month, day in dates)
+    if kind == "identifier_match":
+        literal = re.sub(r"\s+", "", _evidence_text(str(value))).casefold()
+        haystack = re.sub(r"\s+", "", text).casefold()
+        return bool(literal) and literal in haystack
     return True
 
 
@@ -539,6 +583,17 @@ def _validate_candidate_values(
     accepted: Dict[str, Any] = {}
     accepted_evidence: Dict[str, Any] = {}
     allowed = set(allowed_paths)
+    for path, previous in locked.items():
+        current = values
+        tokens = [_unescape_pointer_token(token) for token in path.split("/")[1:]]
+        for index, token in enumerate(tokens):
+            if not isinstance(current, dict) or token not in current:
+                break
+            current = current[token]
+            if (index < len(tokens) - 1 and not isinstance(current, dict)) or (
+                index == len(tokens) - 1 and (type(current) is not type(previous) or current != previous)
+            ):
+                raise ExtractFailure("field_conflict", path)
     known = {path for path, _ in _schema_leaves(schema)}
     for value_path in _value_paths(values):
         if value_path in known:
@@ -550,14 +605,15 @@ def _validate_candidate_values(
         if path not in allowed:
             continue
         present, candidate = _get_pointer(values, path)
-        if not present:
+        if not present or candidate is None or candidate == "" or candidate == [] or candidate == {}:
+            continue
+        if validate_value(node, candidate):
             continue
         refs = _evidence_refs(evidence, path)
         valid_refs: List[Dict[str, Any]] = []
         for ref in refs:
-            try:
-                page_no = int(ref.get("page_no"))
-            except (TypeError, ValueError):
+            page_no = ref.get("page_no")
+            if type(page_no) is not int:
                 continue
             page = page_refs.get(page_no)
             if not page:
@@ -573,18 +629,14 @@ def _validate_candidate_values(
                 if block_id
                 else str(page.get("text") or "")
             )
-            if quote and " ".join(quote.split()) not in " ".join(haystack.split()):
+            if _evidence_text(quote) not in _evidence_text(haystack):
                 continue
-            if not _direct_value_supported(node, candidate, quote):
+            if not _direct_value_supported(node, candidate, quote, path):
                 continue
-            valid_refs.append({"page_no": page_no, "block_id": block_id or None, "quote": quote})
+            valid_refs.append({"page_no": page_no, "block_id": block_id or None, "quote": quote,
+                               "validation_kind": _direct_value_kind(node, candidate, path)})
         if not valid_refs:
             continue
-        issues = validate_value(node, candidate)
-        if issues:
-            continue
-        if path in locked and locked[path] != candidate:
-            raise ExtractFailure("field_conflict", path)
         accepted[path] = candidate
         accepted_evidence[path] = valid_refs
     return accepted, accepted_evidence
