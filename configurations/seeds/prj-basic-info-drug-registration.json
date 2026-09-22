@@ -52,12 +52,12 @@
         "planned_start_date": {
           "type": "string",
           "format": "date",
-          "description": "计划开始日期；格式 YYYY-MM-DD。"
+          "description": "计划开始日期；输出 YYYY-MM-DD。原文只有年-月时取该月1日，不得凭空补充具体日。"
         },
         "planned_end_date": {
           "type": "string",
           "format": "date",
-          "description": "计划结束日期；格式 YYYY-MM-DD。"
+          "description": "计划结束日期；输出 YYYY-MM-DD。原文只有年-月时取该月最后一天，不得凭空补充具体日。"
         },
         "planned_subject_count": {
           "type": "number",
@@ -82,11 +82,11 @@
         },
         "project_scope": {
           "type": "string",
-          "description": "如「国内多中心」。"
+          "description": "项目范围；原文明确多中心或列出多个国内研究中心时归一为「国内多中心」；没有明确依据时省略，不猜测。"
         },
         "nmpa_info": {
           "type": "string",
-          "description": "药监部门批件号/通知书号及状态。"
+          "description": "完整保留药监机构或签发机构、文书类型、批件号/通知书号及状态；不能只输出编号。没有直接证据的组成部分省略。"
         },
         "indication": {
           "type": "string",
@@ -138,7 +138,7 @@
         },
         "study_objective": {
           "type": "string",
-          "description": "试验目的章节摘录。"
+          "description": "试验目的章节的完整原文摘录；保留申办方、研究产品和评价目标等限定信息，不自行缩写。"
         },
         "study_design": {
           "type": "string",
@@ -150,15 +150,15 @@
         },
         "inclusion_criteria": {
           "type": "string",
-          "description": "入选标准逐条。"
+          "description": "入选标准；按原文编号逐条保留，不能合并、改写、跳项或只输出部分条目。"
         },
         "exclusion_criteria": {
           "type": "string",
-          "description": "排除标准逐条。"
+          "description": "排除标准；按原文编号逐条保留，不能合并、改写、跳项或只输出部分条目。"
         },
         "study_group": {
           "type": "string",
-          "description": "分组与用药安排的原文表述。"
+          "description": "完整保留分组与用药安排：试验组/对照组名称、随机比例、每组人数、给药方式、治疗次数和观察次数；没有依据的部分省略，不自行补齐。"
         },
         "primary_endpoint": {
           "type": "string",
@@ -166,7 +166,7 @@
         },
         "secondary_endpoint": {
           "type": "string",
-          "description": "次要终点指标"
+          "description": "次要终点指标；按原文编号逐条完整保留，不能合并、改写、跳项或截断定义。"
         },
         "drug_cn_name": {
           "type": "string",
@@ -174,7 +174,7 @@
         },
         "drug_en_name": {
           "type": "string",
-          "description": "研究产品英文名，不以参考文献商品名代替。"
+          "description": "研究产品英文名；只有正文、封面或研究用药表直接给出研究产品英文名时才输出；不得从活性成分、参考文献商品名或模型常识推断。"
         },
         "drug_registration_class": {
           "type": "string",
@@ -259,7 +259,7 @@
         },
         "control_products": {
           "type": "array",
-          "description": "每行一个原文有依据的对照产品。 无依据时省略整个字段；行内无依据的可选子字段省略，不填空串。",
+          "description": "从研究用药/对照药表中逐行抽取对照产品；应急用药不属于对照产品。无依据时省略整个字段；行内只输出原文直接支持的 name、规格、剂型等子字段，不推断药物注册分类，不填空串。",
           "items": {
             "type": "object",
             "properties": {
