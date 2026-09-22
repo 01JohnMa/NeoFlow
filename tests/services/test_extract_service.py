@@ -194,7 +194,8 @@ class TestResolveSpec:
         assert spec["target"] == "per_page"
         assert spec["extraction_strategy"] == "full_document"
 
-    def test_page_routed_is_valid_for_per_doc_but_not_available_by_default(self):
+    def test_page_routed_is_valid_for_per_doc_but_not_available_by_default(self, monkeypatch):
+        monkeypatch.setattr(extract_service.settings, "EXTRACT_PAGE_ROUTED_ENABLED", False)
         job = _job(execution_spec={
             "capability": "extract",
             "spec_version": "1",
@@ -1044,12 +1045,12 @@ class TestHandleExtract:
                 "status": "initialized",
                 "requests_used": 0,
                 "max_requests": 200,
-                "deadline": _deadline_iso(0.05),
+                "deadline": _deadline_iso(1.0),
             },
         )
 
         def slow_validation(*args):
-            time.sleep(0.08)
+            time.sleep(1.1)
             return []
 
         monkeypatch.setattr(extract_service, "validate_output", slow_validation)

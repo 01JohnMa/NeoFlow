@@ -112,7 +112,11 @@ class OpenAICompatibleEmbeddingProvider:
                     "Authorization": f"Bearer {settings.EMBEDDING_API_KEY}",
                     "Content-Type": "application/json",
                 },
-                json={"model": profile.model, "input": inputs},
+                json={
+                    "model": profile.model,
+                    "input": inputs,
+                    **({"dimensions": profile.dimension} if profile.dimension else {}),
+                },
             )
         if response.status_code >= 400:
             raise PageIndexError("embedding_provider_failed", f"HTTP {response.status_code}")
@@ -405,14 +409,18 @@ class PageIndexService:
             missing.append(page)
 
         if missing:
-            if request_gate:
-                await request_gate("page_embeddings")
-            vectors = await self.provider.embed_documents(
-                [page.text for page in missing], embedding_profile
-            )
-            if len(vectors) != len(missing):
-                raise PageIndexError("embedding_response_invalid", "batch cardinality mismatch")
-            vectors = validate_vectors(vectors, embedding_profile)
+            batch_size = max(1, int(getattr(settings, "EMBEDDING_MAX_BATCH_SIZE", 20)))
+            vectors: List[List[float]] = []
+            for start in range(0, len(missing), batch_size):
+                batch = missing[start : start + batch_size]
+                if request_gate:
+                    await request_gate("page_embeddings")
+                batch_vectors = await self.provider.embed_documents(
+                    [page.text for page in batch], embedding_profile
+                )
+                if len(batch_vectors) != len(batch):
+                    raise PageIndexError("embedding_response_invalid", "batch cardinality mismatch")
+                vectors.extend(validate_vectors(batch_vectors, embedding_profile))
             for page, vector in zip(missing, vectors):
                 page.embedding = vector
                 page.embedding_profile_hash = embedding_profile.identity

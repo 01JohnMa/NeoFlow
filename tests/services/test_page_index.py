@@ -79,6 +79,23 @@ async def test_builds_and_reuses_one_vector_per_physical_page():
 
 
 @pytest.mark.asyncio
+async def test_splits_page_embeddings_into_provider_sized_batches(monkeypatch):
+    provider = FakeEmbeddingProvider()
+    service = PageIndexService(store=InMemoryPageEmbeddingStore(), provider=provider)
+    profile = EmbeddingProfile(model="fake", version="test")
+    monkeypatch.setattr("services.page_index.settings.EMBEDDING_MAX_BATCH_SIZE", 2)
+
+    await service.ensure_index(
+        _row(_page(1, "摘要"), _page(2, "正文"), _page(3, "正文")),
+        tenant_id=TENANT_ID,
+        document_id=DOCUMENT_ID,
+        embedding_profile=profile,
+    )
+
+    assert [len(batch) for batch in provider.document_calls] == [2, 1]
+
+
+@pytest.mark.asyncio
 async def test_vector_and_lexical_candidates_are_unioned_and_neighbors_added():
     provider = FakeEmbeddingProvider()
     service = PageIndexService(store=InMemoryPageEmbeddingStore(), provider=provider)

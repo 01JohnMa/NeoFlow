@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = ""
     EMBEDDING_DIMENSION: int = 0
     EMBEDDING_TIMEOUT_SECONDS: float = 30.0
+    EMBEDDING_MAX_BATCH_SIZE: int = 20
     EMBEDDING_NORMALIZE: bool = True
     EMBEDDING_PROFILE_VERSION: str = "embedding-profile-1"
     EMBEDDING_QUERY_INSTRUCTION: str = ""
