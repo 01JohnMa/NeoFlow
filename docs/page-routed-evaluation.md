@@ -1,6 +1,6 @@
 # Page-routed evaluation (#38)
 
-This document records the frozen preparation artifacts for the optional `page_routed` Extract strategy. The runnable manifest and rubric are in [`benchmarks/page_routed/manifest.json`](../benchmarks/page_routed/manifest.json) and [`benchmarks/page_routed/rubric.json`](../benchmarks/page_routed/rubric.json); scoring is performed by [`scripts/evaluate_page_routed.py`](../scripts/evaluate_page_routed.py).
+This document records preparation artifacts for the optional `page_routed` Extract strategy. The runnable manifest and rubric are in [`benchmarks/page_routed/manifest.json`](../benchmarks/page_routed/manifest.json) and [`benchmarks/page_routed/rubric.json`](../benchmarks/page_routed/rubric.json); scoring is performed by [`scripts/evaluate_page_routed.py`](../scripts/evaluate_page_routed.py).
 
 ## Preparation status
 
@@ -14,10 +14,20 @@ This is an informal browser baseline, not a frozen paired evaluation. It used th
 
 - The first run completed Parse and Extract in approximately 46 seconds end to end. MinerU produced a complete 42-page ParseResult; the Extract job used one model request.
 - A second run against the same Document reused the bound ParseResult and completed in approximately 19 seconds. It did not call MinerU again and also used one model request.
-- The UI displayed 26/38 returned top-level fields on the first run and 25/38 on the reuse run. Against the checked-in case gold, each run had 17/28 exact matches, 8 non-empty mismatches, and 3 gold fields missing. Returned-field count is coverage, not accuracy.
+- The UI displayed 26/38 returned top-level fields on the first run and 25/38 on the reuse run. Against the checked-in case gold, each run had 17/28 exact matches, 8 non-empty mismatches, and 3 gold fields missing. These are literal comparisons, not eight proven factual errors: wording differences and the legacy gold's month-to-day date assumptions require separate adjudication. Returned-field count is coverage, not accuracy.
 - The final Extract result was readable in the browser. The only observed console errors were the expected polling 404s before ParseResult/ExtractResult became available; the terminal result request returned 200.
 
-No `page_routed` run is included here: the local embedding base URL, model, and key are not configured, and `EXTRACT_PAGE_ROUTED_ENABLED` remains false. These measurements therefore establish the standard baseline and a **NO_GO for page-routed rollout**, not a claim that routing is faster or more accurate.
+At the time of those baseline runs, the embedding provider was not configured and advanced execution was disabled. These measurements establish only the standard baseline, not a routing speed or quality improvement.
+
+## Provider connection and first advanced attempt (2026-09-22)
+
+An authorized test key was configured locally for `qwen3.7-text-embedding` on the Beijing DashScope OpenAI-compatible endpoint. A synthetic-text request returned HTTP 200, one embedding, and the requested 1024 dimensions. Credentials remain outside Git. This proves connectivity and the single-input response format, not document retrieval quality or full acceptance.
+
+The first browser-submitted advanced Job (`e57d79d2-8e6b-4d09-b0d6-89fa0bd27678`) bound the same complete ParseResult as the baseline (`78c6ab37-6b10-4ef9-afbf-c368c8256dd6`). It failed before indexing because the test database lacked `document_page_embeddings` (`PGRST205`). The temporary `test` Configuration draft was restored and verified against its saved original. This failed attempt stays in the operational record; it supplies no extraction-quality measurement. Test-database migration authorization and a successful full rerun remain required.
+
+The adapter now splits page requests according to `EMBEDDING_MAX_BATCH_SIZE` (20 for this model), debits the Job request budget for each batch, sends the selected dimension, and validates item indices and vector values before caching. Its OpenAI-compatible path supports plain dense embeddings. Nonempty query/document instruction settings fail explicitly with `embedding_profile_unsupported`: DashScope's `instruct`/`text_type` require its native API, as documented in the [provider guide](https://help.aliyun.com/en/model-studio/embedding). They are not silently ignored or presented as enabled.
+
+Release remains **NO_GO / acceptance incomplete** pending the paired evaluation and its required gates. Production/default settings are unchanged.
 
 ## Frozen scoring rules
 

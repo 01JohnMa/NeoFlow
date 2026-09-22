@@ -1,11 +1,16 @@
+import json
+
+import httpx
 import pytest
 
 from services.page_index import (
     EmbeddingProfile,
     InMemoryPageEmbeddingStore,
+    OpenAICompatibleEmbeddingProvider,
     PageIndexError,
     PageIndexService,
     page_text,
+    validate_vectors,
 )
 
 
@@ -84,15 +89,61 @@ async def test_splits_page_embeddings_into_provider_sized_batches(monkeypatch):
     service = PageIndexService(store=InMemoryPageEmbeddingStore(), provider=provider)
     profile = EmbeddingProfile(model="fake", version="test")
     monkeypatch.setattr("services.page_index.settings.EMBEDDING_MAX_BATCH_SIZE", 2)
+    requests = []
+
+    async def gate(stage):
+        requests.append(stage)
 
     await service.ensure_index(
         _row(_page(1, "摘要"), _page(2, "正文"), _page(3, "正文")),
         tenant_id=TENANT_ID,
         document_id=DOCUMENT_ID,
         embedding_profile=profile,
+        request_gate=gate,
     )
 
     assert [len(batch) for batch in provider.document_calls] == [2, 1]
+    assert requests == ["page_embeddings", "page_embeddings"]
+
+
+@pytest.mark.asyncio
+async def test_http_provider_maps_shuffled_items_and_rejects_duplicate_indices(monkeypatch):
+    from services.page_index import settings
+
+    monkeypatch.setattr(settings, "EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "EMBEDDING_BASE_URL", "https://embedding.example/v1")
+    duplicate = False
+
+    def respond(request):
+        payload = json.loads(request.content)
+        assert payload["dimensions"] == 2
+        assert payload["encoding_format"] == "float"
+        return httpx.Response(200, json={"data": [
+            {"index": 0 if duplicate else 1, "embedding": [0.0, 1.0]},
+            {"index": 0, "embedding": [1.0, 0.0]},
+        ]})
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(
+        transport=httpx.MockTransport(respond), **kwargs
+    ))
+    provider = OpenAICompatibleEmbeddingProvider()
+    profile = EmbeddingProfile(model="test", dimension=2)
+    assert await provider.embed_documents(["page one", "page two"], profile) == [[1.0, 0.0], [0.0, 1.0]]
+    duplicate = True
+    with pytest.raises(PageIndexError, match="embedding_response_invalid"):
+        await provider.embed_documents(["page one", "page two"], profile)
+    with pytest.raises(PageIndexError, match="embedding_profile_unsupported"):
+        await provider.embed_query("query", EmbeddingProfile(model="test", query_instruction="retrieve"))
+
+
+@pytest.mark.parametrize("vectors", [
+    [[0.0, 0.0]], [[True, 1.0]], [["invalid", 1.0]],
+    [[float("nan"), 1.0]], [[float("inf"), 1.0]], [[1.0, 0.0], [1.0]],
+])
+def test_invalid_vectors_cannot_enter_cache(vectors):
+    with pytest.raises(PageIndexError, match="embedding_response_invalid"):
+        validate_vectors(vectors, EmbeddingProfile(model="test"))
 
 
 @pytest.mark.asyncio

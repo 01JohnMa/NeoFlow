@@ -105,27 +105,41 @@ class OpenAICompatibleEmbeddingProvider:
     ) -> List[List[float]]:
         if not settings.EMBEDDING_API_KEY or not settings.EMBEDDING_BASE_URL:
             raise PageIndexError("embedding_unavailable", "embedding provider is not configured")
-        async with httpx.AsyncClient(timeout=settings.EMBEDDING_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                f"{settings.EMBEDDING_BASE_URL.rstrip('/')}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {settings.EMBEDDING_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": profile.model,
-                    "input": inputs,
-                    **({"dimensions": profile.dimension} if profile.dimension else {}),
-                },
-            )
+        if profile.query_instruction or profile.document_instruction:
+            # DashScope instruct/text_type require its native API, not /embeddings.
+            raise PageIndexError("embedding_profile_unsupported", "instructions require a supporting adapter")
+        try:
+            async with httpx.AsyncClient(timeout=settings.EMBEDDING_TIMEOUT_SECONDS) as client:
+                response = await client.post(
+                    f"{settings.EMBEDDING_BASE_URL.rstrip('/')}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {settings.EMBEDDING_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": profile.model,
+                        "input": inputs,
+                        "encoding_format": "float",
+                        **({"dimensions": profile.dimension} if profile.dimension else {}),
+                    },
+                )
+        except httpx.HTTPError as exc:
+            raise PageIndexError("embedding_provider_failed", type(exc).__name__) from exc
         if response.status_code >= 400:
             raise PageIndexError("embedding_provider_failed", f"HTTP {response.status_code}")
         try:
             payload = response.json()
-            rows = sorted(payload["data"], key=lambda item: item["index"])
+            rows = payload["data"]
+            expected_count = 1 if isinstance(inputs, str) else len(inputs)
+            if not isinstance(rows, list) or len(rows) != expected_count:
+                raise ValueError("batch cardinality mismatch")
+            indices = [row["index"] for row in rows]
+            if any(type(index) is not int for index in indices) or sorted(indices) != list(range(expected_count)):
+                raise ValueError("batch index mismatch")
+            rows = sorted(rows, key=lambda item: item["index"])
             vectors = [row["embedding"] for row in rows]
         except (KeyError, TypeError, ValueError) as exc:
-            raise PageIndexError("embedding_response_invalid", str(exc)) from exc
+            raise PageIndexError("embedding_response_invalid", "invalid batch mapping") from exc
         return validate_vectors(vectors, profile)
 
     async def embed_documents(
@@ -266,18 +280,22 @@ def validate_vectors(vectors: Sequence[Sequence[float]], profile: EmbeddingProfi
     for vector in vectors:
         if not isinstance(vector, (list, tuple)) or not vector:
             raise PageIndexError("embedding_response_invalid", "empty vector")
-        values = [float(value) for value in vector]
-        if any(not math.isfinite(value) for value in values):
-            raise PageIndexError("embedding_response_invalid", "non-finite vector")
+        if any(type(value) not in (int, float) for value in vector):
+            raise PageIndexError("embedding_response_invalid", "non-numeric vector")
+        try:
+            values = [float(value) for value in vector]
+            norm = math.hypot(*values)
+        except (ValueError, OverflowError) as exc:
+            raise PageIndexError("embedding_response_invalid", "invalid vector magnitude") from exc
+        if not math.isfinite(norm) or norm == 0:
+            raise PageIndexError("embedding_response_invalid", "non-finite or zero vector")
         dimension = dimension or len(values)
         if len(values) != dimension:
             raise PageIndexError("embedding_response_invalid", "dimension mismatch")
         if profile.dimension and len(values) != profile.dimension:
             raise PageIndexError("embedding_response_invalid", "unexpected dimension")
         if profile.normalize:
-            norm = math.sqrt(sum(value * value for value in values))
-            if norm:
-                values = [value / norm for value in values]
+            values = [value / norm for value in values]
         normalized.append(values)
     return normalized
 
@@ -421,6 +439,7 @@ class PageIndexService:
                 if len(batch_vectors) != len(batch):
                     raise PageIndexError("embedding_response_invalid", "batch cardinality mismatch")
                 vectors.extend(validate_vectors(batch_vectors, embedding_profile))
+            vectors = validate_vectors(vectors, embedding_profile)
             for page, vector in zip(missing, vectors):
                 page.embedding = vector
                 page.embedding_profile_hash = embedding_profile.identity
