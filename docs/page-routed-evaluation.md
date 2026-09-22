@@ -27,6 +27,19 @@ The first source-first replay used the same 42-page clinical-protocol PDF and th
 
 This is a source-first Parse measurement, not a public strategy acceptance: it ran outside the Extract Job/Result persistence seam, used the born-digital text branch only, and did not test the scanned-image branch. The current result shows real Parse-page reduction but no speed or quality win yet; keep the source-first path experimental.
 
+## Unified comparison against the supplied real-case gold
+
+The supplied [`4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json`](../template/OCR训练-基本信息-药物注册类/4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json) is the fact gold for every measured strategy. The strict comparison removes Unicode whitespace before comparing values, but does not treat paraphrases, missing details, or extra unsupported fields as exact matches.
+
+| Run | Returned | Exact | Mismatch | Gold missing | Extra unsupported | Parse/input context |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `full_document` cold (`82629af4`) | 26 | 17/28 | 8 | 3 | 1 | complete 42-page Parse, one Extract request |
+| `full_document` hot (`deadecdf`) | 25 | 17/28 | 8 | 3 | 0 | reused complete ParseResult, one Extract request |
+| legacy complete-Parse `page_routed` (`b398f9e0`) | 26 | 16/28 | 9 | 3 | 1 | 39 selected pages across two passes, six requests |
+| source-first `source_page_routed` replay | 24 | 16/28 | 8 | 4 | 0 | 21 source-selected pages, one Parse and one Extract |
+
+The source-first replay therefore matches the legacy route's exact count and has no extra unsupported value, but it does not exceed the full-document exact count. `progressive_parse_routed` has no executable run yet and is intentionally absent from this table.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
