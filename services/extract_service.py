@@ -783,6 +783,37 @@ async def _run_page_routed(
             page_refs,
             locked,
         )
+        if values and len(accepted) < len(values):
+            # Protocol repair stays inside the current semantic pass and consumes
+            # the same persistent request budget; it cannot bypass evidence checks.
+            repair_messages = build_repair_messages(
+                messages,
+                json.dumps({"values": values, "evidence": pass_evidence}, ensure_ascii=False),
+                [{
+                    "json_path": "$.evidence",
+                    "message": "每个返回字段必须有实际输入中的非空 page/block quote；无证据的字段放入 unresolved",
+                }],
+            )
+            _ensure_unit_fits(repair_messages, f"routed-pass-{pass_count}-evidence-repair")
+            repaired_values, repaired_evidence = await _routed_pass(
+                messages=repair_messages,
+                allowed_paths=unresolved,
+                job_id=job_id,
+                worker_id=worker_id,
+                attempts=attempts,
+                lost=lost,
+                deadline=deadline,
+                request_gate=request_gate,
+                calls=calls,
+            )
+            accepted, accepted_evidence = _validate_candidate_values(
+                schema,
+                repaired_values,
+                repaired_evidence,
+                unresolved,
+                page_refs,
+                locked,
+            )
         if not accepted:
             continue
         locked.update(accepted)

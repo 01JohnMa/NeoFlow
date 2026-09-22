@@ -59,6 +59,9 @@ ROUTED_RULES = RULES + """
 8. values 只填写允许写入的字段路径；没有依据的字段不要编造。
 9. evidence 是内部证据：每个字段路径对应一个数组，元素可包含 page_no、block_id、quote。
 10. evidence 中的页码和 block_id 必须来自原文标记；quote 必须是原文中的连续片段。
+11. values 中每一个非空字段都必须同时有至少一个可核验 evidence；没有可核验引文就把该字段放入 unresolved，不要只返回值。
+12. evidence 的键必须使用 JSON Pointer（例如 /protocol_no），并且 quote 必须非空、逐字出现在对应页或 block 中。
+13. values 仍使用 schema-shaped 对象键；一个最小有效片段是：{"values":{"protocol_no":"CTS1248"},"evidence":{"/protocol_no":[{"page_no":1,"quote":"CTS1248"}]},"unresolved":[]}。
 """
 
 
