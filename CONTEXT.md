@@ -55,7 +55,7 @@ The result unit of one Extraction run — the whole document (`per_doc`) or each
 _Avoid_: granularity, chunking strategy, field scope
 
 **Extraction Strategy**:
-The page-selection strategy for an Extract run: `full_document` keeps the current whole-ParseResult behavior, while `page_routed` is an optional `per_doc` strategy that selects relevant pages before the LLM call. It changes context selection, not the Field Schema, Extraction Target, or Parse Mode, and is frozen with the Revision or Job snapshot.
+The execution shape for an Extract run. NeoFlow distinguishes three strategies: `full_document` sends the complete canonical Parse Result to the extractor; `page_routed` retrieves relevant pages from one complete canonical Parse Result before the extractor; and `progressive_parse_routed` is the separate planned workflow that extracts from an initial Parse coverage and then adds separately tracked Parse coverage for unresolved fields. A strategy changes execution context and orchestration, not the Field Schema, Extraction Target, or Parse Mode, and is frozen with the Revision or Job snapshot when supported.
 _Avoid_: Parse Mode, Extraction Target, Configuration Type
 
 ## Configurations and fields

@@ -392,6 +392,19 @@ class TestValidateOutput:
         assert accepted == {"/summary": "正文"}
         assert len(evidence["/summary"][0]["quote"]) <= extract_service.EVIDENCE_QUOTE_MAX_CHARS
 
+    def test_numeric_evidence_matches_cjk_adjacent_number(self):
+        schema = {"type": "object", "properties": {"sample_size": {"type": "number"}}}
+        accepted, evidence = extract_service._validate_candidate_values(
+            schema,
+            {"sample_size": 240},
+            {"/sample_size": [{"page_no": 1, "quote": "计划纳入240例受试者"}]},
+            ["/sample_size"],
+            {1: {"text": "计划纳入240例受试者", "blocks": {}}},
+            {},
+        )
+        assert accepted == {"/sample_size": 240}
+        assert evidence["/sample_size"][0]["validation_kind"] == "number_match"
+
     def test_candidate_page_budget_round_robins_fields_and_prefers_unexamined_pages(self):
         candidates = {
             "/phone": [PageCandidate(34, 1.0), PageCandidate(2, 0.9)],

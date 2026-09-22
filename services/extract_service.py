@@ -559,7 +559,11 @@ def _direct_value_supported(node: Dict[str, Any], value: Any, quote: str, path: 
     kind = _direct_value_kind(node, value, path)
     text = _evidence_text(quote)
     if kind == "number_match":
-        numbers = re.findall(r"(?<![\w.+-])[+-]?\d+(?:,\d{3})*(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\d.])", text)
+        # CJK text has no word boundary around a number (for example,
+        # ``计划纳入240例``), so ASCII word-boundary guards would reject
+        # otherwise exact numeric evidence. Extract numeric tokens first and
+        # compare their normalized Decimal values.
+        numbers = re.findall(r"[+-]?\d+(?:,\d{3})*(?:\.\d+)?(?:[eE][+-]?\d+)?", text)
         return any(Decimal(token.replace(",", "")) == Decimal(str(value)) for token in numbers)
     if kind == "date_match":
         dates = re.findall(r"(?<!\d)(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})(?:日)?(?!\d)", text)

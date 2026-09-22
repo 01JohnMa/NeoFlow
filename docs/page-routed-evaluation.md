@@ -2,6 +2,16 @@
 
 This document records preparation artifacts for the optional `page_routed` Extract strategy. The runnable manifest and rubric are in [`benchmarks/page_routed/manifest.json`](../benchmarks/page_routed/manifest.json) and [`benchmarks/page_routed/rubric.json`](../benchmarks/page_routed/rubric.json); scoring is performed by [`scripts/evaluate_page_routed.py`](../scripts/evaluate_page_routed.py).
 
+## Three execution strategies
+
+The evaluation separates the three product paths described in Issue #33:
+
+1. **`full_document` — fixed full flow.** Parse the complete document once, then send the complete canonical ParseResult to one extraction call. This is the compatibility baseline.
+2. **`progressive_parse_routed` — staged Parse workflow.** Parse an initial anchor set (for example, cover/summary/TOC), extract the fields resolved there, route only unresolved fields to selected ranges, parse those ranges as supplementary immutable artifacts, and run extraction for the remainder. This is not implemented in the current code and must be evaluated only after its parse-coverage contract exists.
+3. **`page_routed` — fixed embedding route.** Reuse one complete canonical ParseResult, embed one vector per physical page, retrieve and de-duplicate candidate pages per field, then send the selected canonical pages to bounded extraction passes. It reduces LLM context, but it does not reduce the initial MinerU Parse work.
+
+The current browser evidence compares (1) and (3) on the same `parse_result_id`. It is not evidence for (2), and it must not be reported as incremental-Parse savings.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
