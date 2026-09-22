@@ -29,16 +29,16 @@ This is a source-first Parse measurement, not a public strategy acceptance: it r
 
 ## Unified comparison against the supplied real-case gold
 
-The supplied [`4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json`](../template/OCR训练-基本信息-药物注册类/4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json) is the fact gold for every measured strategy. The strict comparison removes Unicode whitespace before comparing values, but does not treat paraphrases, missing details, or extra unsupported fields as exact matches.
+The supplied [`4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json`](../template/OCR训练-基本信息-药物注册类/4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json) is the fact gold for every measured strategy. The comparison normalizes Unicode/full-width text, ignores whitespace and punctuation, and compares `sample_size` by its business value (`240例`); it still does not treat missing details or extra unsupported fields as exact matches.
 
 | Run | Returned | Exact | Mismatch | Gold missing | Extra unsupported | Parse/input context |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `full_document` cold (`82629af4`) | 26 | 17/28 | 8 | 3 | 1 | complete 42-page Parse, one Extract request |
-| `full_document` hot (`deadecdf`) | 25 | 17/28 | 8 | 3 | 0 | reused complete ParseResult, one Extract request |
-| legacy complete-Parse `page_routed` (`b398f9e0`) | 26 | 16/28 | 9 | 3 | 1 | 39 selected pages across two passes, six requests |
-| source-first `source_page_routed` replay | 24 | 16/28 | 8 | 4 | 0 | 21 source-selected pages, one Parse and one Extract |
+| `full_document` cold (`82629af4`) | 26 | 20/28 | 5 | 3 | 1 | complete 42-page Parse, one Extract request |
+| `full_document` hot (`deadecdf`) | 25 | 20/28 | 5 | 3 | 0 | reused complete ParseResult, one Extract request |
+| legacy complete-Parse `page_routed` (`b398f9e0`) | 26 | 19/28 | 6 | 3 | 1 | 39 selected pages across two passes, six requests |
+| source-first `source_page_routed` replay | 24 | 19/28 | 5 | 4 | 0 | 21 source-selected pages, one Parse and one Extract |
 
-The source-first replay therefore matches the legacy route's exact count and has no extra unsupported value, but it does not exceed the full-document exact count. `progressive_parse_routed` has no executable run yet and is intentionally absent from this table.
+The source-first replay is one field below the full-document baseline under the business-normalized rule, matches the legacy route, and has no extra unsupported value. `progressive_parse_routed` has no executable run yet and is intentionally absent from this table.
 
 ## Preparation status
 
