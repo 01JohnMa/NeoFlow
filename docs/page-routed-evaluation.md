@@ -46,10 +46,10 @@ The seed schema descriptions were tightened for issuer/document details, date mo
 
 | Run | Job | Worker time | Requests | Exact | Mismatch | Gold missing | Extra |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `full_document` | `d5df9b3d-203a-4e68-a3c2-731f02da8fbe` | 39.06s | 1 | 23/28 | 5 | 0 | 0 |
-| legacy `page_routed` | `f1c1cd33-2af5-4d50-ada5-9f4088e5eb63` | 142.72s | 6 | 19/28 | 7 | 2 | 0 |
+| `full_document` | `abc3254c-063f-4aef-9e2c-100a19bc0aef` | 17.54s | 1 | 24/28 | 4 | 0 | 0 |
+| legacy `page_routed` | `686c2215-00b4-42ff-9610-95ecdbf3d124` | 98.56s | 6 | 20/28 | 6 | 2 | 0 |
 
-The description changes improved the full-document run from 20/28 to 23/28: both dates, project scope, and control products are now present. Remaining full-document differences are `nmpa_info`, `protocol_version`, `exclusion_criteria`, `study_group`, and `secondary_endpoint`; these require normalization or structured/list extraction rather than more page routing. The legacy route still misses both dates despite its 37-page selection, which points to its staged unresolved/field handling and date normalization path.
+The description changes improved the full-document run from 20/28 to 24/28: both dates, project scope, control products, and protocol-version normalization are now present. Remaining full-document differences are `nmpa_info`, `exclusion_criteria`, `study_group`, and `secondary_endpoint`; these require normalization or structured/list extraction rather than more page routing. The legacy route improved to 20/28 but still misses both dates despite its 37-page selection, which points to its staged unresolved/field handling and date normalization path.
 
 ## Preparation status
 
