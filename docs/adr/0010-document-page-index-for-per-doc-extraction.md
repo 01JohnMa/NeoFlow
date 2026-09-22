@@ -1,14 +1,17 @@
-# Separate extraction strategies and make page-routed extraction an optional per-doc strategy
+# Legacy complete-Parse page routing for per-doc extraction
 
 **Status: accepted**
+
+This ADR records the first, complete-ParseResult page-routing implementation. The source-first third strategy described in the current product model is defined separately in [ADR-0011](0011-source-page-routed-index.md); it must not reuse this ADR's complete-Parse input assumption.
 
 NeoFlow separates three extraction strategies so that context reduction is not confused with reducing canonical Parse coverage:
 
 | Strategy | Input and orchestration | Status |
 | --- | --- | --- |
 | `full_document` | Bind one complete canonical Parse Result and run the existing whole-document extraction flow. | Compatibility default and current baseline. |
-| `page_routed` | Bind one complete canonical Parse Result, embed/index its physical pages, retrieve a bounded page union per unresolved field, then run bounded extraction passes over those pages. | Current advanced implementation, explicit opt-in for `per_doc`. |
+| `page_routed` | Bind one complete canonical Parse Result, embed/index its physical pages, retrieve a bounded page union per unresolved field, then run bounded extraction passes over those pages. | Legacy comparison implementation; it only reduces LLM context. |
 | `progressive_parse_routed` | Parse an initial anchor-page artifact, extract the first batch of fields, route unresolved fields, create supplementary Parse artifacts for selected ranges, and extract only the remainder. | Separate planned workflow; not accepted by the current authoring/execution enum. |
+| `source_page_routed` | Index the uploaded source page by page, retrieve candidates, Parse only selected ranges, and extract from a job-local partial artifact. | Defined by ADR-0011; separate experiment and not yet in the executable enum. |
 
 The `page_routed` Document Page Index is built from one complete, immutable canonical Parse Result in the first slice, with one embedding per physical page, and is cached by source-document hash, page number, text profile, and embedding profile. It changes only the LLM context. `progressive_parse_routed` changes Parse coverage and therefore requires an explicit parse-coverage/artifact contract; it must not be implemented by rebinding or mutating the canonical Parse Result. Native-text/OCR pre-indexing and cross-round incremental Parse remain separate decisions for that workflow.
 

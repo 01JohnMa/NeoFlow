@@ -8,9 +8,11 @@ The evaluation separates the three product paths described in Issue #33:
 
 1. **`full_document` — fixed full flow.** Parse the complete document once, then send the complete canonical ParseResult to one extraction call. This is the compatibility baseline.
 2. **`progressive_parse_routed` — staged Parse workflow.** Parse an initial anchor set (for example, cover/summary/TOC), extract the fields resolved there, route only unresolved fields to selected ranges, parse those ranges as supplementary immutable artifacts, and run extraction for the remainder. This is not implemented in the current code and must be evaluated only after its parse-coverage contract exists.
-3. **`page_routed` — fixed embedding route.** Reuse one complete canonical ParseResult, embed one vector per physical page, retrieve and de-duplicate candidate pages per field, then send the selected canonical pages to bounded extraction passes. It reduces LLM context, but it does not reduce the initial MinerU Parse work.
+3. **`source_page_routed` — source-first route.** Inspect the uploaded source page by page; use native text for usable born-digital pages and images for scanned pages; retrieve top-two candidates per field, parse only the union with MinerU, then extract from that partial artifact. This is the target experiment for reducing first-time MinerU work.
 
-The current browser evidence compares (1) and (3) on the same `parse_result_id`. It is not evidence for (2), and it must not be reported as incremental-Parse savings.
+The existing `page_routed` implementation is retained as a legacy complete-ParseResult comparison. It is not the source-first strategy described above and must not be used as evidence that source-first parsing saves MinerU work.
+
+The current browser evidence compares (1) and the legacy complete-Parse `page_routed` path on the same `parse_result_id`. It is not evidence for (2) or the new source-first (3), and it must not be reported as incremental-Parse savings.
 
 ## Preparation status
 
