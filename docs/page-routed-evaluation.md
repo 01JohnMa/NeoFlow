@@ -29,6 +29,8 @@ After migration 029 was applied to the authorized test project, a second browser
 
 A hot-index rerun (`8a2034df-c009-4ee1-ac24-b77c292f1a8a`) reused those 42 cached vectors but produced the same 22/38 result, 22 evidence fields, 58 requests, and 20 selected pages. Its worker interval was approximately 238 seconds. The small cache saving did not materially change end-to-end latency; query embedding and semantic extraction dominated this sample.
 
+After batching field queries by provider batch size, the final browser run (`acf3c792-1502-424e-b88e-0edc93ce83f2`) consumed 7 requests and completed in approximately 146 seconds, with 24/38 returned fields, 24 evidence fields, and the same 20 selected pages. Against gold it had 16/28 exact matches, 8 non-empty mismatches, and 4 missing fields. Query batching was therefore partially effective for latency, but the route remains much slower than the standard hot run (about 19 seconds) and did not improve exact-field quality; rollout remains **NO_GO**.
+
 The adapter now splits page requests according to `EMBEDDING_MAX_BATCH_SIZE` (20 for this model), debits the Job request budget for each batch, sends the selected dimension, and validates item indices and vector values before caching. Its OpenAI-compatible path supports plain dense embeddings. Nonempty query/document instruction settings fail explicitly with `embedding_profile_unsupported`: DashScope's `instruct`/`text_type` require its native API, as documented in the [provider guide](https://help.aliyun.com/en/model-studio/embedding). They are not silently ignored or presented as enabled.
 
 Release remains **NO_GO / acceptance incomplete** pending the paired evaluation and its required gates. Production/default settings are unchanged.
