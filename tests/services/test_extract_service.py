@@ -396,6 +396,12 @@ class TestHandleExtract:
                 page = 1 if "report_no" in query else 2
                 return [PageCandidate(page, 1.0, ["vector"])]
 
+            async def retrieve_many(self, snapshot, *, queries, **kwargs):
+                return {
+                    path: await self.retrieve(snapshot, query=query, **kwargs)
+                    for path, query in queries.items()
+                }
+
         _patch_env(
             monkeypatch,
             parse_row=parse_row,

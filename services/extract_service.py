@@ -725,23 +725,25 @@ async def _run_page_routed(
 
     while unresolved and pass_count < 2:
         pass_count += 1
-        candidates_by_path: Dict[str, List[PageCandidate]] = {}
-        for path, node in leaves:
-            if path not in unresolved:
-                continue
-            try:
-                candidates_by_path[path] = await page_index_service.retrieve(
-                    snapshot,
-                    query=_field_query(path, node),
-                    embedding_profile=profile,
-                    top_k=settings.PAGE_ROUTED_TOP_K,
-                    neighbor_pages=settings.PAGE_ROUTED_NEIGHBOR_PAGES,
-                    max_pages=settings.PAGE_ROUTED_MAX_PAGES,
-                    request_gate=request_gate,
-                )
-            except PageIndexError as exc:
-                raise ExtractFailure(exc.reason, exc.message) from exc
-            selected_pages.update(candidate.page_no for candidate in candidates_by_path[path])
+        queries = {
+            path: _field_query(path, node)
+            for path, node in leaves
+            if path in unresolved
+        }
+        try:
+            candidates_by_path = await page_index_service.retrieve_many(
+                snapshot,
+                queries=queries,
+                embedding_profile=profile,
+                top_k=settings.PAGE_ROUTED_TOP_K,
+                neighbor_pages=settings.PAGE_ROUTED_NEIGHBOR_PAGES,
+                max_pages=settings.PAGE_ROUTED_MAX_PAGES,
+                request_gate=request_gate,
+            )
+        except PageIndexError as exc:
+            raise ExtractFailure(exc.reason, exc.message) from exc
+        for candidates in candidates_by_path.values():
+            selected_pages.update(candidate.page_no for candidate in candidates)
 
         if not selected_pages:
             break

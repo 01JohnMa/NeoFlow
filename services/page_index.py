@@ -96,6 +96,11 @@ class EmbeddingProvider(Protocol):
     async def embed_query(self, text: str, profile: EmbeddingProfile) -> List[float]:
         ...
 
+    async def embed_queries(
+        self, texts: Sequence[str], profile: EmbeddingProfile
+    ) -> List[List[float]]:
+        ...
+
 
 class OpenAICompatibleEmbeddingProvider:
     """Small OpenAI-compatible adapter; no vector database dependency."""
@@ -152,6 +157,11 @@ class OpenAICompatibleEmbeddingProvider:
         if len(rows) != 1:
             raise PageIndexError("embedding_response_invalid", "query response cardinality")
         return rows[0]
+
+    async def embed_queries(
+        self, texts: Sequence[str], profile: EmbeddingProfile
+    ) -> List[List[float]]:
+        return await self._request(texts, profile)
 
 
 class PageEmbeddingStore(Protocol):
@@ -467,6 +477,95 @@ class PageIndexService:
             pages=pages,
         )
 
+    def _rank_candidates(
+        self,
+        snapshot: PageIndexSnapshot,
+        *,
+        query: str,
+        query_vector: Sequence[float],
+        top_k: int,
+        neighbor_pages: int,
+        max_pages: int,
+    ) -> List[PageCandidate]:
+        query_vector = validate_vectors([query_vector], EmbeddingProfile(model="validated"))[0]
+        usable = [page for page in snapshot.pages if page.state == "parsed" and page.embedding]
+        vector_rows = sorted(
+            ((cosine_similarity(query_vector, page.embedding or []), page) for page in usable),
+            key=lambda item: (-item[0], item[1].page_no),
+        )[: max(0, top_k)]
+        candidates: Dict[int, PageCandidate] = {
+            page.page_no: PageCandidate(page.page_no, score, ["vector"])
+            for score, page in vector_rows
+        }
+        lexical_rows = sorted(
+            ((lexical_score(query, page.text), page) for page in usable),
+            key=lambda item: (-item[0], item[1].page_no),
+        )
+        for score, page in lexical_rows[: max(0, top_k)]:
+            if score <= 0:
+                continue
+            current = candidates.get(page.page_no)
+            if current:
+                current.reasons.append("lexical")
+                current.score = max(current.score, score)
+            else:
+                candidates[page.page_no] = PageCandidate(page.page_no, score, ["lexical"])
+        page_map = {page.page_no: page for page in snapshot.pages}
+        for page_no in list(candidates):
+            for offset in range(1, max(0, neighbor_pages) + 1):
+                for neighbor in (page_no - offset, page_no + offset):
+                    if neighbor in page_map and neighbor not in candidates:
+                        candidates[neighbor] = PageCandidate(neighbor, 0.0, ["neighbor"])
+        return sorted(candidates.values(), key=lambda item: (-item.score, item.page_no))[: max(0, max_pages)]
+
+    async def retrieve_many(
+        self,
+        snapshot: PageIndexSnapshot,
+        *,
+        queries: Dict[str, str],
+        embedding_profile: Optional[EmbeddingProfile] = None,
+        top_k: int = 5,
+        neighbor_pages: int = 1,
+        max_pages: int = 20,
+        request_gate: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> Dict[str, List[PageCandidate]]:
+        profile = embedding_profile or EmbeddingProfile(
+            model=settings.EMBEDDING_MODEL,
+            dimension=settings.EMBEDDING_DIMENSION or None,
+            query_instruction=settings.EMBEDDING_QUERY_INSTRUCTION,
+            document_instruction=settings.EMBEDDING_DOCUMENT_INSTRUCTION,
+            normalize=settings.EMBEDDING_NORMALIZE,
+            version=settings.EMBEDDING_PROFILE_VERSION,
+        )
+        items = list(queries.items())
+        batch_size = max(1, int(getattr(settings, "EMBEDDING_MAX_BATCH_SIZE", 20)))
+        vectors: List[List[float]] = []
+        for start in range(0, len(items), batch_size):
+            batch = items[start : start + batch_size]
+            if request_gate:
+                await request_gate("query_embedding")
+            embed_queries = getattr(self.provider, "embed_queries", None)
+            if embed_queries is None:
+                batch_vectors = await self.provider.embed_documents(
+                    [query for _, query in batch], profile
+                )
+            else:
+                batch_vectors = await embed_queries([query for _, query in batch], profile)
+            if len(batch_vectors) != len(batch):
+                raise PageIndexError("embedding_response_invalid", "query batch cardinality mismatch")
+            vectors.extend(validate_vectors(batch_vectors, profile))
+        return {
+            key: self._rank_candidates(
+                snapshot,
+                query=query,
+                query_vector=vector,
+                top_k=top_k,
+                neighbor_pages=neighbor_pages,
+                max_pages=max_pages,
+            )
+            for (key, query), vector in zip(items, vectors)
+        }
+
     async def retrieve(
         self,
         snapshot: PageIndexSnapshot,
@@ -486,37 +585,14 @@ class PageIndexService:
             normalize=settings.EMBEDDING_NORMALIZE,
             version=settings.EMBEDDING_PROFILE_VERSION,
         )
-        if request_gate:
-            await request_gate("query_embedding")
-        query_vector = await self.provider.embed_query(query, profile)
-        query_vector = validate_vectors([query_vector], profile)[0]
-        usable = [page for page in snapshot.pages if page.state == "parsed" and page.embedding]
-        vector_rows = sorted(
-            ((cosine_similarity(query_vector, page.embedding or []), page) for page in usable),
-            key=lambda item: (-item[0], item[1].page_no),
-        )[: max(0, top_k)]
-        candidates: Dict[int, PageCandidate] = {}
-        for score, page in vector_rows:
-            candidates[page.page_no] = PageCandidate(page.page_no, score, ["vector"])
-        lexical_rows = sorted(
-            ((lexical_score(query, page.text), page) for page in usable),
-            key=lambda item: (-item[0], item[1].page_no),
-        )
-        for score, page in lexical_rows[: max(0, top_k)]:
-            if score <= 0:
-                continue
-            current = candidates.get(page.page_no)
-            if current:
-                current.reasons.append("lexical")
-                current.score = max(current.score, score)
-            else:
-                candidates[page.page_no] = PageCandidate(page.page_no, score, ["lexical"])
-        page_map = {page.page_no: page for page in snapshot.pages}
-        base_pages = list(candidates)
-        for page_no in base_pages:
-            for offset in range(1, max(0, neighbor_pages) + 1):
-                for neighbor in (page_no - offset, page_no + offset):
-                    if neighbor in page_map and neighbor not in candidates:
-                        candidates[neighbor] = PageCandidate(neighbor, 0.0, ["neighbor"])
-        ordered = sorted(candidates.values(), key=lambda item: (-item.score, item.page_no))
-        return ordered[: max(0, max_pages)]
+        return (
+            await self.retrieve_many(
+                snapshot,
+                queries={"query": query},
+                embedding_profile=profile,
+                top_k=top_k,
+                neighbor_pages=neighbor_pages,
+                max_pages=max_pages,
+                request_gate=request_gate,
+            )
+        )["query"]

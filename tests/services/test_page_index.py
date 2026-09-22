@@ -32,6 +32,10 @@ class FakeEmbeddingProvider:
         self.query_calls.append(text)
         return [1.0, 0.0]
 
+    async def embed_queries(self, texts, profile):
+        self.query_calls.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
 
 def _row(*pages, status="complete"):
     return {
@@ -172,6 +176,36 @@ async def test_vector_and_lexical_candidates_are_unioned_and_neighbors_added():
     assert [candidate.page_no for candidate in candidates] == [1, 2, 3]
     assert "lexical" in candidates[1].reasons
     assert "neighbor" in candidates[0].reasons or "neighbor" in candidates[2].reasons
+
+
+@pytest.mark.asyncio
+async def test_retrieve_many_batches_query_embeddings_and_preserves_each_field():
+    provider = FakeEmbeddingProvider()
+    service = PageIndexService(store=InMemoryPageEmbeddingStore(), provider=provider)
+    profile = EmbeddingProfile(model="fake", version="test")
+    calls = []
+
+    async def gate(stage):
+        calls.append(stage)
+
+    snapshot = await service.ensure_index(
+        _row(_page(1, "摘要"), _page(2, "正文"), _page(3, "正文")),
+        tenant_id=TENANT_ID,
+        document_id=DOCUMENT_ID,
+        embedding_profile=profile,
+        request_gate=gate,
+    )
+    result = await service.retrieve_many(
+        snapshot,
+        queries={"/one": "摘要", "/two": "正文", "/three": "联系方式"},
+        embedding_profile=profile,
+        request_gate=gate,
+        top_k=1,
+    )
+
+    assert set(result) == {"/one", "/two", "/three"}
+    assert calls == ["page_embeddings", "query_embedding"]
+    assert provider.query_calls == ["摘要", "正文", "联系方式"]
 
 
 @pytest.mark.asyncio
