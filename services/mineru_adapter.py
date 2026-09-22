@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import io
 import os
+import re
 import tempfile
 import time
 import zipfile
@@ -44,10 +45,62 @@ UPLOAD_URL_PATH = "/api/v4/file-urls/batch"
 RESULT_PATH = "/api/v4/extract-results/batch/{batch_id}"
 
 TERMINAL_STATES = ("done", "failed")
+_PAGE_RANGE_TOKEN = re.compile(r"^(\d+)(?:-(\d+))?$")
 
 
 class MinerUApiError(ParserAdapterError):
     """调用 MinerU 托管 API 失败。"""
+
+
+def _requested_physical_pages(page_ranges: Any) -> Optional[list[int]]:
+    """Expand a page-range request in the stable physical order sent to MinerU."""
+    if not page_ranges:
+        return None
+    pages: set[int] = set()
+    for raw in str(page_ranges).split(","):
+        match = _PAGE_RANGE_TOKEN.match(raw.strip())
+        if not match:
+            return None
+        start = int(match.group(1))
+        end = int(match.group(2) or start)
+        if end < start:
+            return None
+        pages.update(range(start, end + 1))
+    return sorted(pages)
+
+
+def _restore_requested_page_identity(result: ParseResult, page_ranges: Any) -> None:
+    """Restore physical page numbers when a selected-page provider renumbers output.
+
+    MinerU's selected-page response currently returns pages in request order but
+    numbers them from one again. Evidence and downstream routing use source
+    physical page numbers, so silently accepting those local positions would
+    attach evidence to the wrong source page. Refuse an ambiguous cardinality
+    instead of guessing a mapping.
+    """
+    requested = _requested_physical_pages(page_ranges)
+    if requested is None:
+        return
+    if len(result.pages) != len(requested):
+        raise MinerUApiError(
+            "按页解析返回页数与请求物理页数不一致，无法安全恢复页码: "
+            f"requested={len(requested)}, returned={len(result.pages)}"
+        )
+    for page, physical_page_no in zip(result.pages, requested):
+        page.page_no = physical_page_no
+    coverage = result.engine.setdefault("coverage", {})
+    old_states = coverage.get("page_states") or {}
+    coverage["requested_page_numbers"] = requested
+    coverage["reported_pages"] = requested
+    coverage["observed_page_numbers"] = sorted(
+        physical_page_no
+        for physical_page_no, page in zip(requested, result.pages)
+        if page.blocks
+    )
+    coverage["page_states"] = {
+        str(physical_page_no): old_states.get(str(index), "unknown")
+        for index, physical_page_no in enumerate(requested, start=1)
+    }
 
 
 def build_batch_payload(file_name: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -150,6 +203,8 @@ class MinerUApiAdapter(ParserAdapter):
             with tempfile.TemporaryDirectory(prefix="neoflow-mineru-") as workdir:
                 await self._download_and_extract(client, zip_url, workdir)
                 result = await asyncio.to_thread(normalize_mineru_output, workdir, params)
+
+        _restore_requested_page_identity(result, params.get("page_ranges"))
 
         source_hash_after = _file_sha256(file_path)
         result.engine["source_document_hash"] = (

@@ -13,7 +13,7 @@ from services.parser_adapter import (
     ParserAdapterError,
     get_parser_adapter,
 )
-from services.parse_result import ParseResult
+from services.parse_result import Page, ParseResult
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "mineru"
 
@@ -223,6 +223,44 @@ class TestParseFlow:
         assert apply_mock.await_args.args[1] == "demo.png"
         upload_mock.assert_awaited_once()
         assert upload_mock.await_args.args[1] == "https://upload.example/1"
+
+    @pytest.mark.asyncio
+    async def test_selected_pages_restore_physical_page_identity(self, tmp_path):
+        from services.mineru_adapter import MinerUApiAdapter
+
+        file_path = tmp_path / "demo.png"
+        file_path.write_bytes(b"png-bytes")
+        adapter = self._adapter()
+        raw_result = ParseResult(
+            pages=[
+                Page(page_no=1, width=100, height=200),
+                Page(page_no=2, width=100, height=200),
+            ],
+            engine={
+                "coverage": {
+                    "reported_pages": [1, 2],
+                    "observed_page_numbers": [1, 2],
+                    "page_states": {"1": "parsed", "2": "blank"},
+                }
+            },
+        )
+
+        async def fake_download(client, zip_url, target_dir):
+            Path(target_dir, "unused").write_text("fixture")
+
+        with patch.object(adapter, "_apply_upload_url", new=AsyncMock(
+            return_value=("batch-1", "https://upload.example/1")
+        )), patch.object(adapter, "_upload", new=AsyncMock()), \
+             patch.object(adapter, "_wait_for_result", new=AsyncMock(
+                 return_value={"state": "done", "full_zip_url": "https://zip"}
+             )), patch.object(adapter, "_download_and_extract", new=fake_download), \
+             patch("services.mineru_adapter.normalize_mineru_output", return_value=raw_result):
+            result = await adapter.parse(str(file_path), {"page_ranges": "2,5"})
+
+        assert [page.page_no for page in result.pages] == [2, 5]
+        coverage = result.engine["coverage"]
+        assert coverage["reported_pages"] == [2, 5]
+        assert coverage["page_states"] == {"2": "parsed", "5": "blank"}
 
     @pytest.mark.asyncio
     async def test_parse_raises_without_api_key(self, tmp_path):

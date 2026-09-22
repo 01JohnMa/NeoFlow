@@ -14,6 +14,19 @@ The existing `page_routed` implementation is retained as a legacy complete-Parse
 
 The current browser evidence compares (1) and the legacy complete-Parse `page_routed` path on the same `parse_result_id`. It is not evidence for (2) or the new source-first (3), and it must not be reported as incremental-Parse savings.
 
+## Isolated source-first replay (2026-09-22)
+
+The first source-first replay used the same 42-page clinical-protocol PDF and the seed 38-field schema. The file was born-digital: all 42 pages had usable native text, so this run intentionally exercised the text-index branch and did not render images.
+
+- Native page-text extraction took approximately 0.62 seconds.
+- Page embeddings used `qwen3.7-text-embedding`: 3 document batches took approximately 3.42 seconds; 2 batched field-query requests took approximately 1.49 seconds.
+- Top-two retrieval per field produced 21 unique physical pages. The union was submitted as one MinerU `pipeline` `page_ranges` request: `1-3,6-7,13-17,22,27-29,31-37`.
+- MinerU returned 21 parsed pages in approximately 26.85 seconds. The adapter restored the requested physical page numbers; without that mapping the provider's `1..21` local numbering would attach evidence to the wrong source pages.
+- One evidence-aware Extract call took approximately 23.34 seconds, returned 24 accepted fields, and recorded 17,858 input tokens / 6,540 output tokens.
+- Against the existing real-case gold, the isolated result had 16/28 literal exact matches, 8 non-empty mismatches, and 4 gold fields missing. This matches the best query-batched legacy `page_routed` exact count while parsing half as many pages, but total elapsed time was approximately 55.6 seconds versus the earlier full-document cold baseline of approximately 46 seconds.
+
+This is a source-first Parse measurement, not a public strategy acceptance: it ran outside the Extract Job/Result persistence seam, used the born-digital text branch only, and did not test the scanned-image branch. The current result shows real Parse-page reduction but no speed or quality win yet; keep the source-first path experimental.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
