@@ -57,6 +57,8 @@ After replacing the single `nmpa_info` field with `nmpa_acceptance_no`, `nmpa_do
 
 After correcting the gold exclusion item and narrowing `study_group`/`secondary_endpoint` descriptions, the follow-up Job (`43a1ac10-5b94-4c9b-be60-5334a5cf22a7`) completed in 17.56 seconds with one Extract request and reached **27/28 exact, 1 mismatch, 0 missing, 0 extra**. The only remaining difference is wording granularity in `secondary_endpoint`; all seven factual items are present.
 
+The later gold audit found that the previous `secondary_endpoint` gold had removed the definitions from items 1, 2, and 4 and changed item 7 from “发作后” to “发作时”; that was a gold defect, not a model defect. The gold also omitted the original introductory sentences for the inclusion and exclusion criteria. After restoring those source passages, the same completed Job (`1d094e1e-3bf5-435b-9af1-8ef99f13fb4d`) scores **28/28 exact, 0 mismatch, 0 missing, 0 extra** under the business-normalized comparison. The remaining 43a1 result is retained as evidence of the earlier over-constrained description and is not the final quality result.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
