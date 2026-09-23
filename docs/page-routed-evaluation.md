@@ -51,6 +51,10 @@ The seed schema descriptions were tightened for issuer/document details, date mo
 
 The description changes improved the full-document run from 20/28 to 24/28: both dates, project scope, control products, and protocol-version normalization are now present. Remaining full-document differences are `nmpa_info`, `exclusion_criteria`, `study_group`, and `secondary_endpoint`; these require normalization or structured/list extraction rather than more page routing. The legacy route improved to 20/28 but still misses both dates despite its 37-page selection, which points to its staged unresolved/field handling and date normalization path.
 
+## NMPA schema split rerun (2026-09-23)
+
+After replacing the single `nmpa_info` field with `nmpa_acceptance_no`, `nmpa_document_no`, and `nmpa_date`, a real `full_document` Job (`3bf32fca-34ce-4897-aaea-8e925031d6d6`) completed in 33.26 seconds with one Extract request. It returned `nmpa_document_no=2014L00847`; the sample had no direct evidence for an acceptance number or NMPA date, so those fields remained absent as required. Against the same business-normalized gold, the result was **25/28 exact, 3 mismatches, 0 missing, 0 extra**. The remaining mismatches are `exclusion_criteria`, `study_group`, and `secondary_endpoint`.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
