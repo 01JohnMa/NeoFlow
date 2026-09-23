@@ -55,6 +55,8 @@ The description changes improved the full-document run from 20/28 to 24/28: both
 
 After replacing the single `nmpa_info` field with `nmpa_acceptance_no`, `nmpa_document_no`, and `nmpa_date`, a real `full_document` Job (`3bf32fca-34ce-4897-aaea-8e925031d6d6`) completed in 33.26 seconds with one Extract request. It returned `nmpa_document_no=2014L00847`; the sample had no direct evidence for an acceptance number or NMPA date, so those fields remained absent as required. Against the same business-normalized gold, the result was **25/28 exact, 3 mismatches, 0 missing, 0 extra**. The remaining mismatches are `exclusion_criteria`, `study_group`, and `secondary_endpoint`.
 
+After correcting the gold exclusion item and narrowing `study_group`/`secondary_endpoint` descriptions, the follow-up Job (`43a1ac10-5b94-4c9b-be60-5334a5cf22a7`) completed in 17.56 seconds with one Extract request and reached **27/28 exact, 1 mismatch, 0 missing, 0 extra**. The only remaining difference is wording granularity in `secondary_endpoint`; all seven factual items are present.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
