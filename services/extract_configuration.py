@@ -14,7 +14,7 @@ class ExtractConfigurationError(ValueError):
     """An invalid authoring definition; report to the caller instead of normalizing it away."""
 
 
-EXTRACTION_STRATEGIES = ("full_document", "page_routed")
+EXTRACTION_STRATEGIES = ("full_document",)
 
 
 def escape_pointer_token(token: str) -> str:
@@ -67,11 +67,7 @@ def validate_extract_definition(definition: Any) -> Dict[str, Any]:
         strategy = definition["extraction_strategy"]
         if not isinstance(strategy, str) or strategy not in EXTRACTION_STRATEGIES:
             raise ExtractConfigurationError(
-                "extraction_strategy 只支持 full_document/page_routed"
-            )
-        if strategy == "page_routed" and target != "per_doc":
-            raise ExtractConfigurationError(
-                "page_routed 只支持 per_doc target"
+                "extraction_strategy 当前只支持 full_document；旧 page_routed 已下线"
             )
 
     schema = definition["data_schema"]

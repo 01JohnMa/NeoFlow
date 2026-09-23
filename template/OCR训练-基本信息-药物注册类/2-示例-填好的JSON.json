@@ -132,13 +132,26 @@
       "source": "方案摘要"
     },
     {
-      "key": "nmpa_info",
-      "label": "NMPA信息",
+      "key": "nmpa_acceptance_no",
+      "label": "NMPA受理号",
       "type": "string",
-      "hint": "药监部门批件号/通知书号及状态",
+      "hint": "批件/通知书页直接给出的受理号"
+    },
+    {
+      "key": "nmpa_document_no",
+      "label": "NMPA批件/通知单号",
+      "type": "string",
+      "hint": "批件/通知单号",
       "value": "2026L00518（药物临床试验批准通知书）",
       "confidence": 0.87,
       "source": "NMPA批件页"
+    },
+    {
+      "key": "nmpa_date",
+      "label": "NMPA日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "hint": "批件/通知书日期；无直接证据则省略"
     },
     {
       "key": "indication",

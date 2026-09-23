@@ -20,7 +20,6 @@ from services.extract_service import (
     validate_output,
 )
 from services.llm_invoke import LLMResult
-from services.page_index import PageCandidate, PageIndexPage, PageIndexSnapshot, PageIndexService, InMemoryPageEmbeddingStore
 
 JOB_ID = "99999999-9999-4999-8999-999999999999"
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -194,8 +193,7 @@ class TestResolveSpec:
         assert spec["target"] == "per_page"
         assert spec["extraction_strategy"] == "full_document"
 
-    def test_page_routed_is_valid_for_per_doc_but_not_available_by_default(self, monkeypatch):
-        monkeypatch.setattr(extract_service.settings, "EXTRACT_PAGE_ROUTED_ENABLED", False)
+    def test_page_routed_is_retired(self):
         job = _job(execution_spec={
             "capability": "extract",
             "spec_version": "1",
@@ -205,11 +203,9 @@ class TestResolveSpec:
                 "extraction_strategy": "page_routed",
             },
         })
-        spec = resolve_extract_spec(job)
-        assert spec["extraction_strategy"] == "page_routed"
         with pytest.raises(ExtractFailure) as exc:
-            extract_service.ensure_extract_strategy_available(spec)
-        assert exc.value.reason == "strategy_unavailable"
+            resolve_extract_spec(job)
+        assert exc.value.reason == "strategy_deprecated"
 
     def test_page_routed_per_page_is_rejected(self):
         job = _job(execution_spec={
@@ -223,7 +219,7 @@ class TestResolveSpec:
         })
         with pytest.raises(ExtractFailure) as exc:
             resolve_extract_spec(job)
-        assert exc.value.reason == "strategy_target_not_supported"
+        assert exc.value.reason == "strategy_deprecated"
 
     def test_fields_only_is_rejected_without_conversion(self):
         job = _job(execution_spec={
@@ -311,185 +307,9 @@ class TestValidateOutput:
         issues = validate_output("per_page", SCHEMA, [{"report_no": "ok"}, {"conclusion": None}])
         assert issues and issues[0]["json_path"] == "$[1]"
 
-    def test_routed_evidence_requires_quote_and_matches_block(self):
-        schema = {
-            "type": "object",
-            "properties": {"report_no": {"type": "string"}},
-            "additionalProperties": False,
-        }
-        refs = {1: {"text": "page text", "blocks": {"b1": "R1 block"}}}
-
-        accepted, _ = extract_service._validate_candidate_values(
-            schema,
-            {"report_no": "R1"},
-            {"/report_no": [{"page_no": 1, "block_id": "b1"}]},
-            ["/report_no"],
-            refs,
-            {},
-        )
-        assert accepted == {}
-
-        accepted, _ = extract_service._validate_candidate_values(
-            schema,
-            {"report_no": "R1"},
-            {"/report_no": [{"page_no": 1, "block_id": "b1", "quote": "R1 block"}]},
-            ["/report_no"],
-            refs,
-            {},
-        )
-        assert accepted == {"/report_no": "R1"}
-
-    def test_routed_unknown_write_path_is_rejected(self):
-        schema = {
-            "type": "object",
-            "properties": {"report_no": {"type": "string"}},
-            "additionalProperties": False,
-        }
-        with pytest.raises(ExtractFailure) as exc:
-            extract_service._validate_candidate_values(
-                schema,
-                {"unknown": "value"},
-                {"/unknown": [{"page_no": 1, "quote": "value"}]},
-                ["/report_no"],
-                {1: {"text": "value", "blocks": {}}},
-                {},
-            )
-        assert exc.value.reason == "routed_write_path_invalid"
-
-    @pytest.mark.parametrize("node,value,quote", [
-        ({"type": ["string", "null"]}, None, "No answer in this section"),
-        ({"type": "array", "items": {"type": "string"}}, [], "a few items"),
-        ({"type": "number"}, 12, "Quantity 312"),
-        ({"type": "number"}, -12, "Quantity 12"),
-        ({"type": "string"}, "WRONG12", "Report RIGHT12"),
-    ])
-    def test_routed_null_empty_or_unsupported_literal_is_not_locked(self, node, value, quote):
-        schema = {"type": "object", "properties": {"report_no": node}}
-        accepted, _ = extract_service._validate_candidate_values(
-            schema, {"report_no": value},
-            {"/report_no": [{"page_no": 1, "quote": quote}]},
-            ["/report_no"], {1: {"text": quote, "blocks": {}}}, {},
-        )
-        assert accepted == {}
-
-    def test_repair_cannot_overwrite_locked_parent(self):
-        schema = {"type": "object", "properties": {"person": {
-            "type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}},
-        }}}
-        for values in ({"person": None}, {"person": {"name": "changed"}}):
-            with pytest.raises(ExtractFailure, match="field_conflict"):
-                extract_service._validate_candidate_values(
-                    schema, values, {}, ["/person/age"], {}, {"/person/name": "original"},
-                )
-
-    def test_evidence_quote_is_compacted_after_validation(self):
-        schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
-        quote = "正文 " + ("长文本 " * 200)
-        accepted, evidence = extract_service._validate_candidate_values(
-            schema, {"summary": "正文"}, {"/summary": [{"page_no": 1, "quote": quote}]},
-            ["/summary"], {1: {"text": quote, "blocks": {}}}, {},
-        )
-        assert accepted == {"/summary": "正文"}
-        assert len(evidence["/summary"][0]["quote"]) <= extract_service.EVIDENCE_QUOTE_MAX_CHARS
-
-    def test_numeric_evidence_matches_cjk_adjacent_number(self):
-        schema = {"type": "object", "properties": {"sample_size": {"type": "number"}}}
-        accepted, evidence = extract_service._validate_candidate_values(
-            schema,
-            {"sample_size": 240},
-            {"/sample_size": [{"page_no": 1, "quote": "计划纳入240例受试者"}]},
-            ["/sample_size"],
-            {1: {"text": "计划纳入240例受试者", "blocks": {}}},
-            {},
-        )
-        assert accepted == {"/sample_size": 240}
-        assert evidence["/sample_size"][0]["validation_kind"] == "number_match"
-
-    def test_candidate_page_budget_round_robins_fields_and_prefers_unexamined_pages(self):
-        candidates = {
-            "/phone": [PageCandidate(34, 1.0), PageCandidate(2, 0.9)],
-            "/protocol": [PageCandidate(35, 1.0), PageCandidate(3, 0.9)],
-        }
-        first = extract_service._select_candidate_pages(candidates, 2, set())
-        second = extract_service._select_candidate_pages(candidates, 2, {34, 35})
-        assert first == [34, 35]
-        assert second == [2, 3]
 
 
 class TestHandleExtract:
-    @pytest.mark.asyncio
-    async def test_page_routed_runs_two_passes_and_persists_evidence(self, monkeypatch):
-        schema = {
-            "type": "object",
-            "properties": {
-                "report_no": {"type": "string"},
-                "conclusion": {"type": "string"},
-            },
-            "required": ["report_no", "conclusion"],
-            "additionalProperties": False,
-        }
-        parse_row = _parse_row({
-            "markdown": "",
-            "pages": [
-                {"page_no": 1, "markdown": "R1 page", "blocks": []},
-                {"page_no": 2, "markdown": "ok page", "blocks": []},
-            ],
-        })
-
-        class FakePageIndex:
-            async def ensure_index(self, *args, **kwargs):
-                return PageIndexSnapshot(
-                    tenant_id=TENANT_ID,
-                    document_id=DOCUMENT_ID,
-                    parse_result_id=RESULT_ID,
-                    source_document_hash="source",
-                    text_profile_hash="text",
-                    embedding_profile_hash="embedding",
-                    pages=[
-                        PageIndexPage(1, "parsed", "R1 page", "t1", None, [1.0, 0.0]),
-                        PageIndexPage(2, "parsed", "ok page", "t2", None, [0.0, 1.0]),
-                    ],
-                )
-
-            async def retrieve(self, snapshot, *, query, **kwargs):
-                page = 1 if "report_no" in query else 2
-                return [PageCandidate(page, 1.0, ["vector"])]
-
-            async def retrieve_many(self, snapshot, *, queries, **kwargs):
-                return {
-                    path: await self.retrieve(snapshot, query=query, **kwargs)
-                    for path, query in queries.items()
-                }
-
-        _patch_env(
-            monkeypatch,
-            parse_row=parse_row,
-            llm_responses=[
-                _llm_result('{"values":{"report_no":"R1"},"evidence":{"/report_no":[{"page_no":1,"quote":"R1"}]},"unresolved":["/conclusion"]}'),
-                _llm_result('{"values":{"conclusion":"ok"},"evidence":{"/conclusion":[{"page_no":2,"quote":"ok"}]},"unresolved":[]}'),
-            ],
-        )
-        monkeypatch.setattr(extract_service.settings, "EXTRACT_PAGE_ROUTED_ENABLED", True)
-        monkeypatch.setattr(extract_service, "page_index_service", FakePageIndex())
-        job = _job(execution_spec={
-            "capability": "extract",
-            "spec_version": "1",
-            "effective_params": {
-                "target": "per_doc",
-                "data_schema": schema,
-                "extraction_strategy": "page_routed",
-            },
-        })
-
-        result = await handle_extract_job(job)
-
-        assert result == {"report_no": "R1", "conclusion": "ok"}
-        payload, engine = _committed_ok()
-        assert payload == result
-        assert engine["extraction_strategy"] == "page_routed"
-        assert engine["page_routed"]["passes"] == 2
-        assert engine["page_routed"]["evidence"]["/report_no"][0]["page_no"] == 1
-
     @pytest.mark.asyncio
     async def test_heartbeat_error_marks_claim_lost_without_bubbling(self, monkeypatch):
         stop = extract_service.asyncio.Event()

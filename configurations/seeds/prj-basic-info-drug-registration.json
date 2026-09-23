@@ -84,9 +84,18 @@
           "type": "string",
           "description": "项目范围；原文明确多中心或列出多个国内研究中心时归一为「国内多中心」；没有明确依据时省略，不猜测。"
         },
-        "nmpa_info": {
+        "nmpa_acceptance_no": {
           "type": "string",
-          "description": "完整保留药监机构或签发机构、文书类型、批件号/通知书号及状态；不能只输出编号。没有直接证据的组成部分省略。"
+          "description": "NMPA受理号；只有批件/通知书页直接给出时输出，不能用批件号代替。"
+        },
+        "nmpa_document_no": {
+          "type": "string",
+          "description": "NMPA批件号或通知单号；保留原文编号，不与受理号混淆。"
+        },
+        "nmpa_date": {
+          "type": "string",
+          "format": "date",
+          "description": "NMPA批件/通知书日期；输出YYYY-MM-DD，原文只有年-月时按该月1日归一。"
         },
         "indication": {
           "type": "string",
@@ -360,105 +369,113 @@
         "label": "项目范围",
         "order": 11
       },
-      "/properties/nmpa_info": {
-        "label": "NMPA信息",
+      "/properties/nmpa_acceptance_no": {
+        "label": "NMPA受理号",
         "order": 12
+      },
+      "/properties/nmpa_document_no": {
+        "label": "NMPA批件/通知单号",
+        "order": 13
+      },
+      "/properties/nmpa_date": {
+        "label": "NMPA日期",
+        "order": 14
       },
       "/properties/indication": {
         "label": "适应症",
-        "order": 13
+        "order": 15
       },
       "/properties/multisite_flag": {
         "label": "是否多中心",
-        "order": 14
+        "order": 16
       },
       "/properties/human_resource_review": {
         "label": "人类遗传资源审核备案情况",
-        "order": 15
+        "order": 17
       },
       "/properties/insurance_flag": {
         "label": "是否购买保险",
-        "order": 16
+        "order": 18
       },
       "/properties/project_owner": {
         "label": "项目负责人",
-        "order": 17
+        "order": 19
       },
       "/properties/project_owner_phone": {
         "label": "项目负责人手机号",
-        "order": 18
+        "order": 20
       },
       "/properties/project_owner_email": {
         "label": "项目负责人邮箱",
-        "order": 19
+        "order": 21
       },
       "/properties/protocol_no": {
         "label": "试验方案号",
-        "order": 20
+        "order": 22
       },
       "/properties/protocol_name": {
         "label": "方案名称",
-        "order": 21
+        "order": 23
       },
       "/properties/protocol_version": {
         "label": "方案版本号",
-        "order": 22
+        "order": 24
       },
       "/properties/study_objective": {
         "label": "试验目的",
-        "order": 23
+        "order": 25
       },
       "/properties/study_design": {
         "label": "试验设计",
-        "order": 24
+        "order": 26
       },
       "/properties/sample_size": {
         "label": "样本量",
-        "order": 25
+        "order": 27
       },
       "/properties/inclusion_criteria": {
         "label": "入选标准",
-        "order": 26
+        "order": 28
       },
       "/properties/exclusion_criteria": {
         "label": "排除标准",
-        "order": 27
+        "order": 29
       },
       "/properties/study_group": {
         "label": "试验分组",
-        "order": 28
+        "order": 30
       },
       "/properties/primary_endpoint": {
         "label": "主要终点指标",
-        "order": 29
+        "order": 31
       },
       "/properties/secondary_endpoint": {
         "label": "次要终点指标",
-        "order": 30
+        "order": 32
       },
       "/properties/drug_cn_name": {
         "label": "研究产品中文名称",
-        "order": 31
+        "order": 33
       },
       "/properties/drug_en_name": {
         "label": "研究产品英文名称",
-        "order": 32
+        "order": 34
       },
       "/properties/drug_registration_class": {
         "label": "药物注册分类",
-        "order": 33
+        "order": 35
       },
       "/properties/dosage_form": {
         "label": "剂型",
-        "order": 34
+        "order": 36
       },
       "/properties/specification_model": {
         "label": "规格/型号",
-        "order": 35
+        "order": 37
       },
       "/properties/combination_products": {
         "label": "联合产品",
-        "order": 36
+        "order": 38
       },
       "/properties/combination_products/items/properties/name": {
         "label": "产品名称",
@@ -482,7 +499,7 @@
       },
       "/properties/control_products": {
         "label": "对照产品",
-        "order": 37
+        "order": 39
       },
       "/properties/control_products/items/properties/name": {
         "label": "产品名称",

@@ -45,11 +45,10 @@ def test_explicit_invalid_extraction_strategy_is_not_defaulted(strategy):
         validate_extract_definition({**empty_extract_definition(), 'extraction_strategy': strategy})
 
 
-def test_page_routed_strategy_requires_per_doc():
+def test_page_routed_strategy_is_retired():
     with pytest.raises(ExtractConfigurationError):
         validate_extract_definition({
             **empty_extract_definition(),
-            'target': 'per_page',
             'extraction_strategy': 'page_routed',
         })
 
@@ -118,8 +117,10 @@ def test_seed_contract_and_sparse_values():
     definition = validate_extract_definition(payload['definition'])
     schema = definition['data_schema']
     before = copy.deepcopy(schema)
-    assert len(schema['properties']) == 38
-    assert len(definition['ui']) == 48
+    assert len(schema['properties']) == 40
+    assert len(definition['ui']) == 50
+    assert {'nmpa_acceptance_no', 'nmpa_document_no', 'nmpa_date'} <= set(schema['properties'])
+    assert 'nmpa_info' not in schema['properties']
     assert sum('enum' in n for n in schema['properties'].values()) == 8
     assert not schema.get('required')
     for key in ('combination_products', 'control_products'):

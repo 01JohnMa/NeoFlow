@@ -88,7 +88,8 @@ async def test_commit_creates_schema_draft_without_publishing(monkeypatch):
     assert payload["code"] == "shipment_report"
     assert payload["type"] == "extract"
     definition = validate_extract_definition(payload["definition"])
-    assert set(definition) == {"data_schema", "target", "ui"}
+    assert set(definition) == {"data_schema", "target", "ui", "extraction_strategy"}
+    assert definition["extraction_strategy"] == "full_document"
     assert definition["target"] == "per_doc"
     assert definition["data_schema"] == {
         "type": "object", "additionalProperties": False,
@@ -122,7 +123,8 @@ async def test_commit_uses_fallback_schema_description_when_missing(monkeypatch)
     create.assert_awaited_once()
     publish.assert_not_awaited()
     definition = validate_extract_definition(create.await_args.args[0]["definition"])
-    assert set(definition) == {"data_schema", "target", "ui"}
+    assert set(definition) == {"data_schema", "target", "ui", "extraction_strategy"}
+    assert definition["extraction_strategy"] == "full_document"
     assert definition["data_schema"]["properties"]["sample_name"]["type"] == "string"
     description = definition["data_schema"]["description"]
     assert "可选字段省略" in description

@@ -149,7 +149,7 @@ class TestCreateExtractJobs:
         assert "target_not_supported" in resp.json()["error"]
         mod.create_job.assert_not_awaited()
 
-    def test_page_routed_is_rejected_when_advanced_execution_unavailable(self, client, monkeypatch):
+    def test_page_routed_is_rejected_when_strategy_is_retired(self, client, monkeypatch):
         mod = _patch(
             monkeypatch,
             _draft_config(definition={
@@ -165,7 +165,7 @@ class TestCreateExtractJobs:
         )
 
         assert resp.status_code == 409
-        assert "strategy_unavailable" in resp.json()["error"]
+        assert "strategy_deprecated" in resp.json()["error"]
         mod.create_job.assert_not_awaited()
 
     def test_explicit_null_schema_rejected_instead_of_legacy_fallback(self, client, monkeypatch):

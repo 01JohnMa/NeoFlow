@@ -89,13 +89,26 @@
       "source": "§3.1 试验设计（多中心）及§22.2 中心列表（8家均为国内医院）"
     },
     {
-      "key": "nmpa_info",
-      "label": "NMPA信息",
+      "key": "nmpa_acceptance_no",
+      "label": "NMPA受理号",
       "type": "string",
-      "hint": "药监部门批件号/通知书号及状态",
-      "value": "2014L00847（国家食品药品监督管理局药物临床试验批件）",
+      "hint": "批件/通知书页直接给出的受理号"
+    },
+    {
+      "key": "nmpa_document_no",
+      "label": "NMPA批件/通知单号",
+      "type": "string",
+      "hint": "批件/通知单号",
+      "value": "2014L00847",
       "confidence": 0.96,
       "source": "封面/§1.6 立项依据"
+    },
+    {
+      "key": "nmpa_date",
+      "label": "NMPA日期",
+      "type": "date",
+      "format": "yyyy-MM-dd",
+      "hint": "批件/通知书日期；无直接证据则省略"
     },
     {
       "key": "indication",

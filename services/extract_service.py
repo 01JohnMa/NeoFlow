@@ -13,11 +13,8 @@
 
 import asyncio
 import json
-import re
-import unicodedata
 from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Dict, List, Optional, Tuple
 
 import httpx
 from loguru import logger
@@ -42,19 +39,11 @@ from services.extract_prompt import (
     StrictJSONError,
     build_extract_messages,
     build_repair_messages,
-    build_routed_messages,
     fits_context,
     strict_json_loads,
 )
 from services.extract_schema import check_schema, schema_hash, validate_value
 from services.llm_invoke import LLMResult, invoke_llm
-from services.page_index import (
-    EmbeddingProfile,
-    PageCandidate,
-    PageIndexError,
-    PageIndexService,
-    html_to_text,
-)
 from services.parse_service import ensure_parse_result
 from services.result_service import result_service
 from services.supabase_service import supabase_service
@@ -64,13 +53,11 @@ SPEC_VERSION = "1"
 SUPPORTED_TARGETS = ("per_doc", "per_page")
 FULL_DOCUMENT_STRATEGY = "full_document"
 PAGE_ROUTED_STRATEGY = "page_routed"
-SUPPORTED_STRATEGIES = (FULL_DOCUMENT_STRATEGY, PAGE_ROUTED_STRATEGY)
+SUPPORTED_STRATEGIES = (FULL_DOCUMENT_STRATEGY,)
 MAX_REQUESTS_PER_UNIT = 3
 ENGINE_MAX_BYTES = 16384
 ENGINE_MAX_CALLS = 20
-EVIDENCE_QUOTE_MAX_CHARS = 240
 EXTRACT_SAMPLE_KEY = "extract"
-page_index_service = PageIndexService()
 
 class ExtractFailure(Exception):
     """可解释的执行失败（reason 进 Job error，不发正式结果）。"""
@@ -125,10 +112,10 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ExtractFailure("target_not_supported", str(target))
     strategy = params["extraction_strategy"] if "extraction_strategy" in params else FULL_DOCUMENT_STRATEGY
+    if strategy == PAGE_ROUTED_STRATEGY:
+        raise ExtractFailure("strategy_deprecated", PAGE_ROUTED_STRATEGY)
     if not isinstance(strategy, str) or strategy not in SUPPORTED_STRATEGIES:
         raise ExtractFailure("strategy_invalid", str(strategy))
-    if strategy == PAGE_ROUTED_STRATEGY and target != "per_doc":
-        raise ExtractFailure("strategy_target_not_supported", f"{strategy}/{target}")
     if "data_schema" not in params:
         raise ExtractFailure("schema_missing", "缺少 data_schema；不再支持 fields 回退")
     schema = params["data_schema"]
@@ -146,10 +133,9 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def ensure_extract_strategy_available(spec: Dict[str, Any]) -> None:
-    """Reject advanced execution explicitly; never silently run full_document."""
+    """Keep unsupported strategy admission explicit; never silently downgrade."""
     if spec.get("extraction_strategy") == PAGE_ROUTED_STRATEGY:
-        if not settings.EXTRACT_PAGE_ROUTED_ENABLED:
-            raise ExtractFailure("strategy_unavailable", PAGE_ROUTED_STRATEGY)
+        raise ExtractFailure("strategy_deprecated", PAGE_ROUTED_STRATEGY)
 
 
 
@@ -403,511 +389,6 @@ def _schema_leaves(schema: Dict[str, Any], path: str = "") -> List[Tuple[str, Di
     return []
 
 
-def _schema_at_pointer(schema: Dict[str, Any], pointer: str) -> Dict[str, Any]:
-    node: Any = schema
-    tokens = [token for token in pointer.split("/") if token]
-    for token in tokens:
-        key = _unescape_pointer_token(token)
-        if not isinstance(node, dict):
-            return {}
-        node = (node.get("properties") or {}).get(key)
-    return node if isinstance(node, dict) else {}
-
-
-def _path_is_required(schema: Dict[str, Any], pointer: str) -> bool:
-    node: Any = schema
-    tokens = [_unescape_pointer_token(token) for token in pointer.split("/") if token]
-    for token in tokens:
-        if not isinstance(node, dict):
-            return False
-        required = node.get("required") or []
-        if token not in required:
-            return False
-        node = (node.get("properties") or {}).get(token)
-    return True
-
-
-def _get_pointer(value: Any, pointer: str) -> Tuple[bool, Any]:
-    current = value
-    for token in [token for token in pointer.split("/") if token]:
-        key = _unescape_pointer_token(token)
-        if not isinstance(current, dict) or key not in current:
-            return False, None
-        current = current[key]
-    return True, current
-
-
-def _set_pointer(value: Dict[str, Any], pointer: str, item: Any) -> None:
-    tokens = [_unescape_pointer_token(token) for token in pointer.split("/") if token]
-    if not tokens:
-        raise ExtractFailure("routed_write_path_invalid", pointer)
-    current = value
-    for token in tokens[:-1]:
-        child = current.get(token)
-        if not isinstance(child, dict):
-            child = {}
-            current[token] = child
-        current = child
-    current[tokens[-1]] = item
-
-
-def _field_query(path: str, node: Dict[str, Any], schema: Optional[Dict[str, Any]] = None) -> str:
-    enum = node.get("enum")
-    enum_text = " ".join(str(item) for item in enum) if isinstance(enum, list) else ""
-    parents = []
-    parent = schema or {}
-    for token in path.split("/")[1:-1]:
-        parent = (parent.get("properties") or {}).get(_unescape_pointer_token(token), {})
-        if parent.get("description"):
-            parents.append(parent["description"])
-    return " ".join(part for part in (path, *parents, node.get("description", ""), enum_text) if part)
-
-
-def _select_candidate_pages(
-    candidates: Dict[str, List[PageCandidate]], limit: int, examined: set[int],
-) -> List[int]:
-    """Share the page budget across fields by retrieval rank; revisit pages last."""
-    ranked: List[int] = []
-    field_lists = [candidates[key] for key in sorted(candidates)]
-    for rank in range(max((len(items) for items in field_lists), default=0)):
-        for items in field_lists:
-            if rank < len(items) and items[rank].page_no not in ranked:
-                ranked.append(items[rank].page_no)
-    fresh = [page for page in ranked if page not in examined]
-    revisited = [page for page in ranked if page in examined]
-    return (fresh + revisited)[:limit]
-
-
-def _routed_source(parse_data: Dict[str, Any], page_numbers: Sequence[int]) -> Tuple[str, Dict[int, Dict[str, Any]]]:
-    wanted = set(int(page) for page in page_numbers)
-    lines: List[str] = []
-    refs: Dict[int, Dict[str, Any]] = {}
-    pages = sorted(
-        (page for page in (parse_data.get("pages") or []) if int(page.get("page_no") or 0) in wanted),
-        key=lambda page: int(page.get("page_no") or 0),
-    )
-    for page in pages:
-        page_no = int(page.get("page_no"))
-        page_lines: List[str] = []
-        lines.append(f"[[physical_page:{page_no}]]")
-        page_blocks: Dict[str, str] = {}
-        markdown = page.get("markdown")
-        if isinstance(markdown, str) and markdown.strip():
-            page_lines.append(markdown.strip())
-            lines.append(markdown.strip())
-        for block in sorted(page.get("blocks") or [], key=lambda item: item.get("reading_order", 0)):
-            block_id = str(block.get("id") or "")
-            values = [
-                str(block.get("text") or "").strip(),
-                str(block.get("table_html") or "").strip(),
-                str(block.get("latex") or "").strip(),
-            ]
-            block_text = "\n".join(value for value in values if value)
-            if not block_text:
-                continue
-            if block_id:
-                page_blocks[block_id] = block_text
-                marker = f"[[physical_page:{page_no} block:{block_id}]]"
-                lines.append(marker)
-            page_lines.append(block_text)
-            lines.append(block_text)
-        refs[page_no] = {"text": "\n".join(page_lines), "blocks": page_blocks}
-    return "\n".join(lines), refs
-
-
-def _evidence_refs(evidence: Any, path: str) -> List[Dict[str, Any]]:
-    if not isinstance(evidence, dict):
-        return []
-    refs = evidence.get(path)
-    if isinstance(refs, dict):
-        return [refs]
-    if isinstance(refs, list):
-        return [ref for ref in refs if isinstance(ref, dict)]
-    return []
-
-
-def _value_paths(value: Any, path: str = "") -> List[str]:
-    """Return leaf JSON-pointer paths while treating arrays as atomic values."""
-    if isinstance(value, dict):
-        paths: List[str] = []
-        for key, child in value.items():
-            child_path = f"{path}/{_escape_pointer_token(str(key))}"
-            paths.extend(_value_paths(child, child_path))
-        return paths or ([path] if path else [])
-    return [path] if path else []
-
-
-def _evidence_text(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", html_to_text(value)).split())
-
-
-def _direct_value_kind(node: Dict[str, Any], value: Any, path: str) -> str:
-    if node.get("format") == "date":
-        return "date_match"
-    if type(value) in (int, float):
-        return "number_match"
-    if isinstance(value, str) and re.search(
-        r"(?:^|[_/])(id|no|code|phone|email|version|identifier)$|编号|手机号|电话号码|邮箱",
-        path, re.IGNORECASE,
-    ):
-        return "identifier_match"
-    return "quote_presence_only"
-
-
-def _direct_value_supported(node: Dict[str, Any], value: Any, quote: str, path: str = "") -> bool:
-    """Apply only deterministic support checks; semantic paraphrases remain model-judged."""
-    kind = _direct_value_kind(node, value, path)
-    text = _evidence_text(quote)
-    if kind == "number_match":
-        # CJK text has no word boundary around a number (for example,
-        # ``计划纳入240例``), so ASCII word-boundary guards would reject
-        # otherwise exact numeric evidence. Extract numeric tokens first and
-        # compare their normalized Decimal values.
-        numbers = re.findall(r"[+-]?\d+(?:,\d{3})*(?:\.\d+)?(?:[eE][+-]?\d+)?", text)
-        return any(Decimal(token.replace(",", "")) == Decimal(str(value)) for token in numbers)
-    if kind == "date_match":
-        dates = re.findall(r"(?<!\d)(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})(?:日)?(?!\d)", text)
-        return any(f"{int(year):04d}-{int(month):02d}-{int(day):02d}" == value for year, month, day in dates)
-    if kind == "identifier_match":
-        literal = re.sub(r"\s+", "", _evidence_text(str(value))).casefold()
-        haystack = re.sub(r"\s+", "", text).casefold()
-        return bool(literal) and literal in haystack
-    return True
-
-
-def _validate_candidate_values(
-    schema: Dict[str, Any],
-    values: Any,
-    evidence: Any,
-    allowed_paths: Sequence[str],
-    page_refs: Dict[int, Dict[str, Any]],
-    locked: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    if not isinstance(values, dict):
-        raise ExtractFailure("routed_values_invalid")
-    accepted: Dict[str, Any] = {}
-    accepted_evidence: Dict[str, Any] = {}
-    allowed = set(allowed_paths)
-    for path, previous in locked.items():
-        current = values
-        tokens = [_unescape_pointer_token(token) for token in path.split("/")[1:]]
-        for index, token in enumerate(tokens):
-            if not isinstance(current, dict) or token not in current:
-                break
-            current = current[token]
-            if (index < len(tokens) - 1 and not isinstance(current, dict)) or (
-                index == len(tokens) - 1 and (type(current) is not type(previous) or current != previous)
-            ):
-                raise ExtractFailure("field_conflict", path)
-    known = {path for path, _ in _schema_leaves(schema)}
-    for value_path in _value_paths(values):
-        if value_path in known:
-            continue
-        if any(path.startswith(value_path + "/") for path in known):
-            continue
-        raise ExtractFailure("routed_write_path_invalid", value_path)
-    for path, node in _schema_leaves(schema):
-        if path not in allowed:
-            continue
-        present, candidate = _get_pointer(values, path)
-        if not present or candidate is None or candidate == "" or candidate == [] or candidate == {}:
-            continue
-        if validate_value(node, candidate):
-            continue
-        refs = _evidence_refs(evidence, path)
-        valid_refs: List[Dict[str, Any]] = []
-        for ref in refs:
-            page_no = ref.get("page_no")
-            if type(page_no) is not int:
-                continue
-            page = page_refs.get(page_no)
-            if not page:
-                continue
-            quote = str(ref.get("quote") or "").strip()
-            if not quote:
-                continue
-            block_id = str(ref.get("block_id") or "")
-            if block_id and block_id not in page.get("blocks", {}):
-                continue
-            haystack = (
-                str(page.get("blocks", {}).get(block_id) or "")
-                if block_id
-                else str(page.get("text") or "")
-            )
-            if _evidence_text(quote) not in _evidence_text(haystack):
-                continue
-            if not _direct_value_supported(node, candidate, quote, path):
-                continue
-            valid_refs.append({"page_no": page_no, "block_id": block_id or None,
-                               "quote": quote[:EVIDENCE_QUOTE_MAX_CHARS],
-                               "validation_kind": _direct_value_kind(node, candidate, path)})
-        if not valid_refs:
-            continue
-        accepted[path] = candidate
-        accepted_evidence[path] = valid_refs
-    return accepted, accepted_evidence
-
-
-async def _routed_pass(
-    *,
-    messages: List[Dict[str, str]],
-    allowed_paths: Sequence[str],
-    job_id: str,
-    worker_id: str,
-    attempts: int,
-    lost: asyncio.Event,
-    deadline: Optional[datetime],
-    request_gate: Callable[[str], Awaitable[None]],
-    calls: List[Dict[str, Any]],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    repair_sent = False
-    protocol_retry_used = False
-    budget_left = MAX_REQUESTS_PER_UNIT
-    while True:
-        _ensure_execution_window(lost, deadline, "routed_pass")
-        if budget_left <= 0:
-            raise ExtractFailure("routed_pass_budget_exhausted")
-        await request_gate("extract_pass")
-        budget_left -= 1
-        remaining = _remaining_seconds(deadline)
-        try:
-            result = await _await_with_deadline(
-                invoke_llm(
-                    messages,
-                    json_mode=True,
-                    max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
-                    timeout=remaining,
-                ),
-                deadline,
-            )
-        except asyncio.TimeoutError as exc:
-            raise ExtractFailure("deadline_exceeded", "routed_pass") from exc
-        except Exception as exc:
-            if not _is_retryable_transport_error(exc) or repair_sent or budget_left <= 0:
-                raise ExtractFailure("request_failed", f"routed_pass: {exc}") from exc
-            continue
-
-        calls.append({
-            "unit": "routed_pass",
-            "model": result.model,
-            "finish_reason": result.finish_reason,
-            "input_tokens": result.input_tokens,
-            "output_tokens": result.output_tokens,
-            "request_id": result.request_id,
-        })
-        if result.refusal or result.content_invalid:
-            raise ExtractFailure("response_content_invalid", "routed_pass")
-        kind = classify_finish(result.finish_reason)
-        if kind in ("truncated", "filtered"):
-            raise ExtractFailure(f"response_{kind}", "routed_pass")
-        if kind == "unknown":
-            if protocol_retry_used or repair_sent or budget_left <= 0:
-                raise ExtractFailure("completion_unknown", "routed_pass")
-            protocol_retry_used = True
-            continue
-        try:
-            envelope = strict_json_loads(result.content)
-            if not isinstance(envelope, dict) or not isinstance(envelope.get("values"), dict):
-                raise StrictJSONError("page-routed response must contain values object")
-            return envelope["values"], envelope.get("evidence") or {}
-        except StrictJSONError as exc:
-            if repair_sent or budget_left <= 0:
-                raise ExtractFailure("invalid_routed_json", str(exc)) from exc
-            messages = build_repair_messages(messages, result.content, [{"json_path": "$", "message": str(exc)}])
-            repair_sent = True
-            _ensure_unit_fits(messages, "routed_pass")
-
-
-def _embedding_profile() -> EmbeddingProfile:
-    return EmbeddingProfile(
-        model=settings.EMBEDDING_MODEL,
-        dimension=settings.EMBEDDING_DIMENSION or None,
-        query_instruction=settings.EMBEDDING_QUERY_INSTRUCTION,
-        document_instruction=settings.EMBEDDING_DOCUMENT_INSTRUCTION,
-        normalize=settings.EMBEDDING_NORMALIZE,
-        version=settings.EMBEDDING_PROFILE_VERSION,
-    )
-
-
-async def _run_page_routed(
-    *,
-    spec: Dict[str, Any],
-    parse_row: Dict[str, Any],
-    tenant_id: str,
-    document_id: str,
-    job_id: str,
-    worker_id: str,
-    attempts: int,
-    lost: asyncio.Event,
-    deadline: Optional[datetime],
-) -> Tuple[Any, Dict[str, Any], List[Dict[str, Any]], Dict[str, int]]:
-    """Run the bounded page-routed strategy on one complete bound ParseResult."""
-    usage: Dict[str, int] = {"requests": 0}
-
-    async def request_gate(stage: str) -> None:
-        _ensure_execution_window(lost, deadline, stage)
-        try:
-            consumed = await _await_with_deadline(
-                consume_extract_request(job_id, worker_id, attempts), deadline
-            )
-        except asyncio.TimeoutError as exc:
-            raise ExtractFailure("deadline_exceeded", stage) from exc
-        if not consumed.get("allowed"):
-            raise ExtractFailure(
-                f"budget_{consumed.get('reason') or 'denied'}", stage
-            )
-        used = consumed.get("requests_used")
-        usage["requests"] = int(used) if isinstance(used, int) else usage["requests"] + 1
-
-    profile = _embedding_profile()
-    try:
-        snapshot = await page_index_service.ensure_index(
-            parse_row,
-            tenant_id=tenant_id,
-            document_id=document_id,
-            embedding_profile=profile,
-            request_gate=request_gate,
-        )
-    except PageIndexError as exc:
-        raise ExtractFailure(exc.reason, exc.message) from exc
-
-    schema = spec["data_schema"]
-    leaves = _schema_leaves(schema)
-    unresolved = [path for path, _ in leaves]
-    locked: Dict[str, Any] = {}
-    evidence_by_path: Dict[str, Any] = {}
-    selected_pages: set[int] = set()
-    examined_pages: set[int] = set()
-    calls: List[Dict[str, Any]] = []
-    pass_count = 0
-    parse_data = parse_row.get("data") or {}
-
-    while unresolved and pass_count < 2:
-        pass_count += 1
-        queries = {
-            path: _field_query(path, node, schema)
-            for path, node in leaves
-            if path in unresolved
-        }
-        try:
-            candidates_by_path = await page_index_service.retrieve_many(
-                snapshot,
-                queries=queries,
-                embedding_profile=profile,
-                top_k=settings.PAGE_ROUTED_TOP_K,
-                neighbor_pages=settings.PAGE_ROUTED_NEIGHBOR_PAGES,
-                max_pages=settings.PAGE_ROUTED_MAX_PAGES,
-                request_gate=request_gate,
-            )
-        except PageIndexError as exc:
-            raise ExtractFailure(exc.reason, exc.message) from exc
-        pass_pages = set(_select_candidate_pages(
-            candidates_by_path,
-            settings.PAGE_ROUTED_MAX_PAGES,
-            examined_pages,
-        ))
-        if not pass_pages:
-            break
-        examined_pages.update(pass_pages)
-        selected_pages.update(pass_pages)
-        source_text, page_refs = _routed_source(parse_data, sorted(pass_pages))
-        if not source_text.strip():
-            break
-        messages = build_routed_messages(
-            schema=schema,
-            target="per_doc",
-            source_text=source_text,
-            allowed_paths=unresolved,
-            unit_label=f"page-routed pass {pass_count}",
-        )
-        _ensure_unit_fits(messages, f"routed-pass-{pass_count}")
-        values, pass_evidence = await _routed_pass(
-            messages=messages,
-            allowed_paths=unresolved,
-            job_id=job_id,
-            worker_id=worker_id,
-            attempts=attempts,
-            lost=lost,
-            deadline=deadline,
-            request_gate=request_gate,
-            calls=calls,
-        )
-
-        # A locked path may be repeated as a read-only anchor, but a changed value is a conflict.
-        for path in set(locked).intersection(path for path, _ in leaves):
-            present, value = _get_pointer(values, path)
-            if present and value != locked[path]:
-                raise ExtractFailure("field_conflict", path)
-
-        accepted, accepted_evidence = _validate_candidate_values(
-            schema,
-            values,
-            pass_evidence,
-            unresolved,
-            page_refs,
-            locked,
-        )
-        if values and len(accepted) < len(values):
-            # Protocol repair stays inside the current semantic pass and consumes
-            # the same persistent request budget; it cannot bypass evidence checks.
-            repair_messages = build_repair_messages(
-                messages,
-                json.dumps({"values": values, "evidence": pass_evidence}, ensure_ascii=False),
-                [{
-                    "json_path": "$.evidence",
-                    "message": "每个返回字段必须有实际输入中的非空 page/block quote；无证据的字段放入 unresolved",
-                }],
-            )
-            _ensure_unit_fits(repair_messages, f"routed-pass-{pass_count}-evidence-repair")
-            repaired_values, repaired_evidence = await _routed_pass(
-                messages=repair_messages,
-                allowed_paths=unresolved,
-                job_id=job_id,
-                worker_id=worker_id,
-                attempts=attempts,
-                lost=lost,
-                deadline=deadline,
-                request_gate=request_gate,
-                calls=calls,
-            )
-            accepted, accepted_evidence = _validate_candidate_values(
-                schema,
-                repaired_values,
-                repaired_evidence,
-                unresolved,
-                page_refs,
-                locked,
-            )
-        if not accepted:
-            continue
-        locked.update(accepted)
-        evidence_by_path.update(accepted_evidence)
-        unresolved = [path for path, _ in leaves if path not in locked]
-
-    payload: Dict[str, Any] = {}
-    for path, value in locked.items():
-        _set_pointer(payload, path, value)
-    for path, node in leaves:
-        if path in locked or not _path_is_required(schema, path):
-            continue
-        if not validate_value(node, None):
-            _set_pointer(payload, path, None)
-    final_errors = validate_output("per_doc", schema, payload)
-    if final_errors:
-        raise ExtractFailure("final_validation_failed", str(final_errors[0]))
-    routed_meta = {
-        "parse_result_id": str(parse_row.get("id")),
-        "passes": pass_count,
-        "selected_pages": sorted(selected_pages),
-        "evidence": evidence_by_path,
-        "unresolved": unresolved,
-        "index_profile": snapshot.embedding_profile_hash,
-    }
-    if len(json.dumps(routed_meta, ensure_ascii=False).encode("utf-8")) > ENGINE_MAX_BYTES:
-        raise ExtractFailure("evidence_limit_exceeded")
-    return payload, routed_meta, calls, usage
-
-
 def _ensure_unit_fits(messages: List[Dict[str, str]], unit_id: str) -> None:
     prompt_text = "\n".join(item.get("content") or "" for item in messages)
     if not fits_context(
@@ -1137,7 +618,6 @@ def build_engine(
     calls: List[Dict[str, Any]],
     attempts: int,
     requests: Optional[int] = None,
-    page_routed: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     engine: Dict[str, Any] = {
         "name": "neoflow-extract",
@@ -1157,8 +637,6 @@ def build_engine(
     if requests is not None and requests != len(calls):
         engine["usage"]["input_tokens"] = None
         engine["usage"]["output_tokens"] = None
-    if page_routed is not None:
-        engine["page_routed"] = page_routed
     serialized = json.dumps(engine, ensure_ascii=False).encode("utf-8")
     while len(serialized) > ENGINE_MAX_BYTES and engine["usage"]["calls"]:
         engine["usage"]["calls"] = engine["usage"]["calls"][:-1]
@@ -1334,42 +812,26 @@ async def handle_extract_job(
                 tenant_id=tenant_id,
                 lost=lost,
             )
-            if spec["extraction_strategy"] == PAGE_ROUTED_STRATEGY:
-                payload, routed_meta, calls, usage = await _run_page_routed(
-                    spec=spec,
-                    parse_row=parse_row,
-                    tenant_id=tenant_id,
-                    document_id=document_ids[0],
-                    job_id=job_id,
-                    worker_id=worker_id,
-                    attempts=attempts,
-                    lost=lost,
-                    deadline=deadline,
-                )
-                engine = build_engine(
-                    spec, calls, attempts, usage["requests"], page_routed=routed_meta
-                )
-            else:
-                units = plan_units(spec["target"], parse_row.get("data") or {})
-                if not units:
-                    raise ExtractFailure("no_units")
-                usage = {"requests": 0}
-                outputs, calls = await _run_units(
-                    units=units,
-                    target=spec["target"],
-                    schema=spec["data_schema"],
-                    job_id=job_id,
-                    worker_id=worker_id,
-                    attempts=attempts,
-                    lost=lost,
-                    usage=usage,
-                    deadline=deadline,
-                )
-                payload = assemble(spec["target"], outputs)
-                final_errors = validate_output(spec["target"], spec["data_schema"], payload)
-                if final_errors:
-                    raise ExtractFailure("final_validation_failed", str(final_errors[0]))
-                engine = build_engine(spec, calls, attempts, usage["requests"])
+            units = plan_units(spec["target"], parse_row.get("data") or {})
+            if not units:
+                raise ExtractFailure("no_units")
+            usage = {"requests": 0}
+            outputs, calls = await _run_units(
+                units=units,
+                target=spec["target"],
+                schema=spec["data_schema"],
+                job_id=job_id,
+                worker_id=worker_id,
+                attempts=attempts,
+                lost=lost,
+                usage=usage,
+                deadline=deadline,
+            )
+            payload = assemble(spec["target"], outputs)
+            final_errors = validate_output(spec["target"], spec["data_schema"], payload)
+            if final_errors:
+                raise ExtractFailure("final_validation_failed", str(final_errors[0]))
+            engine = build_engine(spec, calls, attempts, usage["requests"])
             try:
                 _ensure_execution_window(lost, deadline, "commit")
             except ExtractFailure:
