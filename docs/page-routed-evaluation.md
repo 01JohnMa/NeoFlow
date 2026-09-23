@@ -59,6 +59,17 @@ After correcting the gold exclusion item and narrowing `study_group`/`secondary_
 
 The later gold audit found that the previous `secondary_endpoint` gold had removed the definitions from items 1, 2, and 4 and changed item 7 from “发作后” to “发作时”; that was a gold defect, not a model defect. The gold also omitted the original introductory sentences for the inclusion and exclusion criteria. After restoring those source passages, the same completed Job (`1d094e1e-3bf5-435b-9af1-8ef99f13fb4d`) scores **28/28 exact, 0 mismatch, 0 missing, 0 extra** under the business-normalized comparison. The remaining 43a1 result is retained as evidence of the earlier over-constrained description and is not the final quality result.
 
+## Final source-first replay (2026-09-23)
+
+The source-first replay was rerun with the final split NMPA schema and corrected gold. It indexed all 42 born-digital pages from native text, selected 23 pages, and submitted one physical-page `page_ranges` Parse: `1-4,6-7,13-17,22,26-29,31-37`.
+
+- Native text read: 0.69s; document embeddings: 2.35s; field-query embeddings: 1.42s.
+- MinerU selected-page Parse: 17.17s; Extract: 8.84s; 15,127 input tokens / 2,615 output tokens.
+- Result: **25/28 exact, 3 mismatches, 0 missing, 0 extra**.
+- Remaining fields: `study_objective`, `inclusion_criteria`, `exclusion_criteria`; the candidate pages were found, but the one-pass source-first prompt did not preserve every chapter qualifier/introduction as the gold expects.
+
+This is still an isolated source-first replay rather than a public Configuration strategy. It reduces parsed pages from 42 to 23, but its quality remains below the latest full-document 28/28 result.
+
 ## Preparation status
 
 The checked-in corpus is synthetic and contains no provider output, credentials, or personal contact data. It exercises born-digital, scanned, mixed/table, exact identifiers/dates, and long-context boundary strata. It is scaffolding for deterministic scoring and must not be described as real-provider acceptance. Manifest fields for implementation commit, Configuration revision, ParseResult IDs, provider, model, and profiles remain `null` until an authorized pre-run freeze.
