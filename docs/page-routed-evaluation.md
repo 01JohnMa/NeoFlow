@@ -65,8 +65,9 @@ The source-first replay was rerun with the final split NMPA schema and corrected
 
 - Native text read: 0.69s; document embeddings: 2.35s; field-query embeddings: 1.42s.
 - MinerU selected-page Parse: 17.17s; Extract: 8.84s; 15,127 input tokens / 2,615 output tokens.
-- Result: **25/28 exact, 3 mismatches, 0 missing, 0 extra**.
-- Remaining fields: `study_objective`, `inclusion_criteria`, `exclusion_criteria`; the candidate pages were found, but the one-pass source-first prompt did not preserve every chapter qualifier/introduction as the gold expects.
+- Result against the corrected criteria-item gold: **27/28 exact, 1 mismatch, 0 missing, 0 extra**.
+- `inclusion_criteria` and `exclusion_criteria` contain all 7/17 numbered items. Their section-introduction sentences are not field values under the schema contract and are not counted as missing.
+- The remaining field is `study_objective`: the selected page contains the objective, but the one-pass source-first prompt did not combine the sponsor name from the adjacent summary-table row.
 
 This is still an isolated source-first replay rather than a public Configuration strategy. It reduces parsed pages from 42 to 23, but its quality remains below the latest full-document 28/28 result.
 
