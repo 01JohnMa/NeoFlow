@@ -1,0 +1,96 @@
+{
+  "case_id": "xida",
+  "status": "candidate_gold_requires_review",
+  "source_path": "/tmp/neoflow-raw-pdf/西达本胺乳腺癌III期试验方案_v1.0 20150421-0708 Final_副本.pdf",
+  "source_hash": "f0027e0a6a73531be55a5b48f387759fa9025950723bb5dbb65cb3d08a21d45a",
+  "parse_pages": 68,
+  "fields": [
+    {
+      "key": "trial_type",
+      "value": "药物",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "trial_phase",
+      "value": "III期",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "planned_subject_count",
+      "value": 328,
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "project_name",
+      "value": "A Phase III Trial of Chidamide in Combination with Exemestane in Patients with Hormone Receptor-Positive Advanced Breast Cancer (ACE)",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "project_short_name",
+      "value": "ACE",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "protocol_no",
+      "value": "CDM301",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "protocol_name",
+      "value": "A Phase III Trial of Chidamide in Combination with Exemestane in Patients with Hormone Receptor-Positive Advanced Breast Cancer (ACE)",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "protocol_version",
+      "value": "V1.0",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "sample_size",
+      "value": "328例",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "primary_endpoint",
+      "value": "PFS",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "drug_en_name",
+      "value": "Chidamide",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "dosage_form",
+      "value": "片剂",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "specification_model",
+      "value": "5mg",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "combination_products",
+      "value": [
+        {
+          "name": "Exemestane",
+          "name_en": "Exemestane",
+          "specification_model": "25mg",
+          "dosage_form": "片剂"
+        }
+      ],
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "nmpa_document_no",
+      "value": "2010L02920",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "indication",
+      "value": "Hormone Receptor-Positive Advanced Breast Cancer",
+      "source": "AI candidate from full-document Parse; human review required"
+    }
+  ]
+}

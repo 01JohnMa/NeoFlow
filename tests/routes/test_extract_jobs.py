@@ -67,6 +67,24 @@ def _patch(monkeypatch, configuration, *, revision=None):
 
 
 class TestCreateExtractJobs:
+    def test_source_page_routed_draft_freezes_strategy(self, client, monkeypatch):
+        definition = {
+            "target": "per_doc",
+            "data_schema": SCHEMA,
+            "extraction_strategy": "source_page_routed",
+        }
+        mod = _patch(monkeypatch, _draft_config(definition))
+
+        resp = client.post(
+            "/api/extract/jobs",
+            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+        )
+
+        assert resp.status_code == 201
+        assert mod.create_job.await_args.kwargs["execution_spec"]["effective_params"][
+            "extraction_strategy"
+        ] == "source_page_routed"
+
     def test_draft_freezes_snapshot(self, client, monkeypatch):
         mod = _patch(monkeypatch, _draft_config())
 
@@ -165,7 +183,7 @@ class TestCreateExtractJobs:
         )
 
         assert resp.status_code == 409
-        assert "strategy_deprecated" in resp.json()["error"]
+        assert "strategy_invalid" in resp.json()["error"]
         mod.create_job.assert_not_awaited()
 
     def test_explicit_null_schema_rejected_instead_of_legacy_fallback(self, client, monkeypatch):

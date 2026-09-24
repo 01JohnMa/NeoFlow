@@ -53,6 +53,20 @@ def test_page_routed_strategy_is_retired():
         })
 
 
+def test_source_page_routed_is_valid_only_for_per_doc():
+    definition = {**empty_extract_definition(), 'extraction_strategy': 'source_page_routed'}
+    assert validate_extract_definition(definition) == definition
+    with pytest.raises(ExtractConfigurationError, match='per_doc'):
+        validate_extract_definition({**definition, 'target': 'per_page'})
+
+
+def test_agentic_source_page_routed_is_valid_only_for_per_doc():
+    definition = {**empty_extract_definition(), 'extraction_strategy': 'agentic_source_page_routed'}
+    assert validate_extract_definition(definition) == definition
+    with pytest.raises(ExtractConfigurationError, match='per_doc'):
+        validate_extract_definition({**definition, 'target': 'per_page'})
+
+
 def test_raw_execution_subset_is_not_narrowed_to_builder_profile():
     definition = {'data_schema': {'type': 'object', 'properties': {
         'n': {'type': 'integer', 'enum': [1, 2]},
@@ -123,6 +137,7 @@ def test_seed_contract_and_sparse_values():
     assert 'nmpa_info' not in schema['properties']
     assert sum('enum' in n for n in schema['properties'].values()) == 8
     assert not schema.get('required')
+    assert definition['extraction_strategy'] == 'source_page_routed'
     for key in ('combination_products', 'control_products'):
         node = schema['properties'][key]
         assert node['type'] == 'array'

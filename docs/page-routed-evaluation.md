@@ -1,18 +1,37 @@
 # Page-routed evaluation (#38)
 
-This document records preparation artifacts for the optional `page_routed` Extract strategy. The runnable manifest and rubric are in [`benchmarks/page_routed/manifest.json`](../benchmarks/page_routed/manifest.json) and [`benchmarks/page_routed/rubric.json`](../benchmarks/page_routed/rubric.json); scoring is performed by [`scripts/evaluate_page_routed.py`](../scripts/evaluate_page_routed.py).
+This document records historical comparison artifacts. `page_routed` is retired and is not an executable Configuration strategy. The current source-first contract is [`ADR-0011`](adr/0011-source-page-routed-index.md); any new comparison must use `source_page_routed` and Job-owned ParseResults.
 
 ## Three execution strategies
 
 The evaluation separates the three product paths described in Issue #33:
 
 1. **`full_document` — fixed full flow.** Parse the complete document once, then send the complete canonical ParseResult to one extraction call. This is the compatibility baseline.
-2. **`progressive_parse_routed` — staged Parse workflow.** Parse an initial anchor set (for example, cover/summary/TOC), extract the fields resolved there, route only unresolved fields to selected ranges, parse those ranges as supplementary immutable artifacts, and run extraction for the remainder. This is not implemented in the current code and must be evaluated only after its parse-coverage contract exists.
+2. **`agentic` — bounded adaptive workflow.** The agent may choose a sequence of Parse and Extract actions, but every turn, Parse call, token, and wall-clock budget is hard; exceeding a limit fails the Job. Each Parse artifact is Job-private, and the agent must use the real MinerU adapter for source parsing. There is no full-document fallback, silent downgrade, or unbounded retry. This is an experimental supported option; its evaluation evidence must not be presented as rollout approval.
 3. **`source_page_routed` — source-first route.** Inspect the uploaded source page by page; use native text for usable born-digital pages and images for scanned pages; retrieve top-two candidates per field, parse only the union with MinerU, then extract from that partial artifact. This is the target experiment for reducing first-time MinerU work.
 
-The existing `page_routed` implementation is retained as a legacy complete-ParseResult comparison. It is not the source-first strategy described above and must not be used as evidence that source-first parsing saves MinerU work.
+Historical `page_routed` numbers below are retained only to explain earlier measurements. They must not be used as evidence for the current implementation or enabled in new jobs.
 
-The current browser evidence compares (1) and the legacy complete-Parse `page_routed` path on the same `parse_result_id`. It is not evidence for (2) or the new source-first (3), and it must not be reported as incremental-Parse savings.
+## Current Job-owned replay (2026-09-23)
+
+Using the same 42-page clinical PDF, the same 30-field gold, the same schema, and the same provider, the formal JobRunner produced:
+
+| strategy | job | Parse pages | embedding/Parse/LLM requests | elapsed | business-normalized quality |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `full_document` | `8643bb21-7a33-4bca-9798-78116c9ac064` | 42 | 0 / 1 / 2 | 45.59 s | 28/30 gold fields (two optional NMPA fields absent in both gold and output) |
+| `source_page_routed` | `b9d57a7d-cd50-4749-8c06-6e54be37f190` | 21 | 5 / 1 / 1 | 58.22 s | 28/30 gold fields (same two optional NMPA fields absent) |
+
+The optimized bounded Agentic replay (`0eba0c32-747d-4b11-a4b5-d822b4f51098`) selected 24 pages, used two MinerU Parse calls, 15 total request units, and completed in approximately 94 seconds. Its deterministic score was **28/28 fields with gold values**, with no missing expected values or unsupported extras. It therefore reached the same business quality as `source_page_routed` on this sample, at higher cost and latency; the page cap and tool budgets remain explicit rather than allowing unbounded expansion.
+
+The source-first run therefore proves Job-owned partial Parse binding, physical page restoration, and equal business-normalized quality for this replay. It reduced MinerU coverage by 50%, but was slower end to end because the provider still charged embedding requests and the selected-page MinerU request had fixed overhead. This is measurement evidence for the sample, not a universal cost or latency guarantee.
+
+## Agentic source-page replay (2026-09-24)
+
+The bounded `agentic_source_page_routed` strategy was run through the real JobRunner with the same PDF, schema, gold, embedding provider, DeepSeek provider, and MinerU adapter. The Agent made two search tool rounds and one Parse call, selecting 12 physical pages (`1-5,13-16,22,34-35`). The Job consumed 13 request units and completed in approximately 53.5 seconds. The deterministic scorer matched **26/28 fields with gold values**; both missing NMPA fields are intentionally absent from gold, and the remaining differences were the inclusion/exclusion list formatting/intro text. No unsupported extra field was returned.
+
+The first attempt exposed a provider integration failure: DeepSeek thinking-mode tool calls require `reasoning_content` replay. The Agentic provider adapter now sends non-thinking mode for this optional path, so the successful Job is the relevant runtime evidence. This is a bounded strategy result, not rollout approval; the fixed source-first path remained 28/28 on the same corpus.
+
+The earlier browser evidence compared a complete-Parse experiment on the same `parse_result_id`; it is not evidence for the current source-first path and must not be reported as incremental-Parse savings.
 
 ## Isolated source-first replay (2026-09-22)
 
@@ -25,7 +44,7 @@ The first source-first replay used the same 42-page clinical-protocol PDF and th
 - One evidence-aware Extract call took approximately 23.34 seconds, returned 24 accepted fields, and recorded 17,858 input tokens / 6,540 output tokens.
 - Against the existing real-case gold, the isolated result had 16/28 literal exact matches, 8 non-empty mismatches, and 4 gold fields missing. This matches the best query-batched legacy `page_routed` exact count while parsing half as many pages, but total elapsed time was approximately 55.6 seconds versus the earlier full-document cold baseline of approximately 46 seconds.
 
-This is a source-first Parse measurement, not a public strategy acceptance: it ran outside the Extract Job/Result persistence seam, used the born-digital text branch only, and did not test the scanned-image branch. The current result shows real Parse-page reduction but no speed or quality win yet; keep the source-first path experimental.
+This is a source-first Parse measurement, not a public strategy acceptance: it ran outside the Extract Job/Result persistence seam, used the born-digital text branch only, and did not test the scanned-image branch. The current result shows real Parse-page reduction but no speed or quality win yet; keep the source-first path experimental. This evidence does not authorize rollout or a default change.
 
 ## Unified comparison against the supplied real-case gold
 
@@ -38,7 +57,7 @@ The supplied [`4-真实案例-苹果酸阿莫曲坦片-填好的JSON.json`](../t
 | legacy complete-Parse `page_routed` (`b398f9e0`) | 26 | 19/28 | 6 | 3 | 1 | 39 selected pages across two passes, six requests |
 | source-first `source_page_routed` replay | 24 | 19/28 | 5 | 4 | 0 | 21 source-selected pages, one Parse and one Extract |
 
-The source-first replay is one field below the full-document baseline under the business-normalized rule, matches the legacy route, and has no extra unsupported value. `progressive_parse_routed` has no executable run yet and is intentionally absent from this table.
+The source-first replay is one field below the full-document baseline under the business-normalized rule, matches the legacy route, and has no extra unsupported value. `agentic` has no comparable frozen run yet and is intentionally absent from this table.
 
 ## Description-adjusted rerun (2026-09-22)
 

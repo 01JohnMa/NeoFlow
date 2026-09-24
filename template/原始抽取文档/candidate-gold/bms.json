@@ -1,0 +1,123 @@
+{
+  "case_id": "bms",
+  "status": "candidate_gold_requires_review",
+  "source_path": "template/原始抽取文档/施贵宝- CA209-078 - 修订方案01-摘要-中文_副本.pdf",
+  "source_hash": "3149c459507f1963a3cb88a0ea1fe832c31ede58672cb852983d4cd5f97ecb4d",
+  "parse_pages": 20,
+  "fields": [
+    {
+      "key": "trial_type",
+      "value": "药物",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "trial_phase",
+      "value": "III期",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "blinding_method",
+      "value": "开放",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "planned_subject_count",
+      "value": 500,
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "project_name",
+      "value": "Nivolumab对比多西他赛治疗既往接受过治疗的晚期或转移性非小细胞肺癌的开放性、随机、多个国家参加的Ⅲ期试验",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "project_short_name",
+      "value": "CheckMate 078",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "multisite_flag",
+      "value": "是",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "indication",
+      "value": "晚期或转移性非小细胞肺癌",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "protocol_no",
+      "value": "CA209078",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "protocol_name",
+      "value": "Nivolumab对比多西他赛治疗既往接受过治疗的晚期或转移性非小细胞肺癌的开放性、随机、多个国家参加的Ⅲ期试验",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "study_objective",
+      "value": "主要目的：在以前用含铂剂化疗失败的晚期或转移性NSCLC受试者中，比较nivolumab组与多西他赛组的总生存期。次要目的：比较nivolumab组与多西他赛组的客观缓解率（ORR）；比较nivolumab组与多西他赛组的无进展生存期（PFS）；评价不同亚组的临床疗效（总生存期、客观缓解率和无进展生存期），包括：鳞状细胞NSCLC亚组和非鳞状细胞NSCLC亚组，PD-L1蛋白表达阳性亚组和阴性亚组，以及中国人亚组和非中国人亚组；评价nivolumab组与多西他赛组的治疗相关的选择性不良事件和SAE的发生率；根据肺癌症状量表评价结果，评价nivolumab组与多西他赛组到12周时疾病相关症状有改善的受试者所占的比例。",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "study_design",
+      "value": "本研究是在以前用含铂剂二联化疗失败后的晚期和转移性NSCLC成年（≥18岁）男性和女性受试者中开展的开放性、随机的3期研究。大约要有500例受试者按2:1的比例随机分成nivolumab组和多西他赛组。",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "sample_size",
+      "value": "500例",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "inclusion_criteria",
+      "value": "1. 组织学或细胞学确诊为NSCLC、并且有IB期/IV期肿瘤（按照国际肺癌研究协会胸部肿瘤分期手册(International Association for the Study of Lung Cancer Staging Manual inThoracic Oncology）第7版判断）或多模式治疗（放疗、手术切除或根治性放化疗治疗局部晚期疾病）后复发或疾病进展的受试者。\n2. 受试者必须在以前用一种含铂剂二联化疗方案治疗晚期或转移性肿瘤期间或以后发生了疾病进展。\n一 接受维持治疗（是指用含铂剂二联化疗方案后无进展者接受的治疗）并发生了进展的受试者适合入选。\n一 使用含铂的辅助、新辅助治疗或根治性放化疗治疗局部晚期疾病、并且在完成治疗后6个月内发生了肿瘤复发或转移的受试者适合入选。\n给予含铂的辅助、新辅助治疗或根治性放化疗治疗局部晚期疾病后>6个月以后肿瘤复发、并且后来在用铂剂二联方案治疗复发性肿瘤期间或以后又发生了进展的受试者适合入选。\n3. 按照 RECIST1.1 标准（附录2），受试者必须有通过CT 或 MRI检查的可测量病变。肿瘤影像学评价在随机分组之前的28天内进行。\na) 目标病灶可以位于以前放疗过的区域，只要证实(影像学检查)该部位有疾病进展。\n4. ≥18 岁的男性和女性。\n5. ECOG 体力状况评分≤1。\n6. 必须有一份经福尔马林固定、石蜡包埋（FFPE）的肿瘤组织块或至少10张未染色的肿瘤标本切片（如果BMS医学监查员批准，可提交不到10张未染色切片）必须在中心实验室进行生物标志物评价（肿瘤标本可以是存档或近期的标本）。为了进行随机，将受试者分为PD-L1阳性、PD-L1阴性或PD-L1无法评估。活检标本应该是切除的标本、切取的标本或空心针穿刺标本。细针穿刺活检的标本、胸腔积液引流离心的细胞涂片、或者钻取活检不足以用于生物标志物的审阅和随机化。没有软组织成分或脱钙骨肿瘤标本的骨病变也不可接受。\n7. 随机分组之前，以前对非CNS病变进行的姑息放疗必须已经完成至少2周。强烈建议，在基线期存在有症状的肿瘤病灶且可能需要在随机分组后4周内进行姑息放疗的受试者，在随机分组之前接受姑息放疗。",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "exclusion_criteria",
+      "value": "1. 受试者有癌性脑膜炎。\n2. 要排除有活动性中枢神经系统（CNS）转移的受试者。如果受试者的CNS转移能够充分治疗，并目受试者的神经系统症状能够在入选前至少2周恢复到基线水平（与CNS治疗有关的残留体征或症状除外），则可以参加研究。此外，受试者还必须是不用皮质类固醇的受试者，或接受剂量稳定或逐渐降低的≤10mg/天的强的松（或等价物）。\n3. 排除患有活动性、已知或可疑的自身免疫性疾病的受试者。患有Ⅰ型糖尿病、只需接受激素替代治疗的甲状腺功能减退症、无需进行全身治疗的皮肤疾病（例如，白癜风、银屑病或脱发），或预计在无外部触发因素的状态下情况不会再现的受试者可以入选。\n4.随机分组之前的14天内有需要全身用皮质类固醇（剂量相当于>10mg强的松/天）或其他免疫抑制药物治疗的受试者。使用吸入性或外用皮质类固醇的受试者，以及肾上腺皮质类固醇替代治疗剂量相当于>10mg强的松/天的受试者，如果没有活动性自身免疫性疾病，则可以参加研究。\n5.以前用过抗肿瘤疫苗或其他具有免疫刺激作用的抗肿瘤药治疗。\n6. 以前用过抗 PD-1 抗体、抗 PD-L1 抗体、抗 PD-L2 抗体、抗 CD137 抗体或抗 CTLA-4抗体治疗（包括ipilimumab或特异性作用于T细胞协同刺激或检查点途径的任何其他抗体或药物）。\n7. 以前用过多西他赛治疗。\n8.乙型肝炎病毒表面抗原（HBVsAg）或丙型肝炎病毒抗体（HCVAb）阳性，说明有急性或慢性感染。\n9. 根据胸部X线检查、痰液检查以及临床查体，判断有活动性肺结核（TB）感染。前1年内有活动性肺结核感染病史的患者，即使已经治疗，也要排除；超过1年以前有活动性肺结核感染病史的患者，也要排除，除非证明以前所用的抗结核治疗的疗程和种类都恰当。\n10. 排除EGFR突变的受试者（不考虑突变类型）。必须对EGFR突变状态未知的非鳞癌受试者的EGFR突变状态进行检测（强烈建议采用基于PCR的检测方法）。如果EGFR突变为阳性，则排除受试者。\n11. 排除已知 ALK 易位的受试者。\n12. 既往在伊匹木单抗一线NSCLC 研究 CA184153 中接受过盲态研究药物治疗(无论哪个治疗组）的受试者。",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "study_group",
+      "value": "试验组：nivolumab组；对照组：多西他赛组",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "primary_endpoint",
+      "value": "总生存期（OS）",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "secondary_endpoint",
+      "value": "次要疗效终点按下列分级次序进行检验：客观缓解率和无进展生存期。\n客观缓解率（ORR）：所有随机分组、而且按照RECIST1.1标准评定最佳总体疗效（BOR）为完全缓解（CR）或部分缓解（PR）的受试者所占的比例。客观缓解率用双侧5%水平的Cochran-Mantel Haenszel（CMH）检验进行比较，检验用随机分组所用的分层因素分层。要计算相应的比值比和95%CI。还会用Clopper-Pearson法计算各治疗组的客观缓解率及其相应的精确95%CI。将采用以下Cochran-Mantel-Haenszel（CMH）权重法（按分层因素调整）对两个治疗组之间的ORR差异及双侧95%CI进行估算。\n无进展生存期（PFS）：从随机分组到第一次记录肿瘤进展（按照RECIST1.1标准评定）的日期或因任何原因死亡的日期这段时间。在确定PFS时，在无确凿的疾病进展证据（根据RECIST1.1）的情况下出现的临床恶化不属于进展。对于以前没有报告进展的死亡受试者，将其视为在死亡日期发生了进展。既没有发生疾病进展也没有死亡的受试者将会在其最后一次可评价的肿瘤评价日期被删失。研究期间没有任何肿瘤评价而且也没有死亡的受试者将会在随机分组日期被删失。之前没有报告疾病进展却开始了后续抗癌治疗的受试者，将会在开始用后续抗癌治疗之前最后一次可评价的肿瘤评价日期、或者开始后续抗癌治疗时被删失。会进行按随机分组所用的分层因素分层的双侧时序检验，比较2个随机组无进展生存期的分布。用分层Cox比例风险模型估计风险比和相应的双侧95%CI，在这个模型中，用随机组作为唯一的协变量。用Kaplan-Meier乘积极限法估计各随机组的无进展生存期曲线。用Brookmeyer-Crowley方法计算中位无进展生存期的双侧95%可信区间。还要用疗效分析方法评价下列不同的亚组的总生存期、客观缓解率和无进展生存期：鳞状细胞亚组和非鳞状细胞亚组，PD-L1蛋白表达阳性亚组和PD-L1蛋白表达阴性亚组，以及中国人亚组和非中国人亚组。各个亚组也要用上述总生存期、客观缓解率和无进展生存期分析方法进行分析。但是，对这些亚组，不会在治疗组间进行正式的比较，即上述对总生存期和无进展生存期所进行的分层时序检验以及对客观缓解率所进行的 Cochran-Mantel Haenszel 检验。\n疾病相关症状改善率：根据肺癌症状量表（LCSS）评价结果判断到第12周疾病相关症状有改善的随机分组受试者所占的比例。各随机组第12周时的疾病相关症状改善率及其相应的精确95%CI用Clopper-Pearson法计算。",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "drug_en_name",
+      "value": "Nivolumab",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "specification_model",
+      "value": "10 mg/ml",
+      "source": "AI candidate from full-document Parse; human review required"
+    },
+    {
+      "key": "control_products",
+      "value": [
+        {
+          "name": "多西他赛",
+          "specification_model": "40 mg/ml"
+        },
+        {
+          "name": "多西他赛",
+          "specification_model": "20 mg/ml"
+        }
+      ],
+      "source": "AI candidate from full-document Parse; human review required"
+    }
+  ]
+}

@@ -94,7 +94,11 @@ describe('extract service', () => {
           status: 'published',
           type: 'extract',
           current_revision_id: 'revision-1',
-          draft_definition: { target: 'per_doc', data_schema: { type: 'object' } },
+          draft_definition: {
+            target: 'per_doc',
+            extraction_strategy: 'source_page_routed',
+            data_schema: { type: 'object' },
+          },
         },
       ],
     })
@@ -106,13 +110,14 @@ describe('extract service', () => {
     })
     expect(configs).toHaveLength(1)
     expect(configs[0].draft_definition?.target).toBe('per_doc')
+    expect(configs[0].draft_definition?.extraction_strategy).toBe('source_page_routed')
   })
 
   it('非管理员 403 时回退到已发布模板', async () => {
     apiMock.get
       .mockRejectedValueOnce(Object.assign(new Error('forbidden'), { response: { status: 403 } }))
       .mockResolvedValueOnce({
-        data: [{ id: 'template-1', name: '旧版模板', code: 'legacy', description: null }],
+        data: [{ id: 'template-1', name: '源文件模板', code: 'source', description: null, extraction_strategy: 'source_page_routed' }],
       })
 
     const configs = await extractService.listConfigurations()
@@ -127,6 +132,6 @@ describe('extract service', () => {
       type: 'extract',
       current_revision_id: null,
     })
-    expect(configs[0].draft_definition).toBeUndefined()
+    expect(configs[0].draft_definition?.extraction_strategy).toBe('source_page_routed')
   })
 })

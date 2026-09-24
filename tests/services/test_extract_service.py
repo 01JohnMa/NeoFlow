@@ -20,6 +20,7 @@ from services.extract_service import (
     validate_output,
 )
 from services.llm_invoke import LLMResult
+from services.source_page_index import SourcePage, SourcePageCandidate, SourcePageIndex
 
 JOB_ID = "99999999-9999-4999-8999-999999999999"
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -81,6 +82,7 @@ def _parse_data(pages: int = 1):
 def _parse_row(data=None):
     return {
         "id": RESULT_ID,
+        "job_id": JOB_ID,
         "document_id": DOCUMENT_ID,
         "tenant_id": TENANT_ID,
         "sample_key": "parse",
@@ -111,7 +113,6 @@ def _patch_env(
     *,
     parse_row=None,
     llm_responses=None,
-    bind_status="bound",
     budget=None,
     renewed=True,
     auto_parse=True,
@@ -128,12 +129,36 @@ def _patch_env(
         extract_service.result_service, "get_result",
         AsyncMock(return_value=parse_row if parse_row is not None else _parse_row()),
     )
+    parse_result = type("FakeParseResult", (), {"to_dict": lambda self: _parse_data()})()
+    created_parse_row = parse_row if parse_row is not None else _parse_row()
     monkeypatch.setattr(
-        extract_service, "ensure_parse_result",
-        AsyncMock(return_value=_parse_data() if auto_parse else None),
+        extract_service,
+        "get_parser_adapter",
+        lambda params=None: type(
+            "FakeParser",
+            (),
+            {"parse": AsyncMock(return_value=parse_result if auto_parse else None)},
+        )(),
+    )
+    monkeypatch.setattr(extract_service, "apply_parse_postprocess", lambda result, params: None)
+    monkeypatch.setattr(extract_service, "annotate_parse_provenance", lambda result, path, params: result)
+    monkeypatch.setattr(
+        extract_service.result_service,
+        "record_parse_result",
+        AsyncMock(return_value=created_parse_row if auto_parse else None),
     )
     monkeypatch.setattr(
-        extract_service, "bind_extract_parse_result", AsyncMock(return_value=bind_status)
+        extract_service,
+        "commit_extract_parse_result",
+        AsyncMock(
+            return_value={
+                "status": "bound",
+                "result_id": created_parse_row.get("id"),
+                "reason": None,
+            }
+            if auto_parse
+            else {"status": "invalid", "result_id": None, "reason": "parse_data_invalid"}
+        ),
     )
     monkeypatch.setattr(
         extract_service, "ensure_extract_budget",
@@ -205,7 +230,7 @@ class TestResolveSpec:
         })
         with pytest.raises(ExtractFailure) as exc:
             resolve_extract_spec(job)
-        assert exc.value.reason == "strategy_deprecated"
+        assert exc.value.reason == "strategy_invalid"
 
     def test_page_routed_per_page_is_rejected(self):
         job = _job(execution_spec={
@@ -219,7 +244,7 @@ class TestResolveSpec:
         })
         with pytest.raises(ExtractFailure) as exc:
             resolve_extract_spec(job)
-        assert exc.value.reason == "strategy_deprecated"
+        assert exc.value.reason == "strategy_invalid"
 
     def test_fields_only_is_rejected_without_conversion(self):
         job = _job(execution_spec={
@@ -348,9 +373,107 @@ class TestHandleExtract:
         assert data == payload
         assert engine["target"] == "per_doc"
         assert engine["extraction_strategy"] == "full_document"
-        assert engine["usage"]["requests"] == 1
-        assert engine["usage"]["input_tokens"] == 10
+        assert engine["usage"]["requests"] == 2
+        assert engine["usage"]["input_tokens"] is None
         assert captured == []
+
+    @pytest.mark.asyncio
+    async def test_source_page_routed_builds_job_private_partial_parse(self, monkeypatch):
+        job = _job(
+            execution_spec={
+                "capability": "extract",
+                "spec_version": "1",
+                "effective_params": {
+                    "target": "per_doc",
+                    "data_schema": SCHEMA,
+                    "extraction_strategy": "source_page_routed",
+                },
+            }
+        )
+        _patch_env(
+            monkeypatch,
+            llm_responses=[_llm_result('{"report_no": "SRC-1"}')],
+        )
+        index = SourcePageIndex(
+            source_hash="sha",
+            pages=[SourcePage(3, "text", text="page 3")],
+            vectors=[[1.0, 0.0]],
+            profile="test",
+        )
+        monkeypatch.setattr(extract_service, "build_source_page_index", AsyncMock(return_value=index))
+        monkeypatch.setattr(
+            extract_service,
+            "retrieve_source_pages",
+            AsyncMock(return_value={
+                "/report_no": [SourcePageCandidate(3, 0.99, ["text-vector"])],
+                "/conclusion": [SourcePageCandidate(3, 0.98, ["text-vector"])],
+            }),
+        )
+
+        payload = await handle_extract_job(job)
+
+        assert payload == {"report_no": "SRC-1"}
+        _, engine = _committed_ok()
+        assert engine["extraction_strategy"] == "source_page_routed"
+        assert engine["source_page_routed"]["page_ranges"] == "3"
+
+    @pytest.mark.asyncio
+    async def test_agentic_source_page_routed_uses_bounded_agent_parse_result(self, monkeypatch):
+        job = _job(
+            execution_spec={
+                "capability": "extract",
+                "spec_version": "1",
+                "effective_params": {
+                    "target": "per_doc",
+                    "data_schema": SCHEMA,
+                    "extraction_strategy": "agentic_source_page_routed",
+                },
+            }
+        )
+        _patch_env(monkeypatch, llm_responses=[_llm_result('{"report_no": "AGENT-1"}')])
+        monkeypatch.setattr(
+            extract_service,
+            "_agentic_source_page_parse_and_bind",
+            AsyncMock(
+                return_value=(
+                    _parse_row(),
+                    {"strategy": "agentic_source_page_routed", "parse_calls": 1, "selected_pages": [3]},
+                )
+            ),
+        )
+
+        assert await handle_extract_job(job) == {"report_no": "AGENT-1"}
+        _, engine = _committed_ok()
+        assert engine["extraction_strategy"] == "agentic_source_page_routed"
+        assert engine["agentic_source_page_routed"]["parse_calls"] == 1
+
+    @pytest.mark.asyncio
+    async def test_new_extract_job_does_not_read_document_latest_parse(self, monkeypatch):
+        _patch_env(
+            monkeypatch,
+            llm_responses=[_llm_result('{"report_no": "PRIVATE"}')],
+        )
+        monkeypatch.setattr(
+            extract_service.result_service,
+            "get_document_parse_result",
+            AsyncMock(side_effect=AssertionError("document latest ParseResult must not be read")),
+        )
+
+        assert await handle_extract_job(_job()) == {"report_no": "PRIVATE"}
+
+    @pytest.mark.asyncio
+    async def test_extract_retry_reuses_only_its_bound_parse(self, monkeypatch):
+        bound_job = _job(parse_result_id=RESULT_ID)
+        _patch_env(
+            monkeypatch,
+            parse_row=_parse_row(),
+            llm_responses=[_llm_result('{"report_no": "RETRY"}')],
+        )
+        parser = extract_service.get_parser_adapter()
+        monkeypatch.setattr(parser, "parse", AsyncMock(side_effect=AssertionError("retry reparsed")))
+        monkeypatch.setattr(extract_service, "get_parser_adapter", lambda params=None: parser)
+
+        assert await handle_extract_job(bound_job) == {"report_no": "RETRY"}
 
     @pytest.mark.asyncio
     async def test_per_page_units_in_order(self, monkeypatch):
@@ -375,7 +498,7 @@ class TestHandleExtract:
         assert payload == [{"report_no": "P1"}, {"report_no": "P2"}]
         data, engine = _committed_ok()
         assert data == payload
-        assert engine["usage"]["requests"] == 2
+        assert engine["usage"]["requests"] == 3
 
     @pytest.mark.asyncio
     async def test_second_page_failure_commits_failed_without_partial_result(self, monkeypatch):
@@ -442,7 +565,7 @@ class TestHandleExtract:
 
         assert payload == {"report_no": "WT-2"}
         _, engine = _committed_ok()
-        assert engine["usage"]["requests"] == 2
+        assert engine["usage"]["requests"] == 3
 
     @pytest.mark.asyncio
     async def test_repair_exhausted_fails(self, monkeypatch):
@@ -504,7 +627,7 @@ class TestHandleExtract:
 
         assert payload == {"report_no": "WT-4"}
         _, engine = _committed_ok()
-        assert engine["usage"]["requests"] == 2
+        assert engine["usage"]["requests"] == 3
 
     @pytest.mark.asyncio
     async def test_transport_error_retries_within_budget(self, monkeypatch):
@@ -520,7 +643,7 @@ class TestHandleExtract:
 
         assert payload == {"report_no": "WT-5"}
         _, engine = _committed_ok()
-        assert engine["usage"]["requests"] == 2
+        assert engine["usage"]["requests"] == 3
 
     @pytest.mark.asyncio
     async def test_non_transport_error_does_not_retry(self, monkeypatch):
@@ -746,7 +869,7 @@ class TestHandleExtract:
             llm_responses=[_llm_result('{"report_no": "WT-10"}')],
         )
         monkeypatch.setattr(
-            extract_service, "bind_extract_parse_result",
+            extract_service, "commit_extract_parse_result",
             AsyncMock(side_effect=RuntimeError("timeout")),
         )
         monkeypatch.setattr(extract_service, "get_job", AsyncMock(return_value=fresh))
@@ -754,7 +877,7 @@ class TestHandleExtract:
         payload = await handle_extract_job(_job())
 
         assert payload == {"report_no": "WT-10"}
-        assert extract_service.bind_extract_parse_result.await_count == 1
+        assert extract_service.commit_extract_parse_result.await_count == 1
 
     @pytest.mark.asyncio
     async def test_budget_wrapper_status_not_found(self, monkeypatch):

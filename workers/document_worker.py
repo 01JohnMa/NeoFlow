@@ -8,6 +8,7 @@ import os
 import socket
 from typing import Any, Dict, Optional
 
+import httpx
 from loguru import logger
 
 from api.jobs import claim_next_job, update_job_if_owned
@@ -69,7 +70,12 @@ async def run_forever(worker_id: Optional[str] = None) -> None:
         logger.opt(exception=exc).warning("Supabase 初始化失败，worker 将在任务执行时继续尝试")
 
     while True:
-        did_work = await poll_once(effective_worker_id)
+        try:
+            did_work = await poll_once(effective_worker_id)
+        except (httpx.HTTPError, OSError) as exc:
+            logger.warning(f"worker 队列连接暂时失败，将重试: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(settings.DOC_WORKER_POLL_INTERVAL_SECONDS)
+            continue
         if not did_work:
             await asyncio.sleep(settings.DOC_WORKER_POLL_INTERVAL_SECONDS)
 

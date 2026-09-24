@@ -39,11 +39,11 @@ The structured values produced for one Document by Extraction, in the shape sele
 _Avoid_: raw JSON, business table row, per-page sample
 
 **Parse Result**:
-The page- and block-structured markdown produced for one Document by Parsing, and the sole input to Extraction. Stored per Document and reused by every Configuration that consumes that Document.
+The page- and block-structured markdown produced for one Document by Parsing, and the sole input to one Extract Job. It is stored as a Job-owned `sample_key=parse` Result for audit and retry; a new Configuration or Extract Job does not reuse another Job's ParseResult.
 _Avoid_: OCR text, raw text
 
 **Document Page Index**:
-A derived page-level retrieval artifact that maps a Document's extraction questions to candidate physical pages. It helps route work to Parse pages, but it is not a Parse Result, field value, or authoritative extraction evidence.
+A Job-local derived page-level retrieval artifact that maps an Extract Job's questions to candidate physical pages. It helps route work to Parse pages, but it is not a Parse Result, field value, or authoritative extraction evidence.
 _Avoid_: canonical ParseResult, Extraction Result, business answer
 
 **Parse Mode**:
@@ -55,7 +55,7 @@ The result unit of one Extraction run — the whole document (`per_doc`) or each
 _Avoid_: granularity, chunking strategy, field scope
 
 **Extraction Strategy**:
-The execution shape for an Extract run. The target product model has three strategies: `full_document` sends the complete canonical Parse Result to the extractor; `source_page_routed` indexes pages from the uploaded source before Parse and only Parses retrieved pages; and `progressive_parse_routed` starts from an anchor Parse artifact and adds separately tracked Parse coverage for unresolved fields. The retired `page_routed` name referred to a complete-ParseResult experiment and is not a supported strategy. A strategy changes execution context and orchestration, not the Field Schema, Extraction Target, or Parse Mode, and is frozen with the Revision or Job snapshot when supported.
+The execution shape for an Extract run, with three selectable interface names: **Normal** (`full_document`) parses the complete source, **Agentic** (`source_page_routed`) retrieves source pages before parsing them, and **Agentic Plus** (`agentic_source_page_routed`) uses bounded iterative search and parsing before extraction; each uses a Job-owned ParseResult. These names leave API identifiers and the Normal default unchanged; a strategy changes execution context and orchestration, not the Field Schema, Extraction Target, or Parse Mode, and is frozen with the Revision or Job snapshot; the retired `page_routed` name is not supported.
 _Avoid_: Parse Mode, Extraction Target, Configuration Type
 
 ## Configurations and fields

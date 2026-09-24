@@ -77,6 +77,12 @@ function documentName(doc: Document | undefined, fallbackId: string): string {
   return doc.display_name || doc.original_file_name || doc.file_name || fallbackId
 }
 
+function extractionStrategyLabel(strategy?: string): string {
+  if (strategy === 'agentic_source_page_routed') return 'Agentic Plus'
+  if (strategy === 'source_page_routed') return 'Agentic'
+  return 'Normal'
+}
+
 function engineSummary(engine?: ExtractEngine | null): string | null {
   if (!engine) return null
   const parts: string[] = []
@@ -504,16 +510,24 @@ export function ExtractPlayground() {
                         </option>
                         {configs.map((config) => (
                           <option key={config.id} value={config.id}>
-                            {config.name}
+                            {config.name} · {extractionStrategyLabel(config.draft_definition?.extraction_strategy)}
                           </option>
                         ))}
                       </Select>
                       {selectedConfig && (
-                        <Badge variant={configurationStatusVariant(selectedConfig.status)}>
-                          {CONFIGURATION_STATUS_LABELS[selectedConfig.status]}
-                        </Badge>
+                        <>
+                          <Badge variant={configurationStatusVariant(selectedConfig.status)}>
+                            {CONFIGURATION_STATUS_LABELS[selectedConfig.status]}
+                          </Badge>
+                          <Badge variant="outline">
+                            抽取模式：{extractionStrategyLabel(selectedConfig.draft_definition?.extraction_strategy)}
+                          </Badge>
+                        </>
                       )}
                     </div>
+                    <p className="mt-2 text-xs text-text-muted">
+                      抽取模式在管理员配置中选择：Normal、Agentic 或 Agentic Plus。
+                    </p>
                     <div className="mt-3">
                       {definitionPreview.kind === 'schema' ? (
                         <pre className="max-h-40 overflow-auto rounded-lg border border-border-default bg-bg-secondary p-3 font-mono text-[11px] leading-relaxed text-text-secondary">

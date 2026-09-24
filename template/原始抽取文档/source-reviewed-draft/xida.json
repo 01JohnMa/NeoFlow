@@ -1,0 +1,108 @@
+{
+  "case_id": "xida",
+  "status": "source_reviewed_draft_requires_confirmation",
+  "method": "local text/source review only; no NeoFlow/MinerU/LLM service used for this review",
+  "review_flags": [
+    "样本量按开放期+双盲期合计348例",
+    "主要/次要终点按两个研究阶段拆开",
+    "批件号原文称CFDA临床批件号",
+    "中文标题和适应症按原文修正"
+  ],
+  "fields": [
+    {
+      "key": "trial_type",
+      "value": "药物"
+    },
+    {
+      "key": "trial_phase",
+      "value": "III期"
+    },
+    {
+      "key": "planned_subject_count",
+      "value": 348
+    },
+    {
+      "key": "project_name",
+      "value": "西达本胺联合依西美坦治疗激素受体阳性晚期乳腺癌的III期临床试验"
+    },
+    {
+      "key": "project_short_name",
+      "value": "ACE"
+    },
+    {
+      "key": "protocol_no",
+      "value": "CDM301"
+    },
+    {
+      "key": "protocol_name",
+      "value": "西达本胺联合依西美坦治疗激素受体阳性晚期乳腺癌的III期临床试验"
+    },
+    {
+      "key": "protocol_version",
+      "value": "V1.0"
+    },
+    {
+      "key": "sample_size",
+      "value": "开放期20例；双盲对照期328例（试验组219例、对照组109例）"
+    },
+    {
+      "key": "primary_endpoint",
+      "value": "开放期：PK/PD特征；双盲对照期：无进展生存期（PFS）"
+    },
+    {
+      "key": "drug_en_name",
+      "value": "Chidamide"
+    },
+    {
+      "key": "dosage_form",
+      "value": "片剂"
+    },
+    {
+      "key": "specification_model",
+      "value": "5mg"
+    },
+    {
+      "key": "combination_products",
+      "value": [
+        {
+          "name": "Exemestane",
+          "name_en": "Exemestane",
+          "specification_model": "25mg",
+          "dosage_form": "片剂"
+        }
+      ]
+    },
+    {
+      "key": "nmpa_document_no",
+      "value": "2010L02920"
+    },
+    {
+      "key": "indication",
+      "value": "经内分泌治疗失败的激素受体阳性晚期乳腺癌"
+    },
+    {
+      "key": "study_objective",
+      "value": "开放期：观察西达本胺片与依西美坦片联合治疗的PK、PD特征，并评价初步疗效和安全性；双盲对照期：评价西达本胺片联合依西美坦片的疗效和安全性，为增加新适应症上市审批提供支持依据。"
+    },
+    {
+      "key": "study_design",
+      "value": "开放期为多中心、开放、单臂设计；双盲对照期为多中心、随机、双盲、安慰剂对照设计，按2:1分配试验组和对照组。"
+    },
+    {
+      "key": "multisite_flag",
+      "value": "是"
+    },
+    {
+      "key": "drug_cn_name",
+      "value": "西达本胺"
+    },
+    {
+      "key": "study_group",
+      "value": "试验组：西达本胺片+依西美坦片；对照组：西达本胺模拟片（安慰剂）+依西美坦片"
+    },
+    {
+      "key": "secondary_endpoint",
+      "value": "开放期：客观缓解率（ORR）、无进展生存期（PFS）；双盲对照期：总生存期（OS）、缓解持续时间（DOR）、客观缓解率（ORR）、临床获益率（CBR）；全程安全性评价。"
+    }
+  ]
+}

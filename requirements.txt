@@ -29,6 +29,9 @@ langchain-openai==1.6.2
 langchain-core==1.6.3
 langgraph==1.2.11
 openai-agents==0.22.2
+# Optional agentic source-page routing (FunctionAgent + OpenAI-compatible LLM)
+llama-index-core==0.14.25
+llama-index-llms-openai==0.7.10
 mcp>=1.19.0,<3
 sse-starlette>=3.0.3,<4
 

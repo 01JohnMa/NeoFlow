@@ -41,6 +41,7 @@ export interface ExtractResultResponse {
 export interface ExtractConfigurationDefinition {
   target?: string
   data_schema?: unknown
+  extraction_strategy?: 'full_document' | 'source_page_routed' | 'agentic_source_page_routed'
 }
 
 export interface ExtractConfiguration {
@@ -81,6 +82,11 @@ function normalizeAdminConfiguration(row: Record<string, unknown>): ExtractConfi
 }
 
 function normalizeTemplate(row: Record<string, unknown>): ExtractConfiguration {
+  const extractionStrategy = row.extraction_strategy === 'agentic_source_page_routed'
+    ? 'agentic_source_page_routed'
+    : row.extraction_strategy === 'source_page_routed'
+      ? 'source_page_routed'
+      : 'full_document'
   return {
     id: String(row.id),
     name: String(row.name ?? ''),
@@ -88,6 +94,7 @@ function normalizeTemplate(row: Record<string, unknown>): ExtractConfiguration {
     status: 'published',
     type: 'extract',
     current_revision_id: null,
+    draft_definition: { extraction_strategy: extractionStrategy },
     description: (row.description as string | null) ?? null,
   }
 }

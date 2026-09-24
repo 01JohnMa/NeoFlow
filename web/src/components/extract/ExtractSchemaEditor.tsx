@@ -22,7 +22,7 @@ interface Draft {
   schema: ExtractSchema | null
   ui: ExtractSchemaUi
   target: 'per_doc' | 'per_page'
-  extraction_strategy: 'full_document' | 'page_routed'
+  extraction_strategy: 'full_document' | 'source_page_routed' | 'agentic_source_page_routed'
   buffers: InlineBuffers
 }
 const control = 'w-full rounded-md border border-border-default bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50'
@@ -34,7 +34,7 @@ function initialDraft(definition: Props['definition']): Draft {
     schema: isRecord(definition.data_schema) ? clone(definition.data_schema) as ExtractSchema : null,
     ui: isRecord(definition.ui) ? clone(definition.ui) as ExtractSchemaUi : {},
     target: definition.target === 'per_page' ? 'per_page' : 'per_doc', buffers: {},
-    extraction_strategy: definition.extraction_strategy === 'page_routed' ? 'page_routed' : 'full_document',
+    extraction_strategy: definition.extraction_strategy === 'agentic_source_page_routed' ? 'agentic_source_page_routed' : definition.extraction_strategy === 'source_page_routed' ? 'source_page_routed' : 'full_document',
   }
 }
 function issue(schema: ExtractSchema | null): string | null {
@@ -312,11 +312,15 @@ export function ExtractSchemaEditor({ definition, readOnly = false, onSave, onDi
           {!readOnly && <><select aria-label="新增字段类型" className={control} style={{ width: 120 }} value={newKind} disabled={locked} onChange={(event) => setNewKind(event.target.value as BuilderType)}>{Object.entries(BUILDER_TYPES).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select><Button size="sm" disabled={locked} onClick={() => add('', newKind)}>新增字段</Button></>}
         </div>}
       </div>
-      <details className="rounded-lg border border-border-default p-3">
-        <summary className="cursor-pointer text-sm text-text-secondary">整体抽取说明与目标 <span className="ml-2 text-xs text-text-muted">{draft.target === 'per_doc' ? '整份文档' : '逐页'}</span></summary>
+      <details open className="rounded-lg border border-border-default p-3">
+        <summary className="cursor-pointer text-sm text-text-secondary">抽取目标与策略 <span className="ml-2 text-xs text-text-muted">{draft.target === 'per_doc' ? '整份文档' : '逐页'}</span></summary>
         <div className="mt-3 space-y-3">
           <label className="block space-y-1 text-sm"><span>抽取目标</span><select aria-label="抽取目标" className={control} value={draft.target} disabled={locked} onChange={(event) => { const target = event.target.value as Draft['target']; change((current) => ({ ...current, target, extraction_strategy: target === 'per_page' ? 'full_document' : current.extraction_strategy })) }}><option value="per_doc">整份文档 · 一个实例</option><option value="per_page">逐页 · 每页一个实例</option></select></label>
-          <label className="block space-y-1 text-sm"><span>页面策略</span><select aria-label="页面策略" className={control} value={draft.extraction_strategy} disabled={locked} onChange={(event) => { const extraction_strategy = event.target.value as Draft['extraction_strategy']; change((current) => ({ ...current, extraction_strategy })) }}><option value="full_document">完整文档</option><option value="page_routed" disabled={draft.target !== 'per_doc'}>按页面路由（仅整份文档）</option></select></label>
+          <label className="block space-y-1 text-sm"><span>抽取模式</span><select aria-label="抽取模式" className={control} value={draft.extraction_strategy} disabled={locked} onChange={(event) => { const extraction_strategy = event.target.value as Draft['extraction_strategy']; change((current) => ({ ...current, extraction_strategy })) }}><option value="full_document">Normal</option><option value="source_page_routed" disabled={draft.target !== 'per_doc'}>Agentic</option><option value="agentic_source_page_routed" disabled={draft.target !== 'per_doc'}>Agentic Plus</option></select></label>
+          <p className="text-xs text-text-muted">
+            {draft.extraction_strategy === 'full_document' ? 'Normal：完整解析文档后抽取。' : draft.extraction_strategy === 'source_page_routed' ? 'Agentic：检索相关页面，按需解析后抽取。' : 'Agentic Plus：由模型在预算内分轮搜索和解析页面，再进行抽取。'}
+            {' '}Agentic 与 Agentic Plus 仅支持整份文档抽取。
+          </p>
           {mode === 'builder' && <label className="block space-y-1 text-sm"><span>整体抽取说明</span><textarea aria-label="整体抽取说明" className={control} rows={3} value={draft.schema?.description ?? ''} disabled={locked} onChange={(event) => { const description = event.target.value; change((current) => ({ ...current, schema: { ...current.schema, description } })) }} /></label>}
           <p className="text-xs text-text-muted">说明写入 schema.description。找不到依据的可选字段省略；必填不代表允许编造。</p>
         </div>

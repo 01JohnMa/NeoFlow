@@ -3,7 +3,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Literal
 from loguru import logger
 
 from services.configuration_service import configuration_service
@@ -30,6 +30,7 @@ class ExtractionConfigurationResponse(BaseModel):
     code: Optional[str] = None
     description: Optional[str] = None
     is_active: bool = True
+    extraction_strategy: Literal["full_document", "source_page_routed", "agentic_source_page_routed"] = "full_document"
 
 
 class UpdateProfileRequest(BaseModel):
@@ -154,6 +155,7 @@ async def get_my_templates(user: CurrentUser = Depends(get_current_user)):
             "code": configuration.get("code"),
             "description": configuration.get("description"),
             "is_active": True,
+            "extraction_strategy": configuration.get("extraction_strategy") or "full_document",
         }
         for configuration in configurations
     ]
@@ -178,5 +180,4 @@ async def get_my_template_detail(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     return configuration
-
 

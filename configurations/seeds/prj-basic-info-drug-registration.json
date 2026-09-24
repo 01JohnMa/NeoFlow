@@ -5,6 +5,7 @@
   "type": "extract",
   "definition": {
     "target": "per_doc",
+    "extraction_strategy": "source_page_routed",
     "data_schema": {
       "type": "object",
       "description": "只依据文档提取立项基本信息。可选字段无依据则省略，不输出 null 或空值占位。场景名称不是文档证据，不自动填入试验类型或注册类型。仅输出以字段键为属性的 JSON 对象，不输出 fields/value/confidence/source 包装。",
@@ -147,7 +148,7 @@
         },
         "study_objective": {
           "type": "string",
-          "description": "试验目的章节的完整原文摘录；保留申办方、研究产品和评价目标等限定信息，不自行缩写。"
+          "description": "只提取试验目的字段/章节中的目标句；保留研究产品和评价目标，不把相邻的申办方、CRO或研究单位字段拼入。"
         },
         "study_design": {
           "type": "string",

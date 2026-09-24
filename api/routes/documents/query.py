@@ -106,7 +106,7 @@ async def get_document_parse_result(
     document_id: str,
     user: CurrentUser = Depends(get_current_user)
 ):
-    """读取文档最新的 Parse Result（权限同提取结果）。"""
+    """读取文档最近一次 Parse 产物供检查；不作为 Extract 输入。"""
     try:
         doc_result = await _run_supabase(
             lambda: supabase_service.client.table("documents").select("*").eq("id", document_id).execute()
@@ -128,6 +128,7 @@ async def get_document_parse_result(
         return {
             "success": True,
             "result_id": row.get("id"),
+            "job_id": row.get("job_id"),
             "data": row.get("data") or {},
         }
 

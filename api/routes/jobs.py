@@ -190,11 +190,7 @@ async def get_job_parse_result(
     job_id: str,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """读取 Job 的 ParseResult（data JSONB）。
-
-    parse Job 直接按 job_id 命中；抽取等内联解析的 Job 其 ParseResult
-    写入时 job_id 为空，回退按 Job 关联文档取最新 ParseResult。
-    """
+    """读取当前 Job 自己的 ParseResult（data JSONB）。"""
     job = await get_job(job_id)
     if not job or not await _can_access_job(job, user):
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -208,18 +204,11 @@ async def get_job_parse_result(
         (row for row in results if row.get("sample_key") == PARSE_SAMPLE_KEY),
         None,
     )
-    if not parse_row:
-        for document_id in job.get("document_ids") or []:
-            parse_row = await result_service.get_document_parse_result(
-                document_id,
-                tenant_id=job.get("tenant_id"),
-            )
-            if parse_row:
-                break
+    if parse_row and str(parse_row.get("job_id") or "") != str(job_id):
+        parse_row = None
     if not parse_row:
         raise HTTPException(status_code=404, detail="解析结果不存在")
 
-    # 回退路径可能命中其他文档的最新 Parse：仍须通过文档授权
     if parse_row.get("document_id"):
         document = await supabase_service.get_document(str(parse_row["document_id"]))
         if not document or not _can_access_document(document, user):
@@ -245,4 +234,3 @@ def _can_access_document(document: Dict[str, Any], user: CurrentUser) -> bool:
     if document.get("user_id") != user.user_id:
         return False
     return not user.tenant_id or document.get("tenant_id") == user.tenant_id
-

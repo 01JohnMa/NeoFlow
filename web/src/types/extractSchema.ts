@@ -18,7 +18,7 @@ export interface ExtractAuthoringDefinition {
   data_schema: ExtractSchema
   target?: 'per_doc' | 'per_page'
   ui?: ExtractSchemaUi
-  extraction_strategy?: 'full_document' | 'page_routed'
+  extraction_strategy?: 'full_document' | 'source_page_routed' | 'agentic_source_page_routed'
 }
 
 export type ExtractResultView =

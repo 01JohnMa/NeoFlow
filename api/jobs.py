@@ -298,6 +298,36 @@ async def bind_extract_parse_result(
     return (row or {}).get("out_status")
 
 
+async def commit_extract_parse_result(
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    parse_data: Dict[str, Any],
+    engine: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """原子写入并绑定当前 Extract Job 的 ParseResult（迁移 030）。"""
+    result = await _run_db(
+        lambda: supabase_service.client.rpc(
+            "commit_extract_parse_result",
+            {
+                "p_job_id": job_id,
+                "p_worker_id": worker_id,
+                "p_attempts": attempts,
+                "p_parse_data": parse_data,
+                "p_engine": engine,
+            },
+        ).execute()
+    )
+    data = result.data or []
+    row = data if isinstance(data, dict) else (data[0] if data else None)
+    row = row or {}
+    return {
+        "status": row.get("out_status"),
+        "result_id": row.get("out_parse_result_id"),
+        "reason": row.get("out_reason"),
+    }
+
+
 async def consume_extract_request(
     job_id: str,
     worker_id: str,

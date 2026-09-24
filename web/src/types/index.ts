@@ -30,6 +30,7 @@ export interface ConfigurationParseSection {
 export interface ConfigurationDefinition {
   data_schema?: ExtractSchema
   target?: 'per_doc' | 'per_page'
+  extraction_strategy?: 'full_document' | 'source_page_routed' | 'agentic_source_page_routed'
   ui?: ExtractSchemaUi
   // Other operation types still have their own configuration sections.
   fields?: ConfigurationField[]

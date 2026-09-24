@@ -65,6 +65,8 @@ uvicorn api.main:app --reload --port 8080
 python -m workers.document_worker
 ```
 
+本地测试必须同时保持 API 和 worker 运行。`/api/health` 正常只表示 API 可用；若任务一直是 `queued`、`attempts=0`、`started_at` 为空，应先检查 worker 进程和日志。worker 遇到队列连接的短暂网络错误会等待轮询间隔后重试。
+
 ### 4. 启动前端
 
 ```bash

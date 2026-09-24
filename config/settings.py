@@ -93,9 +93,20 @@ class Settings(BaseSettings):
     EMBEDDING_QUERY_INSTRUCTION: str = ""
     EMBEDDING_DOCUMENT_INSTRUCTION: str = ""
 
-    PAGE_ROUTED_TOP_K: int = 5
-    PAGE_ROUTED_NEIGHBOR_PAGES: int = 1
-    PAGE_ROUTED_MAX_PAGES: int = 20
+    # ============ Source-page routing ============
+    SOURCE_PAGE_MIN_TEXT_CHARS: int = 40
+    SOURCE_PAGE_RENDER_DPI: int = 144
+    SOURCE_PAGE_MAX_IMAGE_BYTES: int = 5 * 1024 * 1024
+    SOURCE_PAGE_IMAGE_API_KEY: str = ""
+    SOURCE_PAGE_IMAGE_BASE_URL: str = "https://dashscope.aliyuncs.com"
+    SOURCE_PAGE_IMAGE_MODEL: str = "qwen3-vl-embedding"
+    SOURCE_PAGE_IMAGE_DIMENSION: int = 1024
+
+    # ============ Agentic source-page routing ==========
+    AGENTIC_MAX_SEARCH_TOOLS: int = 8
+    AGENTIC_MAX_PARSE_CALLS: int = 2
+    AGENTIC_MAX_UNIQUE_PAGES: int = 24
+    AGENTIC_MAX_TURNS: int = 12
 
     # ============ MinerU 解析（#8；key 由本地 .env 提供，不入库） ============
     MINERU_API_KEY: str = ""
