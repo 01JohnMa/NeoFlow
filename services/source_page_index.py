@@ -14,6 +14,7 @@ import os
 import json
 import subprocess
 import tempfile
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
@@ -68,6 +69,7 @@ class SourcePageCandidate:
     page_no: int
     score: float
     reasons: Sequence[str]
+    sources: Sequence[str] = ()
 
 
 def _source_hash(path: str) -> str:
@@ -282,8 +284,83 @@ async def retrieve_source_pages(index: SourcePageIndex, queries: Dict[str, str],
         query_vectors = await embed([query for _, query in batch])
         _validated_vectors([{"index": i, "embedding": vector} for i, vector in enumerate(query_vectors)],
                            len(batch), len(vectors[0]), "source_query_embedding_invalid")
-        for (path, _), query_vector in zip(batch, query_vectors):
+        for (path, query), query_vector in zip(batch, query_vectors):
             ranked = sorted(zip(index.pages, vectors), key=lambda pair: (-_cosine(query_vector, pair[1]), pair[0].page_no))
-            result[path] = [SourcePageCandidate(page.page_no, _cosine(query_vector, vector), [f"{page.modality}-vector"])
-                            for page, vector in ranked[:2]]
+            # The vector top-2 remains the baseline.  Lightweight structural
+            # hints are merged when the page text itself contains a heading or
+            # table cue matching the field description; this does not require a
+            # document-specific schema or a second index.
+            selected: Dict[int, SourcePageCandidate] = {}
+            for page, vector in ranked[:2]:
+                score = _cosine(query_vector, vector)
+                selected[page.page_no] = SourcePageCandidate(
+                    page.page_no, score, [f"{page.modality}-vector"], ["embedding"]
+                )
+            structural = _structural_candidates(index.pages, query)
+            for page, score in structural:
+                existing = selected.get(page.page_no)
+                if existing:
+                    selected[page.page_no] = SourcePageCandidate(
+                        existing.page_no, max(existing.score, score),
+                        list(dict.fromkeys([*existing.reasons, "structural"])),
+                        list(dict.fromkeys([*existing.sources, "structural"])),
+                    )
+                else:
+                    selected[page.page_no] = SourcePageCandidate(
+                        page.page_no, score, ["structural"], ["structural"]
+                    )
+            if _needs_neighbor_expansion(query):
+                base_pages = list(selected)
+                for page_no in base_pages:
+                    for neighbor_no in (page_no - 1, page_no + 1):
+                        if neighbor_no < 1 or neighbor_no > len(index.pages):
+                            continue
+                        if neighbor_no not in selected:
+                            selected[neighbor_no] = SourcePageCandidate(
+                                neighbor_no, 0.0, ["neighbor"], ["neighbor"]
+                            )
+                        else:
+                            current = selected[neighbor_no]
+                            selected[neighbor_no] = SourcePageCandidate(
+                                current.page_no, current.score,
+                                list(dict.fromkeys([*current.reasons, "neighbor"])),
+                                list(dict.fromkeys([*current.sources, "neighbor"])),
+                            )
+            result[path] = sorted(selected.values(), key=lambda candidate: (-candidate.score, candidate.page_no))
     return result
+
+
+_STRUCTURAL_TOKEN_RE = re.compile(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}")
+_HEADING_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十百0-9]+[章节部分]|[0-9]{1,3}(?:\.[0-9]+){0,3}[、.]?)\s*")
+
+
+def _query_tokens(value: str) -> set[str]:
+    return {token.lower() for token in _STRUCTURAL_TOKEN_RE.findall(value or "") if len(token) >= 2}
+
+
+def _structural_candidates(pages: Sequence[SourcePage], query: str) -> List[tuple[SourcePage, float]]:
+    """Find cheap heading/table matches from already-read page text.
+
+    This is intentionally lexical and conservative: it only contributes pages
+    with a positive overlap and never replaces embedding retrieval.
+    """
+    tokens = _query_tokens(query)
+    if not tokens:
+        return []
+    matches: List[tuple[SourcePage, float]] = []
+    for page in pages:
+        lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+        headings = [line for line in lines if len(line) <= 160 and _HEADING_RE.search(line)]
+        haystack = " ".join(headings or lines[:3]).lower()
+        overlap = sum(1 for token in tokens if token in haystack)
+        table_cue = sum(marker in page.text for marker in ("|", "项目", "规格", "剂量", "用药"))
+        if overlap or (table_cue >= 2 and any(token in page.text for token in tokens)):
+            matches.append((page, min(0.99, 0.55 + 0.08 * overlap + 0.03 * table_cue)))
+    return sorted(matches, key=lambda item: (-item[1], item[0].page_no))[:4]
+
+
+def _needs_neighbor_expansion(query: str) -> bool:
+    lowered = (query or "").lower()
+    return any(marker in lowered for marker in (
+        "列表", "逐条", "完整", "定义", "时间点", "表格", "产品", "标准", "criteria", "endpoint", "table"
+    ))

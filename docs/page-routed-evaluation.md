@@ -6,9 +6,9 @@ This document records historical comparison artifacts. `page_routed` is retired 
 
 The evaluation separates the three product paths described in Issue #33:
 
-1. **`full_document` — fixed full flow.** Parse the complete document once, then send the complete canonical ParseResult to one extraction call. This is the compatibility baseline.
-2. **`agentic` — bounded adaptive workflow.** The agent may choose a sequence of Parse and Extract actions, but every turn, Parse call, token, and wall-clock budget is hard; exceeding a limit fails the Job. Each Parse artifact is Job-private, and the agent must use the real MinerU adapter for source parsing. There is no full-document fallback, silent downgrade, or unbounded retry. This is an experimental supported option; its evaluation evidence must not be presented as rollout approval.
-3. **`source_page_routed` — source-first route.** Inspect the uploaded source page by page; use native text for usable born-digital pages and images for scanned pages; retrieve top-two candidates per field, parse only the union with MinerU, then extract from that partial artifact. This is the target experiment for reducing first-time MinerU work.
+1. **Normal (`full_document`) — fixed full flow.** Parse the complete document once, then send the complete Job-owned ParseResult to one extraction call. This is the compatibility baseline.
+2. **Agentic (`source_page_routed`) — bounded source-page route.** Inspect the uploaded source page by page; use native text for usable born-digital pages and images for scanned pages; merge structural candidates with embedding top-two candidates, parse only the union with MinerU, then extract from that partial artifact. This is the target experiment for reducing first-time MinerU work.
+3. **Agentic Plus (`agentic_source_page_routed`) — bounded adaptive workflow.** The agent may choose a bounded sequence of search and Parse actions, but every turn, Parse call, token, and wall-clock budget is hard; exceeding a limit fails the Job. Each Parse artifact is Job-private. There is no full-document fallback, silent downgrade, or unbounded retry.
 
 Historical `page_routed` numbers below are retained only to explain earlier measurements. They must not be used as evidence for the current implementation or enabled in new jobs.
 

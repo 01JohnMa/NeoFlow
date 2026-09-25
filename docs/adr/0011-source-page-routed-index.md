@@ -32,6 +32,10 @@ The selected page ranges are sent to one bounded Parse request within the curren
 6. Submit one `page_ranges` Parse request for the union. Bind the resulting partial artifact to this Extract Job, then run the existing schema/evidence extraction logic over the parsed pages.
 7. Record candidate pages, parsed pages, partial ParseResult identity, embedding requests, Parse requests, Extract requests, unresolved fields, and terminal outcome for comparison with `full_document`.
 
+The source-page implementation may add conservative lexical candidates from page headings, numbered sections, directory-like lines, and table cues already present in the page text. These candidates are merged with the embedding top-two baseline and are recorded as `structural`, `embedding`, or `neighbor` sources. List/table/product-like field descriptions may add immediate neighbor pages; this is a generic description-driven heuristic, not a clinical-protocol field-name rule.
+
+The Extract validation seam performs the same generic checks for the canonical 40-field template used by the training package: empty values are unresolved, enum/date/number values remain schema-checked, numbered lists are checked for structural gaps, product rows require a name and valid nested enums, and evidence pages must belong to the Job input. No field-specific rule is added for `trial_phase`, NMPA, or the Apple case.
+
 ## Consequences
 
 - Born-digital documents avoid full MinerU Parse before routing; source-page text extraction and embedding become the index cost.

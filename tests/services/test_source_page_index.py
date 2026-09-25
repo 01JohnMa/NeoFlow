@@ -77,6 +77,32 @@ async def test_retrieve_top2_per_field_and_dedicated_image_query(monkeypatch):
     assert stages == ["source_page_image_query_embedding"]
 
 
+@pytest.mark.asyncio
+async def test_retrieve_merges_structural_and_neighbor_candidates(monkeypatch):
+    index = module.SourcePageIndex(
+        source_hash="sha",
+        pages=[
+            module.SourcePage(1, "text", text="封面"),
+            module.SourcePage(2, "text", text="4.2 入选标准\n1) 年龄符合\n2) 诊断明确"),
+            module.SourcePage(3, "text", text="入选标准续表\n3) 签署知情同意"),
+            module.SourcePage(4, "text", text="其他章节"),
+        ],
+        vectors=[[1.0, 0.0], [0.8, 0.0], [0.7, 0.0], [0.6, 0.0]],
+        profile="test",
+        embedding_space="text",
+    )
+
+    async def text_vectors(values, **kwargs):
+        return [[1.0, 0.0] for _ in values]
+
+    monkeypatch.setattr(module, "_openai_text_embeddings", text_vectors)
+    result = await module.retrieve_source_pages(index, {"/criteria": "入选标准 完整列表"})
+    rows = result["/criteria"]
+    assert {row.page_no for row in rows} >= {1, 2, 3}
+    assert any("structural" in row.sources for row in rows)
+    assert any("neighbor" in row.sources for row in rows)
+
+
 def test_compact_page_ranges_restores_physical_page_numbers():
     assert module.compact_page_ranges([7, 1, 2, 4, 5, 6, 6]) == "1-2,4-7"
 

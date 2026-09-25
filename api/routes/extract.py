@@ -28,6 +28,7 @@ from services.extract_service import (
 from services.result_service import result_service
 from services.extract_result_view import resolve_result_view
 from services.supabase_service import supabase_service
+from services.template_contract import is_canonical_schema, project_fields
 
 router = APIRouter(tags=["抽取能力"])
 
@@ -127,12 +128,20 @@ async def _result_response(row: Dict[str, Any], job: Optional[Dict[str, Any]], u
     except Exception:
         # Schema/metadata retrieval is separate from access to the already-authorized result.
         view = {"status": "unavailable", "reason": "view_load_failed"}
+    template_data = None
+    if view.get("status") == "available" and is_canonical_schema(view.get("schema") or {}):
+        data = row.get("data")
+        if isinstance(data, dict):
+            template_data = project_fields(data)
+        elif isinstance(data, list):
+            template_data = [project_fields(item) for item in data if isinstance(item, dict)]
     return {
         "success": True,
         "result_id": row.get("id"),
         "job_id": row.get("job_id"),
         "config_revision_id": row.get("config_revision_id"),
         "data": row.get("data"),
+        "template_data": template_data,
         "engine": row.get("engine"),
         "view": view,
     }

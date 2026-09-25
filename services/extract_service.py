@@ -43,6 +43,8 @@ from services.extract_prompt import (
     strict_json_loads,
 )
 from services.extract_schema import check_schema, schema_hash, validate_value
+from services.business_validation import validate_template_values
+from services.template_contract import is_canonical_schema, load_template
 from services.agentic_source import AgenticSourceError, route_with_agent
 from services.llm_invoke import LLMResult, invoke_llm
 from services.parse_service import (
@@ -131,8 +133,11 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     strategy = params["extraction_strategy"] if "extraction_strategy" in params else FULL_DOCUMENT_STRATEGY
     if not isinstance(strategy, str) or strategy not in SUPPORTED_STRATEGIES:
         raise ExtractFailure("strategy_invalid", str(strategy))
-    if strategy == SOURCE_PAGE_ROUTED_STRATEGY and target != "per_doc":
-        raise ExtractFailure("strategy_target_not_supported", "source_page_routed 只支持 per_doc")
+    if strategy in {SOURCE_PAGE_ROUTED_STRATEGY, AGENTIC_SOURCE_PAGE_ROUTED_STRATEGY} and target != "per_doc":
+        raise ExtractFailure(
+            "strategy_target_not_supported",
+            "source_page_routed/agentic_source_page_routed 只支持 per_doc",
+        )
     if "data_schema" not in params:
         raise ExtractFailure("schema_missing", "缺少 data_schema；不再支持 fields 回退")
     schema = params["data_schema"]
@@ -201,6 +206,20 @@ def validate_output(target: str, schema: Dict[str, Any], payload: Any) -> List[D
                 {"json_path": f"$[{index}]{issue['json_path'][1:]}", "message": issue["message"]}
             )
     return issues
+
+
+def validate_business_output(schema: Dict[str, Any], payload: Any) -> List[Dict[str, Any]]:
+    """Run generic business-shape checks for the canonical template only.
+
+    The validator is shape-driven; it does not know field names such as
+    ``trial_phase`` or any document-specific business rule. Other arbitrary
+    user schemas continue to use their JSON Schema contract alone.
+    """
+    if not is_canonical_schema(schema):
+        return []
+    if not isinstance(payload, dict):
+        return [{"key": "$", "code": "invalid_payload", "message": "抽取结果必须是对象"}]
+    return validate_template_values(load_template(), payload)
 
 
 def classify_finish(reason: Optional[str]) -> str:
@@ -481,6 +500,12 @@ async def _source_page_parse_and_bind(
         "source_hash": index.source_hash,
         "selected_pages": selected,
         "page_ranges": page_ranges,
+        "candidate_sources": {
+            str(page): sorted({source for candidate in rows if candidate.page_no == page for source in (candidate.sources or candidate.reasons)})
+            for page in selected
+            for rows in candidates.values()
+            if any(candidate.page_no == page for candidate in rows)
+        },
         "modalities": {str(page.page_no): page.modality for page in index.pages if page.page_no in selected},
         "index_profile": index.profile,
     }
@@ -812,6 +837,15 @@ async def _run_unit(
             continue
 
         errors = validate_value(schema, value)
+        if not errors:
+            business_issues = validate_business_output(schema, value)
+            errors = [
+                {
+                    "json_path": f"$.{issue.get('key', '')}" if issue.get("key") else "$",
+                    "message": str(issue.get("message") or issue.get("code") or "业务校验失败"),
+                }
+                for issue in business_issues
+            ]
         if errors:
             if repair_sent or budget_left <= 0:
                 raise ExtractFailure("schema_validation_failed", f"{unit['id']}: {errors[0]}")
@@ -1137,6 +1171,14 @@ async def handle_extract_job(
             )
             payload = assemble(spec["target"], outputs)
             final_errors = validate_output(spec["target"], spec["data_schema"], payload)
+            if not final_errors and spec["target"] == "per_doc":
+                final_errors = [
+                    {
+                        "json_path": f"$.{issue.get('key', '')}" if issue.get("key") else "$",
+                        "message": str(issue.get("message") or issue.get("code") or "业务校验失败"),
+                    }
+                    for issue in validate_business_output(spec["data_schema"], payload)
+                ]
             if final_errors:
                 raise ExtractFailure("final_validation_failed", str(final_errors[0]))
             engine = build_engine(

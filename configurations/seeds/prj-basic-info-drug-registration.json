@@ -5,7 +5,7 @@
   "type": "extract",
   "definition": {
     "target": "per_doc",
-    "extraction_strategy": "source_page_routed",
+    "extraction_strategy": "full_document",
     "data_schema": {
       "type": "object",
       "description": "只依据文档提取立项基本信息。可选字段无依据则省略，不输出 null 或空值占位。场景名称不是文档证据，不自动填入试验类型或注册类型。仅输出以字段键为属性的 JSON 对象，不输出 fields/value/confidence/source 包装。",

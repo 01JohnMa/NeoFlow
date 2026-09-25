@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "project_kind": "personal",
+  "integration_branch": "neoflow2.0",
+  "publish_remotes": ["github"],
+  "remotes": {
+    "github": {
+      "role": "primary",
+      "url": "https://github.com/01JohnMa/NeoFlow.git",
+      "publish_requires_explicit_authorization": true
+    }
+  },
+  "retention_days": {
+    "task": 14,
+    "review": 1,
+    "snapshot": 7,
+    "merge-sim": 0,
+    "demo": 7,
+    "blocked": 14
+  },
+  "validation_commands": [
+    "PYTHONPATH=. .venv/bin/python -m pytest -q tests",
+    "npm run test",
+    "npm run build"
+  ]
+}

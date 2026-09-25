@@ -137,7 +137,7 @@ def test_seed_contract_and_sparse_values():
     assert 'nmpa_info' not in schema['properties']
     assert sum('enum' in n for n in schema['properties'].values()) == 8
     assert not schema.get('required')
-    assert definition['extraction_strategy'] == 'source_page_routed'
+    assert definition['extraction_strategy'] == 'full_document'
     for key in ('combination_products', 'control_products'):
         node = schema['properties'][key]
         assert node['type'] == 'array'
