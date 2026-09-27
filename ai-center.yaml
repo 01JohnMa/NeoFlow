@@ -38,12 +38,6 @@ environment:
   - name: DOC_WORKER_STALE_LOCK_SECONDS
     required: false
     sensitive: false
-  - name: LITELLM_BASE_URL
-    required: false
-    sensitive: false
-  - name: LITELLM_API_KEY
-    required: false
-    sensitive: true
   - name: LLM_MODEL_ID
     required: false
     sensitive: false
