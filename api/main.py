@@ -14,6 +14,7 @@ from api.exceptions import AppException
 from config.settings import settings
 from services.supabase_service import supabase_service
 from api.routes import documents_router, health_router
+from api.routes.health import health_check
 from api.routes.tenants import router as tenants_router
 from api.routes.configurations import router as configurations_router
 from api.routes.jobs import router as jobs_router
@@ -121,6 +122,14 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(health_router, prefix="/api", tags=["健康检查"])
+
+
+@app.get("/health", tags=["健康检查"])
+async def root_health_check():
+    """Compatibility health endpoint for runtimes that probe the root path."""
+    return await health_check()
+
+
 app.include_router(documents_router, prefix="/api/documents", tags=["文档处理"])
 app.include_router(tenants_router, prefix="/api", tags=["租户管理"])
 app.include_router(configurations_router, prefix="/api", tags=["配置管理"])

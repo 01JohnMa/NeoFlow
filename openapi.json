@@ -3662,6 +3662,26 @@
           "租户管理"
         ]
       }
+    },
+    "/health": {
+      "get": {
+        "description": "Compatibility health endpoint for runtimes that probe the root path.",
+        "operationId": "root_health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root Health Check",
+        "tags": [
+          "健康检查"
+        ]
+      }
     }
   }
 }
