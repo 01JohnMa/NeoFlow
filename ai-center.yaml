@@ -15,10 +15,10 @@ environment:
     required: true
     sensitive: true
   - name: JWT_SECRET
-    required: true
+    required: false
     sensitive: true
   - name: JWKS_URL
-    required: false
+    required: true
     sensitive: false
   - name: MINERU_API_KEY
     required: true
