@@ -76,8 +76,7 @@ async def invoke_llm(
     """调用一次模型；不隐藏失败、不重试。"""
     kwargs: Dict[str, Any] = {
         "model": settings.LLM_MODEL_ID,
-        "api_key": settings.LLM_API_KEY,
-        "base_url": settings.LLM_BASE_URL,
+        **settings.llm_connection(),
         "temperature": settings.LLM_TEMPERATURE,
         "max_retries": 0,
     }

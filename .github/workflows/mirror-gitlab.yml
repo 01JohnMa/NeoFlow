@@ -1,0 +1,25 @@
+name: Mirror release to GitLab
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      - name: Validate frozen OpenAPI
+        run: python scripts/export_openapi.py --check
+      - name: Mirror immutable tag to GitLab
+        env:
+          GITLAB_REPOSITORY: ${{ secrets.GITLAB_REPOSITORY }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          test -n "$GITLAB_REPOSITORY" -a -n "$GITLAB_TOKEN"
+          git remote add gitlab "https://oauth2:${GITLAB_TOKEN}@${GITLAB_REPOSITORY}"
+          git push gitlab "${GITHUB_REF_NAME}:${GITHUB_REF_NAME}"

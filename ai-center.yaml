@@ -1,0 +1,54 @@
+# Minimal AI Center publication contract for NeoFlow.
+runtime:
+  kind: python-http
+  command: [uvicorn, api.main:app, --host, 0.0.0.0, --port, "8000"]
+  port: 8000
+  healthcheck_path: /api/health
+environment:
+  - name: SUPABASE_URL
+    required: true
+    sensitive: false
+  - name: SUPABASE_ANON_KEY
+    required: true
+    sensitive: true
+  - name: SUPABASE_SERVICE_ROLE_KEY
+    required: true
+    sensitive: true
+  - name: JWT_SECRET
+    required: true
+    sensitive: true
+  - name: JWKS_URL
+    required: false
+    sensitive: false
+  - name: MINERU_API_KEY
+    required: true
+    sensitive: true
+  - name: MINERU_BASE_URL
+    required: true
+    sensitive: false
+  - name: DOC_WORKER_ID
+    required: true
+    sensitive: false
+  - name: DOC_PROCESS_MAX_CONCURRENCY
+    required: false
+    sensitive: false
+  - name: DOC_WORKER_POLL_INTERVAL_SECONDS
+    required: false
+    sensitive: false
+  - name: DOC_WORKER_STALE_LOCK_SECONDS
+    required: false
+    sensitive: false
+  - name: LITELLM_BASE_URL
+    required: false
+    sensitive: false
+  - name: LITELLM_API_KEY
+    required: false
+    sensitive: true
+  - name: LLM_MODEL_ID
+    required: false
+    sensitive: false
+  - name: SDK_MODEL_ID
+    required: false
+    sensitive: false
+worker:
+  command: [python, -m, workers.document_worker]

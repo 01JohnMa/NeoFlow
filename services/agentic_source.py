@@ -299,10 +299,11 @@ async def route_with_agent(
         # Keep this construction deliberately small; tool functions are the contract.
         # The model alias is only for LlamaIndex's context metadata. The actual
         # provider model is sent through additional_kwargs for OpenAI-compatible APIs.
+        connection = settings.llm_connection()
         llm = OpenAI(
             model="gpt-4o-mini",
-            api_key=settings.LLM_API_KEY,
-            api_base=settings.LLM_BASE_URL,
+            api_key=connection["api_key"],
+            api_base=connection["base_url"],
             temperature=settings.LLM_TEMPERATURE,
             additional_kwargs={
                 "model": settings.LLM_MODEL_ID,

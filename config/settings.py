@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.deepseek.com"
     LLM_TEMPERATURE: float = 0.5
+    LITELLM_BASE_URL: str = ""
+    LITELLM_API_KEY: str = ""
 
     # ============ OpenAI Agents SDK 配置 ============
     SDK_MODEL_ID: str = ""
@@ -113,6 +115,18 @@ class Settings(BaseSettings):
     MINERU_BASE_URL: str = "https://mineru.net"
     MINERU_POLL_INTERVAL_SECONDS: float = 5.0
     MINERU_PARSE_TIMEOUT_SECONDS: int = 900
+
+    def llm_connection(self, *, sdk: bool = False) -> dict[str, str]:
+        """Platform injection is an atomic pair; standalone SDK overrides remain local."""
+        url, key = self.LITELLM_BASE_URL.strip(), self.LITELLM_API_KEY.strip()
+        if bool(url) != bool(key):
+            raise ValueError("LITELLM_BASE_URL and LITELLM_API_KEY must be configured together")
+        if url:
+            return {"base_url": url, "api_key": key}
+        return {
+            "base_url": (self.SDK_BASE_URL or self.LLM_BASE_URL) if sdk else self.LLM_BASE_URL,
+            "api_key": (self.SDK_API_KEY or self.LLM_API_KEY) if sdk else self.LLM_API_KEY,
+        }
 
     @property
     def allowed_extensions_list(self) -> List[str]:

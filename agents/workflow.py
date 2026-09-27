@@ -33,8 +33,7 @@ class DocumentWorkflow:
     def __init__(self):
         self.llm = ChatOpenAI(
             model=settings.LLM_MODEL_ID,
-            api_key=settings.LLM_API_KEY,
-            base_url=settings.LLM_BASE_URL,
+            **settings.llm_connection(),
             temperature=settings.LLM_TEMPERATURE,
             model_kwargs={"response_format": {"type": "json_object"}},
         )
