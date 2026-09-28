@@ -43,7 +43,7 @@ from services.extract_prompt import (
     strict_json_loads,
 )
 from services.extract_schema import check_schema, schema_hash, validate_value
-from services.business_validation import validate_template_values
+from services.business_validation import clear_unsupported_enum_values, validate_template_values
 from services.template_contract import is_canonical_schema, load_template
 from services.agentic_source import AgenticSourceError, route_with_agent
 from services.llm_invoke import LLMResult, invoke_llm
@@ -58,6 +58,7 @@ from services.source_page_index import (
     build_source_page_index,
     compact_page_ranges,
     retrieve_source_pages,
+    select_source_pages,
 )
 from services.result_service import result_service
 from services.supabase_service import supabase_service
@@ -463,7 +464,10 @@ async def _source_page_parse_and_bind(
     except SourcePageIndexError as exc:
         raise ExtractFailure(exc.reason, exc.message) from exc
 
-    selected = sorted({candidate.page_no for rows in candidates.values() for candidate in rows})
+    selected, candidate_sources = select_source_pages(
+        candidates,
+        max_pages=settings.SOURCE_PAGE_MAX_SELECTED_PAGES,
+    )
     if not selected:
         raise ExtractFailure("source_page_no_candidates")
     page_ranges = compact_page_ranges(selected)
@@ -500,12 +504,8 @@ async def _source_page_parse_and_bind(
         "source_hash": index.source_hash,
         "selected_pages": selected,
         "page_ranges": page_ranges,
-        "candidate_sources": {
-            str(page): sorted({source for candidate in rows if candidate.page_no == page for source in (candidate.sources or candidate.reasons)})
-            for page in selected
-            for rows in candidates.values()
-            if any(candidate.page_no == page for candidate in rows)
-        },
+        "candidate_sources": candidate_sources,
+        "retrieval_units": len(index.chunks),
         "modalities": {str(page.page_no): page.modality for page in index.pages if page.page_no in selected},
         "index_profile": index.profile,
     }
@@ -586,10 +586,10 @@ async def _agentic_source_page_parse_and_bind(
             parse_pages,
             request_gate=request_gate,
             deadline=agent_deadline,
-            max_search_tools=getattr(settings, "AGENTIC_MAX_SEARCH_TOOLS", 8),
-            max_parse_calls=getattr(settings, "AGENTIC_MAX_PARSE_CALLS", 2),
-            max_unique_pages=getattr(settings, "AGENTIC_MAX_UNIQUE_PAGES", 64),
-            max_agent_turns=getattr(settings, "AGENTIC_MAX_TURNS", 16),
+            max_search_tools=settings.AGENTIC_MAX_SEARCH_TOOLS,
+            max_parse_calls=settings.AGENTIC_MAX_PARSE_CALLS,
+            max_unique_pages=settings.AGENTIC_MAX_UNIQUE_PAGES,
+            max_agent_turns=settings.AGENTIC_MAX_TURNS,
         )
     except AgenticSourceError as exc:
         raise ExtractFailure("agentic_source_failed", str(exc)) from exc
@@ -627,6 +627,7 @@ async def _agentic_source_page_parse_and_bind(
         "source_hash": index.source_hash,
         "selected_pages": all_pages,
         "page_ranges": compact_page_ranges(all_pages),
+        "retrieval_units": len(index.chunks),
         "modalities": {
             str(page.page_no): page.modality
             for page in index.pages
@@ -1170,6 +1171,14 @@ async def handle_extract_job(
                 deadline=deadline,
             )
             payload = assemble(spec["target"], outputs)
+            if spec["target"] == "per_doc" and is_canonical_schema(spec["data_schema"]) and isinstance(payload, dict):
+                # The extractor returns values only.  Use the current Job's
+                # ParseResult as the generic evidence boundary before final
+                # validation; unsupported enum inferences become unresolved.
+                source_text = "\n".join(
+                    unit["source"] for unit in plan_units("per_doc", parse_row.get("data") or {})
+                )
+                payload = clear_unsupported_enum_values(load_template(), payload, source_text)
             final_errors = validate_output(spec["target"], spec["data_schema"], payload)
             if not final_errors and spec["target"] == "per_doc":
                 final_errors = [

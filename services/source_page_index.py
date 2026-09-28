@@ -1,4 +1,4 @@
-"""Build a per-Extract-Job page index from the uploaded source file.
+"""Build a per-Extract-Job retrieval index from the uploaded source file.
 
 This module deliberately owns no Document-level cache.  Its records live for
 the current Extract execution only; a later Job builds its own index again.
@@ -56,11 +56,30 @@ class SourcePage:
 
 
 @dataclass(frozen=True)
+class SourceChunk:
+    """Job-local retrieval unit mapped back to one physical PDF page.
+
+    A chunk is deliberately smaller than a ParseResult page when headings or
+    tables make that boundary obvious.  MinerU still receives physical pages;
+    this object only improves recall and keeps the source provenance attached.
+    """
+
+    chunk_id: str
+    page_no: int
+    modality: str
+    text: str = ""
+    chunk_type: str = "page"
+    heading_path: Sequence[str] = ()
+    parent_chunk_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class SourcePageIndex:
     source_hash: str
     pages: Sequence[SourcePage]
     vectors: Sequence[Sequence[float]]
     profile: str
+    chunks: Sequence[SourceChunk]
     embedding_space: str = "text"
 
 
@@ -103,7 +122,10 @@ def _native_text(path: str, page_no: int) -> str:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise SourcePageIndexError("source_text_read_failed", f"page={page_no}: {exc}") from exc
-    return " ".join(output.split())
+    # Preserve line boundaries for cheap heading/table detection.  Flattening
+    # here made a page with "9.1.2 次要疗效指标" indistinguishable from body text.
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in output.splitlines()]
+    return "\n".join(line for line in lines if line)
 
 
 def _render_page(path: str, page_no: int) -> str:
@@ -219,7 +241,7 @@ async def _dashscope_text_embeddings(contents: Sequence[str]) -> List[List[float
 
 def _profile(space: str) -> str:
     # Cache/audit identity excludes credentials, includes preprocessing and provider settings.
-    values = {"version": 2, "space": space, "min_text_chars": settings.SOURCE_PAGE_MIN_TEXT_CHARS,
+    values = {"version": 3, "chunker": "heading-table-v1", "space": space, "min_text_chars": settings.SOURCE_PAGE_MIN_TEXT_CHARS,
               "dpi": settings.SOURCE_PAGE_RENDER_DPI, "max_image_bytes": min(settings.SOURCE_PAGE_MAX_IMAGE_BYTES, 5 * 1024 * 1024)}
     if space == "multimodal":
         values.update(endpoint=settings.SOURCE_PAGE_IMAGE_BASE_URL, model="qwen3-vl-embedding", dimension=1024, fusion=False)
@@ -238,32 +260,38 @@ async def build_source_page_index(file_path: str, *, request_gate=None) -> Sourc
     for page_no in range(1, count + 1):
         text = await asyncio.to_thread(_native_text, file_path, page_no)
         pages.append(SourcePage(page_no, "text" if len(text) >= settings.SOURCE_PAGE_MIN_TEXT_CHARS else "image", text))
+    chunks = _build_chunks(pages)
     space = "multimodal" if any(page.modality == "image" for page in pages) else "text"
-    vectors = [None] * len(pages)
-    text_positions = [i for i, page in enumerate(pages) if page.modality == "text"]
+    vectors = [None] * len(chunks)
+    text_positions = [i for i, chunk in enumerate(chunks) if chunk.modality == "text"]
     batch_size = 20 if space == "multimodal" else max(1, settings.EMBEDDING_MAX_BATCH_SIZE)
     for start in range(0, len(text_positions), batch_size):
         positions = text_positions[start:start + batch_size]
         if request_gate:
             await request_gate("source_page_text_embedding")
         embed = _dashscope_text_embeddings if space == "multimodal" else _openai_text_embeddings
-        batch = await embed([pages[i].text for i in positions])
+        batch = await embed([chunks[i].text for i in positions])
         for i, vector in zip(positions, batch):
             vectors[i] = vector
     # Render/send/discard one image at a time; never hold a whole scanned PDF as base64.
-    for i, page in enumerate(pages):
-        if page.modality == "image":
+    for i, chunk in enumerate(chunks):
+        if chunk.modality == "image":
             if request_gate:
                 await request_gate("source_page_image_embedding")
-            image = await asyncio.to_thread(_render_page, file_path, page.page_no)
+            image = await asyncio.to_thread(_render_page, file_path, chunk.page_no)
             vectors[i] = (await _dashscope_image_embeddings([image]))[0]
     _validated_vectors([{"index": i, "embedding": vector} for i, vector in enumerate(vectors)],
-                       len(pages), len(vectors[0]) if vectors and vectors[0] else None, "source_index_invalid")
-    return SourcePageIndex(source_hash, pages, vectors, _profile(space), space)
+                       len(chunks), len(vectors[0]) if vectors and vectors[0] else None, "source_index_invalid")
+    return SourcePageIndex(source_hash, pages, vectors, _profile(space), chunks, space)
 
 
 async def retrieve_source_pages(index: SourcePageIndex, queries: Dict[str, str], *, request_gate=None) -> Dict[str, List[SourcePageCandidate]]:
-    """Batch field queries once per provider batch and rank top two physical pages."""
+    """Batch field queries and rank logical chunks, returning physical pages.
+
+    Lexical/structural evidence is fused with dense similarity.  The returned
+    candidates remain page-shaped so the existing MinerU page-range boundary
+    and evidence contract do not change.
+    """
     result = {path: [] for path in queries}
     if not index.pages or not queries:
         return result
@@ -271,8 +299,11 @@ async def retrieve_source_pages(index: SourcePageIndex, queries: Dict[str, str],
         raise SourcePageIndexError("source_embedding_space_mismatch")
     if len({page.page_no for page in index.pages}) != len(index.pages):
         raise SourcePageIndexError("source_index_invalid", "duplicate physical pages")
+    if len(index.chunks) != len(index.vectors):
+        raise SourcePageIndexError("source_index_invalid", "chunk/vector cardinality")
+    units = list(index.chunks)
     vectors = _validated_vectors([{"index": i, "embedding": vector} for i, vector in enumerate(index.vectors)],
-                                 len(index.pages), None, "source_index_invalid")
+                                 len(units), None, "source_index_invalid")
     multimodal = index.embedding_space == "multimodal"
     embed = _dashscope_text_embeddings if multimodal else _openai_text_embeddings
     batch_size = 20 if multimodal else max(1, settings.EMBEDDING_MAX_BATCH_SIZE)
@@ -285,29 +316,34 @@ async def retrieve_source_pages(index: SourcePageIndex, queries: Dict[str, str],
         _validated_vectors([{"index": i, "embedding": vector} for i, vector in enumerate(query_vectors)],
                            len(batch), len(vectors[0]), "source_query_embedding_invalid")
         for (path, query), query_vector in zip(batch, query_vectors):
-            ranked = sorted(zip(index.pages, vectors), key=lambda pair: (-_cosine(query_vector, pair[1]), pair[0].page_no))
-            # The vector top-2 remains the baseline.  Lightweight structural
-            # hints are merged when the page text itself contains a heading or
-            # table cue matching the field description; this does not require a
-            # document-specific schema or a second index.
+            ranked = sorted(
+                zip(units, vectors),
+                key=lambda pair: (-_hybrid_score(pair[0], query, query_vector, pair[1]), pair[0].page_no, pair[0].chunk_id),
+            )
+            # Top-two remains the cheap baseline, but ranking now happens on
+            # logical chunks.  Multiple chunks can map to one physical page.
             selected: Dict[int, SourcePageCandidate] = {}
-            for page, vector in ranked[:2]:
-                score = _cosine(query_vector, vector)
-                selected[page.page_no] = SourcePageCandidate(
-                    page.page_no, score, [f"{page.modality}-vector"], ["embedding"]
+            for unit, vector in ranked[:2]:
+                lexical_score = _lexical_score(unit, query)
+                score = _hybrid_score(unit, query, query_vector, vector)
+                selected[unit.page_no] = SourcePageCandidate(
+                    unit.page_no, score,
+                    [f"{unit.modality}-vector", f"chunk:{unit.chunk_type}"]
+                    + (["lexical"] if lexical_score else []),
+                    ["embedding"] + (["lexical"] if lexical_score else []),
                 )
-            structural = _structural_candidates(index.pages, query)
-            for page, score in structural:
-                existing = selected.get(page.page_no)
+            structural = _structural_candidates(units, query)
+            for unit, score in structural:
+                existing = selected.get(unit.page_no)
                 if existing:
-                    selected[page.page_no] = SourcePageCandidate(
+                    selected[unit.page_no] = SourcePageCandidate(
                         existing.page_no, max(existing.score, score),
                         list(dict.fromkeys([*existing.reasons, "structural"])),
                         list(dict.fromkeys([*existing.sources, "structural"])),
                     )
                 else:
-                    selected[page.page_no] = SourcePageCandidate(
-                        page.page_no, score, ["structural"], ["structural"]
+                    selected[unit.page_no] = SourcePageCandidate(
+                        unit.page_no, score, ["structural", f"chunk:{unit.chunk_type}"], ["structural"]
                     )
             if _needs_neighbor_expansion(query):
                 base_pages = list(selected)
@@ -330,15 +366,97 @@ async def retrieve_source_pages(index: SourcePageIndex, queries: Dict[str, str],
     return result
 
 
+def select_source_pages(candidates: Dict[str, List[SourcePageCandidate]], *, max_pages: int) -> tuple[list[int], dict[str, list[str]]]:
+    """Merge and cap candidate pages without a document-specific rule.
+
+    Structural and embedding hits outrank pure neighbor expansion; the latter
+    only fills context when the cap leaves room.
+    """
+    by_page: dict[int, tuple[float, set[str]]] = {}
+    for rows in candidates.values():
+        for candidate in rows:
+            sources = set(candidate.sources or candidate.reasons)
+            bonus = 0.02 if "structural" in sources else 0.0
+            score = float(candidate.score) + bonus
+            current = by_page.get(candidate.page_no)
+            if current is None or score > current[0]:
+                by_page[candidate.page_no] = (score, sources)
+            elif score == current[0]:
+                by_page[candidate.page_no] = (score, current[1] | sources)
+    ranked = sorted(by_page.items(), key=lambda item: (-item[1][0], item[0]))
+    selected = sorted(page for page, _ in ranked[:max(1, int(max_pages))])
+    source_map = {str(page): sorted(by_page[page][1]) for page in selected}
+    return selected, source_map
+
+
 _STRUCTURAL_TOKEN_RE = re.compile(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}")
-_HEADING_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十百0-9]+[章节部分]|[0-9]{1,3}(?:\.[0-9]+){0,3}[、.]?)\s*")
+_HEADING_RE = re.compile(
+    r"^\s*(?:第\s*[一二三四五六七八九十百0-9]+[章节部分]|"
+    r"[0-9]{1,3}(?:\.[0-9]+){0,3}(?:[、.]|\s+))"
+)
 
 
 def _query_tokens(value: str) -> set[str]:
     return {token.lower() for token in _STRUCTURAL_TOKEN_RE.findall(value or "") if len(token) >= 2}
 
 
-def _structural_candidates(pages: Sequence[SourcePage], query: str) -> List[tuple[SourcePage, float]]:
+def _is_heading(line: str) -> bool:
+    return bool(_HEADING_RE.search(line))
+
+
+def _build_chunks(pages: Sequence[SourcePage]) -> List[SourceChunk]:
+    """Split only where the source exposes a heading; otherwise keep one page chunk."""
+    chunks: List[SourceChunk] = []
+    for page in pages:
+        if page.modality != "text" or not page.text.strip():
+            chunks.append(SourceChunk(f"p{page.page_no}-c0", page.page_no, page.modality, page.text, "page"))
+            continue
+        lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+        if not lines:
+            chunks.append(SourceChunk(f"p{page.page_no}-c0", page.page_no, page.modality, "", "page"))
+            continue
+        parts: List[List[str]] = []
+        current: List[str] = []
+        for line in lines:
+            if current and _is_heading(line):
+                parts.append(current)
+                current = []
+            current.append(line)
+        if current:
+            parts.append(current)
+        if len(parts) == 1:
+            chunks.append(SourceChunk(f"p{page.page_no}-c0", page.page_no, page.modality,
+                                       "\n".join(parts[0]), "page"))
+            continue
+        for offset, lines_for_chunk in enumerate(parts):
+            text = "\n".join(lines_for_chunk)
+            heading = lines_for_chunk[0] if _is_heading(lines_for_chunk[0]) else ""
+            chunk_type = "table" if ("|" in text or sum(marker in text for marker in ("规格", "剂量", "生产单位")) >= 2) else "section"
+            chunks.append(SourceChunk(
+                f"p{page.page_no}-c{offset}", page.page_no, page.modality, text,
+                chunk_type, (heading,) if heading else (), f"p{page.page_no}",
+            ))
+    return chunks
+
+
+def _lexical_score(unit: SourceChunk, query: str) -> float:
+    tokens = _query_tokens(query)
+    if not tokens:
+        return 0.0
+    heading = " ".join(unit.heading_path).lower()
+    body = (unit.text or "").lower()
+    heading_hits = sum(token in heading for token in tokens)
+    body_hits = sum(token in body for token in tokens)
+    return min(1.0, 0.18 * heading_hits + 0.06 * body_hits)
+
+
+def _hybrid_score(unit: SourceChunk, query: str, query_vector: Sequence[float], vector: Sequence[float]) -> float:
+    dense = _cosine(query_vector, vector)
+    lexical = _lexical_score(unit, query)
+    return 0.68 * dense + 0.32 * lexical
+
+
+def _structural_candidates(units: Sequence[SourceChunk], query: str) -> List[tuple[SourceChunk, float]]:
     """Find cheap heading/table matches from already-read page text.
 
     This is intentionally lexical and conservative: it only contributes pages
@@ -347,16 +465,16 @@ def _structural_candidates(pages: Sequence[SourcePage], query: str) -> List[tupl
     tokens = _query_tokens(query)
     if not tokens:
         return []
-    matches: List[tuple[SourcePage, float]] = []
-    for page in pages:
-        lines = [line.strip() for line in page.text.splitlines() if line.strip()]
+    matches: List[tuple[SourceChunk, float]] = []
+    for unit in units:
+        lines = [line.strip() for line in unit.text.splitlines() if line.strip()]
         headings = [line for line in lines if len(line) <= 160 and _HEADING_RE.search(line)]
-        haystack = " ".join(headings or lines[:3]).lower()
+        haystack = " ".join((*unit.heading_path, *(headings or lines[:3]))).lower()
         overlap = sum(1 for token in tokens if token in haystack)
-        table_cue = sum(marker in page.text for marker in ("|", "项目", "规格", "剂量", "用药"))
-        if overlap or (table_cue >= 2 and any(token in page.text for token in tokens)):
-            matches.append((page, min(0.99, 0.55 + 0.08 * overlap + 0.03 * table_cue)))
-    return sorted(matches, key=lambda item: (-item[1], item[0].page_no))[:4]
+        table_cue = sum(marker in unit.text for marker in ("|", "项目", "规格", "剂量", "用药"))
+        if overlap or (table_cue >= 2 and any(token in unit.text for token in tokens)):
+            matches.append((unit, min(0.99, 0.55 + 0.08 * overlap + 0.03 * table_cue)))
+    return sorted(matches, key=lambda item: (-item[1], item[0].page_no, item[0].chunk_id))[:8]
 
 
 def _needs_neighbor_expansion(query: str) -> bool:

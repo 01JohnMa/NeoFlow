@@ -49,6 +49,11 @@ async def test_retrieve_top2_per_field_and_dedicated_image_query(monkeypatch):
         vectors=[[1.0, 0.0], [1.0, 0.0], [0.9, 0.0]],
         profile="test",
         embedding_space="multimodal",
+        chunks=[
+            module.SourceChunk("p1-c0", 1, "text", "one"),
+            module.SourceChunk("p2-c0", 2, "image", ""),
+            module.SourceChunk("p3-c0", 3, "text", "three"),
+        ],
     )
     text_calls = []
     image_calls = []
@@ -90,6 +95,12 @@ async def test_retrieve_merges_structural_and_neighbor_candidates(monkeypatch):
         vectors=[[1.0, 0.0], [0.8, 0.0], [0.7, 0.0], [0.6, 0.0]],
         profile="test",
         embedding_space="text",
+        chunks=[
+            module.SourceChunk("p1-c0", 1, "text", "封面"),
+            module.SourceChunk("p2-c0", 2, "text", "4.2 入选标准\n1) 年龄符合\n2) 诊断明确", "section", ("4.2 入选标准",)),
+            module.SourceChunk("p3-c0", 3, "text", "入选标准续表\n3) 签署知情同意", "page"),
+            module.SourceChunk("p4-c0", 4, "text", "其他章节"),
+        ],
     )
 
     async def text_vectors(values, **kwargs):
@@ -105,6 +116,41 @@ async def test_retrieve_merges_structural_and_neighbor_candidates(monkeypatch):
 
 def test_compact_page_ranges_restores_physical_page_numbers():
     assert module.compact_page_ranges([7, 1, 2, 4, 5, 6, 6]) == "1-2,4-7"
+
+
+def test_chunker_splits_sections_without_splitting_numbered_items():
+    page = module.SourcePage(
+        22,
+        "text",
+        "9.1.1 主要疗效指标\n1）头痛消失比例\n2）复发率\n9.1.2 次要疗效指标\n1）无头痛比例",
+    )
+    chunks = module._build_chunks([page])
+    assert len(chunks) == 2
+    assert chunks[0].heading_path == ("9.1.1 主要疗效指标",)
+    assert chunks[1].heading_path == ("9.1.2 次要疗效指标",)
+    assert "1）头痛消失比例" in chunks[0].text
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retrieval_prefers_matching_heading_over_dense_tie(monkeypatch):
+    index = module.SourcePageIndex(
+        source_hash="sha",
+        pages=[module.SourcePage(22, "text", "9.1.2 次要疗效指标\n..."), module.SourcePage(3, "text", "其他章节")],
+        vectors=[[1.0, 0.0], [1.0, 0.0]],
+        profile="test",
+        chunks=[
+            module.SourceChunk("p22-c0", 22, "text", "9.1.2 次要疗效指标\n...", "section", ("9.1.2 次要疗效指标",)),
+            module.SourceChunk("p3-c0", 3, "text", "其他章节", "page"),
+        ],
+    )
+
+    async def vectors(values, **kwargs):
+        return [[1.0, 0.0] for _ in values]
+
+    monkeypatch.setattr(module, "_openai_text_embeddings", vectors)
+    result = await module.retrieve_source_pages(index, {"/secondary": "secondary_endpoint 次要疗效指标"})
+    assert result["/secondary"][0].page_no == 22
+    assert "lexical" in result["/secondary"][0].sources
 
 
 @pytest.mark.asyncio

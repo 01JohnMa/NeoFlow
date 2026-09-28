@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from copy import deepcopy
 from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -62,6 +64,54 @@ def validate_template_values(template: Mapping[str, Any], values: Mapping[str, A
                 if page_numbers is not None and page is not None and page not in page_numbers:
                     issues.append({"key": key, "code": "evidence_page_out_of_range", "message": f"证据页 {page} 不在本次输入范围"})
     return issues
+
+
+def clear_unsupported_enum_values(
+    template: Mapping[str, Any],
+    values: Mapping[str, Any],
+    source_text: str,
+) -> dict[str, Any]:
+    """Drop enum answers that have no literal source support.
+
+    This is intentionally schema-driven.  Binary yes/no fields are excluded
+    because documents commonly express them as "多中心"/"未投保" rather than
+    the literal option.  Other enum values must occur in the current Parse
+    input after whitespace/punctuation normalization; this prevents an agent
+    from turning a workflow phrase into an unsupported trial phase.
+    """
+    result = deepcopy(dict(values))
+    source = _compact(source_text)
+    if not source:
+        return result
+    for field in template.get("fields") or []:
+        if field.get("type") != "enum":
+            continue
+        key = str(field.get("key"))
+        value = result.get(key)
+        if _empty(value) or value in {"是", "否"}:
+            continue
+        if not _contains_option(source, _compact(str(value))):
+            # Internal results use omission for unresolved values.  The
+            # template projection adds the display-layer empty sentinel later;
+            # an empty string is not valid for an enum JSON Schema.
+            result.pop(key, None)
+    return result
+
+
+def _compact(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return re.sub(r"[\s\W_]+", "", normalized)
+
+
+def _contains_option(source: str, option: str) -> bool:
+    """Match an option without accepting a partial ASCII token."""
+    if not source or not option:
+        return False
+    if re.search(r"[a-z0-9]", option):
+        return re.search(
+            rf"(?<![a-z0-9]){re.escape(option)}(?![a-z0-9])", source,
+        ) is not None
+    return option in source
 
 
 def _schema_from_template(template: Mapping[str, Any]) -> dict[str, Any]:

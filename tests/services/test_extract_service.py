@@ -20,7 +20,7 @@ from services.extract_service import (
     validate_output,
 )
 from services.llm_invoke import LLMResult
-from services.source_page_index import SourcePage, SourcePageCandidate, SourcePageIndex
+from services.source_page_index import SourceChunk, SourcePage, SourcePageCandidate, SourcePageIndex
 
 JOB_ID = "99999999-9999-4999-8999-999999999999"
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -399,6 +399,7 @@ class TestHandleExtract:
             pages=[SourcePage(3, "text", text="page 3")],
             vectors=[[1.0, 0.0]],
             profile="test",
+            chunks=[SourceChunk("p3-c0", 3, "text", "page 3")],
         )
         monkeypatch.setattr(extract_service, "build_source_page_index", AsyncMock(return_value=index))
         monkeypatch.setattr(

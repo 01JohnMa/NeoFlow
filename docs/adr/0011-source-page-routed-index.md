@@ -10,29 +10,29 @@ All three extraction strategies remain selectable:
 |---|---|---|
 | Normal | `full_document` | Parse the complete source, then extract. |
 | Agentic | `source_page_routed` | Retrieve source pages, parse the selected pages, then extract. |
-| Agentic Plus | `agentic_source_page_routed` | Use bounded iterative search and parsing, then extract. |
+| Agentic Plus | `agentic_source_page_routed` | Use at most one follow-up search and Parse region, then extract. |
 
 These are display names only. API identifiers, execution algorithms, and the `full_document` default remain unchanged. Agentic names the fixed source-page routing strategy; Agentic Plus names the tool-driven routing strategy.
 
 ## Decision
 
-NeoFlow's `source_page_routed` extraction strategy starts from the uploaded source file, classifies each physical PDF page by usable text-layer availability, and builds a page index before creating a ParseResult owned by the current Extract Job. Born-digital pages use their native page text for a text embedding. Scanned or unusable-text pages are rendered as images for a cross-modal image embedding. A field name and description query the matching page modality; the top two pages per field are unioned and de-duplicated. There is no full-document fallback when no page is retrieved.
+NeoFlow's `source_page_routed` extraction strategy starts from the uploaded source file, classifies each physical PDF page by usable text-layer availability, and builds a Job-local retrieval index before creating a ParseResult owned by the current Extract Job. The index may contain heading, section, table, or paragraph chunks, with a page chunk as the fallback. Born-digital chunks use native page text for a text embedding. Scanned or unusable-text pages are rendered as images for a cross-modal image embedding. A field name and description query the matching chunk modality; the top two chunks per field are unioned, de-duplicated, and mapped back to physical pages. There is no full-document fallback when no page is retrieved.
 
 The router is generic. Its core understands physical page identity, page modality, text/image index records, field queries, candidate ranking, page-range construction, and bounded Parse/Extract execution. Document-specific structure is optional metadata supplied by a strategy profile: a profile may identify a summary region, directory anchors, section ranges, table expectations, or validation rules, but the core does not contain clinical-protocol field names or chapter numbers.
 
-The selected page ranges are sent to one bounded Parse request within the current Extract Job. The resulting partial Parse artifact is stored as `sample_key=parse` with the current Extract Job's `job_id` and records the source-document hash, requested physical pages, modality/index profile, Parse profile, and coverage. It is retained for audit and retry, but is never silently reused by another Configuration as input. `full_document` follows the same Job-owned binding while parsing the full source.
+The selected page ranges are sent to one bounded Parse request within the current Extract Job. Agentic Plus may make one additional search and Parse region, within the same Job budget. The resulting partial Parse artifact is stored as `sample_key=parse` with the current Extract Job's `job_id` and records the source-document hash, requested physical pages, modality/index profile, Parse profile, and coverage. It is retained for audit and retry, but is never silently reused by another Configuration as input. `full_document` follows the same Job-owned binding while parsing the full source.
 
 ## Execution contract
 
 1. Read the uploaded source and compute an immutable source hash.
 2. Inspect every physical page. Use native text when it is present and usable; otherwise render that page as an image. A mixed document may contain both modalities.
-3. Create a Job-local page index keyed in memory by source hash, physical page, modality, actual input hash, embedding model/profile, and renderer/text-extractor version. Persistent vector-cache reuse is deferred until the source-first measurements justify it; it must not change ParseResult ownership.
-4. Build one query from each field path, field name, and description. Retrieve at most two pages per field. Union and de-duplicate page numbers. Structural profile candidates may be added; vector results are a fallback for fields without a structural route.
+3. Create a Job-local retrieval index keyed in memory by source hash, chunk/page identity, physical page, modality, actual input hash, embedding model/profile, and renderer/text-extractor version. Persistent vector-cache reuse is deferred until the source-first measurements justify it; it must not change ParseResult ownership.
+4. Build one query from each field path, field name, and description. Retrieve at most two chunks per field using lexical/heading/table signals fused with embedding similarity. Union and de-duplicate the mapped physical page numbers. Structural candidates may outrank dense hits; page chunks remain the fallback when no finer structure is available.
 5. If the union is empty, leave fields unresolved. Do not infer absence and do not silently run a full Parse fallback.
 6. Submit one `page_ranges` Parse request for the union. Bind the resulting partial artifact to this Extract Job, then run the existing schema/evidence extraction logic over the parsed pages.
 7. Record candidate pages, parsed pages, partial ParseResult identity, embedding requests, Parse requests, Extract requests, unresolved fields, and terminal outcome for comparison with `full_document`.
 
-The source-page implementation may add conservative lexical candidates from page headings, numbered sections, directory-like lines, and table cues already present in the page text. These candidates are merged with the embedding top-two baseline and are recorded as `structural`, `embedding`, or `neighbor` sources. List/table/product-like field descriptions may add immediate neighbor pages; this is a generic description-driven heuristic, not a clinical-protocol field-name rule.
+The source-page implementation may add conservative lexical candidates from chunk headings, numbered sections, directory-like lines, and table cues already present in the page text. These candidates are fused with the embedding top-two baseline and are recorded as `structural`, `lexical`, `embedding`, `parent`, or `neighbor` sources. List/table/product-like field descriptions may add immediate neighbor pages; this is a generic description-driven heuristic, not a clinical-protocol field-name rule. Chunks only control retrieval; Parse and evidence still use physical page numbers.
 
 The Extract validation seam performs the same generic checks for the canonical 40-field template used by the training package: empty values are unresolved, enum/date/number values remain schema-checked, numbered lists are checked for structural gaps, product rows require a name and valid nested enums, and evidence pages must belong to the Job input. No field-specific rule is added for `trial_phase`, NMPA, or the Apple case.
 
