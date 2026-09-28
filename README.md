@@ -62,6 +62,17 @@ docker compose --env-file .env.local \
 
 外置配置不能叠加 `supabase/docker-compose.yml`，否则会引入第二个 `db` 服务和重复端口映射。数据库角色与 Auth 表需预先准备好，Auth 服务启动后再运行迁移。迁移容器只执行 `supabase/migrations` 并记录 `schema_migrations`；它不会把另一套 Supabase 项目中的用户、文档或 Configuration 数据复制过来。LiteLLM 的 URL 和 key 在部署目标环境注入后，再启动 API 与 worker。
 
+全新 PostgreSQL 可以直接使用当前已验证数据库生成的最终基线，跳过历史迁移链：
+
+```bash
+docker compose --env-file .env.local \
+  -f supabase/docker-compose.external.yml \
+  -f docker-compose.prod.yml \
+  run --rm --no-deps -e MIGRATION_MODE=baseline -e MIGRATIONS_DIR=/baseline migrations
+```
+
+`supabase/baseline` 只包含最终 `public` schema、Auth 兼容函数和 `wetrial` 的药物注册 Configuration；不包含用户、文档、Job、Result 或向量。已有数据库继续使用 `supabase/migrations` 历史链，不能在已有库上运行基线。
+
 ### 2. 启动后端 API
 
 ```bash

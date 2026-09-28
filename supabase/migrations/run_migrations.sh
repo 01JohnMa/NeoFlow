@@ -9,6 +9,7 @@ DB_PASSWORD="${DB_PASSWORD:-your-super-secret-password}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
 AUTH_WAIT_SECONDS="${AUTH_WAIT_SECONDS:-300}"
 MIGRATION_SKIP_FILES="${MIGRATION_SKIP_FILES:-}"
+MIGRATION_MODE="${MIGRATION_MODE:-incremental}"
 
 # 固定排序规则，保证迁移顺序可预测（重复编号按文件名字典序执行）
 LC_ALL=C
@@ -53,6 +54,16 @@ BEGIN
   END IF;
 END $$;
 SQL
+}
+
+ensure_baseline_database_empty() {
+  [ "$MIGRATION_MODE" = "baseline" ] || return 0
+  applied=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+    "SELECT count(*) FROM public.schema_migrations" | tr -d '[:space:]')
+  if [ "${applied:-0}" != "0" ]; then
+    log "错误: baseline 只允许用于没有迁移记录的全新数据库（已有 ${applied} 条记录）"
+    exit 1
+  fi
 }
 
 escape_sql() {
@@ -191,6 +202,7 @@ apply_migration() {
 main() {
   wait_for_db
   ensure_migrations_table
+  ensure_baseline_database_empty
 
   if [ ! -d "$MIGRATIONS_DIR" ]; then
     log "迁移目录不存在: $MIGRATIONS_DIR"

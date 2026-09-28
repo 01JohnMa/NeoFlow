@@ -88,6 +88,7 @@ services:
       MIGRATION_SKIP_FILES: 004_seed_users.sql
     volumes:
       - ./migrations:/migrations:ro
+      - ./baseline:/baseline:ro
     entrypoint: ["sh", "/migrations/run_migrations.sh"]
     restart: "no"
     networks: [supabase-network]
