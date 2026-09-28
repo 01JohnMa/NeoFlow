@@ -55,13 +55,12 @@ docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d -
 
 ```bash
 docker compose --env-file .env.local \
-  -f supabase/docker-compose.yml \
   -f supabase/docker-compose.external.yml \
   -f docker-compose.prod.yml \
   run --rm --no-deps migrations
 ```
 
-迁移容器只执行 `supabase/migrations` 并记录 `schema_migrations`；它不会把另一套 Supabase 项目中的用户、文档或 Configuration 数据复制过来。LiteLLM 的 URL 和 key 在部署目标环境注入后，再启动 API 与 worker。
+外置配置不能叠加 `supabase/docker-compose.yml`，否则会引入第二个 `db` 服务和重复端口映射。数据库角色与 Auth 表需预先准备好，Auth 服务启动后再运行迁移。迁移容器只执行 `supabase/migrations` 并记录 `schema_migrations`；它不会把另一套 Supabase 项目中的用户、文档或 Configuration 数据复制过来。LiteLLM 的 URL 和 key 在部署目标环境注入后，再启动 API 与 worker。
 
 ### 2. 启动后端 API
 
@@ -202,7 +201,7 @@ JWT_SECRET=...            # 自建项目用于 API 验签；云项目可改用 J
 
 # LLM（中台部署使用 LiteLLM）
 LITELLM_BASE_URL=https://<litellm-gateway>/v1
-LITELLM_API_KEY=...       # 由 GitLab/Jenkins/部署 Secret 注入，不提交到仓库
+LITELLM_API_KEY=...       # 由平台部署进程注入，不提交到仓库
 LLM_MODEL_ID=deepseek-chat
 
 # 本地直连回退（中台部署不配置）
@@ -223,7 +222,9 @@ EXTRACT_MAX_REQUESTS_PER_JOB=200
 EXTRACT_TIMEOUT_SECONDS=900
 ```
 
-中台应用注册不承载 LiteLLM 凭据。部署到 GitLab/Jenkins 或其他运行环境时，由部署编排把 `LITELLM_BASE_URL` 注入普通环境变量，把 `LITELLM_API_KEY` 注入 Secret；两者不写入 Configuration、数据库、AI Center manifest 或代码。API 的 `/api/health/config` 只返回生效的 provider 与 URL，不返回 key。
+中台应用注册不承载 LiteLLM 凭据。AI Center 部署进程读取平台级 `AINEXUS_RUNTIME_MODEL_GATEWAY_URL` 与 `LITELLM_API_KEY`，创建应用容器时注入为 `LITELLM_BASE_URL` / `LITELLM_API_KEY`。地址在平台部署环境配置一次，key 使用平台的 Runtime Integration virtual key，不是调用 NeoFlow 的 Application API Key。不要把它们加入应用注册表单、Configuration、AI Center manifest 或源码；自托管时才由运维在 `.env` 或部署 Secret 中成对配置。
+
+注册前先准备运行目标可访问的 PostgreSQL、Auth、PostgREST、迁移和已发布模板；`SUPABASE_URL` 指向 PostgREST。发布还需确认中台运行版本支持 `ai-center.yaml` 的独立 worker、API 与 worker 共用持久上传目录，并且两者均收到相同的 LiteLLM/数据库环境变量。平台源码存在 worker 配置不等于运行环境已具备该能力；必须用真实 Job 验证。`/api/health/config` 只显示生效 provider 与 URL，不回显 key，也不能单独证明模型调用成功。
 
 ## 测试
 

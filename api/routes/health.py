@@ -38,13 +38,12 @@ async def config_check():
         "debug": settings.DEBUG,
         "supabase_url": settings.SUPABASE_URL,
         "llm_model": settings.LLM_MODEL_ID,
-        "llm_provider": "litellm" if settings.LITELLM_BASE_URL else "direct",
+        "llm_provider": "litellm" if settings.LITELLM_BASE_URL.strip() else "direct",
         "llm_base_url": connection["base_url"],
         "upload_folder": settings.UPLOAD_FOLDER,
         "max_file_size": settings.MAX_FILE_SIZE,
         "allowed_extensions": settings.allowed_extensions_list
     }
-
 
 
 
