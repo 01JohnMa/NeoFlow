@@ -3,15 +3,15 @@ import api from './api'
 import type { ProcessingJob } from '@/types'
 
 export interface CreateExtractJobsPayload {
-  configuration_id: string
+  template_code: string
   document_ids: string[]
 }
 
 export interface CreateExtractJobsResult {
   job_ids: string[]
-  configuration_id: string
+  template_code: string
   revision_id: string | null
-  mode: 'published' | 'draft'
+  mode: 'published'
 }
 
 export interface ExtractEngine {
@@ -51,7 +51,7 @@ export interface ExtractConfiguration {
   status: 'draft' | 'published' | 'archived'
   type: string
   current_revision_id: string | null
-  /** 旧版模板（/tenants/me/templates）不返回定义，此时缺失 */
+  /** Configuration detail is available only in internal administration views. */
   draft_definition?: ExtractConfigurationDefinition | null
   description?: string | null
 }
@@ -61,42 +61,6 @@ export interface ListExtractJobsParams {
   created_by?: string
   limit?: number
   capability?: string
-}
-
-function isForbidden(error: unknown): boolean {
-  return (error as { response?: { status?: number } })?.response?.status === 403
-}
-
-function normalizeAdminConfiguration(row: Record<string, unknown>): ExtractConfiguration {
-  return {
-    id: String(row.id),
-    name: String(row.name ?? ''),
-    code: (row.code as string | null) ?? null,
-    status: (row.status as ExtractConfiguration['status']) ?? 'draft',
-    type: String(row.type ?? 'extract'),
-    current_revision_id: (row.current_revision_id as string | null) ?? null,
-    draft_definition:
-      (row.draft_definition as ExtractConfigurationDefinition | null) ?? undefined,
-    description: (row.description as string | null) ?? null,
-  }
-}
-
-function normalizeTemplate(row: Record<string, unknown>): ExtractConfiguration {
-  const extractionStrategy = row.extraction_strategy === 'agentic_source_page_routed'
-    ? 'agentic_source_page_routed'
-    : row.extraction_strategy === 'source_page_routed'
-      ? 'source_page_routed'
-      : 'full_document'
-  return {
-    id: String(row.id),
-    name: String(row.name ?? ''),
-    code: (row.code as string | null) ?? null,
-    status: 'published',
-    type: 'extract',
-    current_revision_id: null,
-    draft_definition: { extraction_strategy: extractionStrategy },
-    description: (row.description as string | null) ?? null,
-  }
 }
 
 export const extractService = {
@@ -133,19 +97,6 @@ export const extractService = {
     return data
   },
 
-  /** 管理员走 /admin/configurations?type=extract；非管理员 403 时回退到已发布模板 */
-  async listConfigurations(): Promise<ExtractConfiguration[]> {
-    try {
-      const { data } = await api.get<Record<string, unknown>[]>('/admin/configurations', {
-        params: { type: 'extract' },
-      })
-      return (data || []).map(normalizeAdminConfiguration)
-    } catch (error) {
-      if (!isForbidden(error)) throw error
-      const { data } = await api.get<Record<string, unknown>[]>('/tenants/me/templates')
-      return (data || []).map(normalizeTemplate)
-    }
-  },
 }
 
 export default extractService

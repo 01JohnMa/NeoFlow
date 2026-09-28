@@ -31,9 +31,9 @@ async def upload_document(
     - 用户ID从JWT token中自动提取
     """
     try:
-        # 检查用户是否已关联租户（必需，否则无法获取模板配置）
+        # 检查经认证身份的租户范围（上传文档必须有明确的数据归属）
         if not user.tenant_id:
-            raise ProcessingError("请先在个人设置中选择所属部门后再上传文档")
+            raise ProcessingError("请求缺少有效租户范围")
         
         # 验证文件类型
         if not validate_file_extension(file.filename):

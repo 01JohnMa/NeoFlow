@@ -19,6 +19,7 @@
 | 9 | `migrations/021_configurations.sql` | Configuration / Revision |
 | 10 | `migrations/022_results_and_job_revision.sql` | Result 存储与 Job Revision |
 | 11 | `migrations/023_drop_legacy_business_tables.sql` | 收尾：删除旧模板表（无业务表时会跳过） |
+| 12 | `migrations/032_rename_quality_tenant_to_wetrial.sql` | 将默认租户命名为 `wetrial` |
 
 ## 不执行的迁移及原因
 

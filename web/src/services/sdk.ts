@@ -7,7 +7,6 @@ import type {
 } from '@/types'
 
 export interface SDKCreateSessionOptions {
-  tenantId: string
   templateName: string
   templateCode: string
   parseMode?: 'pipeline' | 'vlm'
@@ -20,7 +19,6 @@ export async function createSDKSession(
 ): Promise<SDKSession> {
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('tenant_id', options.tenantId)
   formData.append('template_name', options.templateName)
   formData.append('template_code', options.templateCode)
   if (options.parseMode) {

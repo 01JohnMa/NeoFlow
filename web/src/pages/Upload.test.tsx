@@ -3,11 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Upload } from '@/pages/Upload'
 
 const profileState = vi.hoisted(() => ({
-  tenantCode: 'quality' as string | null,
   profile: {
     user_id: 'user-1',
     tenant_id: 'tenant-1',
-    tenant_name: '测试部门',
+    tenant_name: '测试租户',
     tenant_code: 'quality',
     role: 'user' as const,
     display_name: null,
@@ -30,11 +29,10 @@ vi.mock('react-router-dom', () => ({
 
 describe('Upload page', () => {
   it('只提供纯上传入口，不展示模板选择', () => {
-    profileState.tenantCode = 'quality'
     profileState.profile = {
       user_id: 'user-1',
       tenant_id: 'tenant-1',
-      tenant_name: '测试部门',
+      tenant_name: '测试租户',
       tenant_code: 'quality',
       role: 'user',
       display_name: null,
@@ -49,12 +47,20 @@ describe('Upload page', () => {
     expect(html).not.toContain('上传并识别')
   })
 
-  it('未选择部门时提示先选择部门', () => {
-    profileState.tenantCode = null
-    profileState.profile = null
+  it('无有效租户范围时不展示上传入口', () => {
+    profileState.profile = {
+      user_id: 'user-1',
+      tenant_id: '',
+      tenant_name: null,
+      tenant_code: null,
+      role: 'user',
+      display_name: null,
+    }
 
     const html = renderToStaticMarkup(<Upload />)
 
-    expect(html).toContain('请先选择所属部门')
+    expect(html).toContain('当前账户未绑定租户范围')
+    expect(html).not.toContain('拖拽文件到此处或点击选择')
+    expect(html).not.toContain('选择所属部门')
   })
 })

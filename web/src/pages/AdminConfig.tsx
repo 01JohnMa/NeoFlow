@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useProfileStore } from '@/store/useStore'
-import { api } from '@/services/api'
 import * as configurationsApi from '@/services/configurations'
 import { readDraftingSessionId, writeDraftingSessionId } from '@/lib/draftingSession'
 import type { Configuration, ConfigurationType } from '@/types'
@@ -34,20 +33,13 @@ const CONFIGURATION_TYPES: ConfigurationType[] = [
   'composite',
 ]
 
-interface Tenant {
-  id: string
-  name: string
-  code: string
-}
-
 export function AdminConfig() {
   const navigate = useNavigate()
   const { profile } = useProfileStore()
   const isSuperAdmin = profile?.role === 'super_admin'
   const isTenantAdmin = profile?.role === 'tenant_admin' || isSuperAdmin
 
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [selectedTenantId, setSelectedTenantId] = useState<string>('')
+  const selectedTenantId = profile?.tenant_id || ''
   const [searchParams, setSearchParams] = useSearchParams()
   // 草拟会话 id 存在 URL（`?session=`）：刷新页面后能回到同一个向导
   const draftingSessionId = readDraftingSessionId(searchParams.toString())
@@ -70,17 +62,6 @@ export function AdminConfig() {
       navigate('/', { replace: true })
     }
   }, [profile, isTenantAdmin, navigate])
-
-  useEffect(() => {
-    if (!isSuperAdmin) return
-    api.get<Tenant[]>('/tenants').then(({ data }) => setTenants(data || []))
-  }, [isSuperAdmin])
-
-  useEffect(() => {
-    if (!isSuperAdmin && profile?.tenant_id) {
-      setSelectedTenantId(profile.tenant_id)
-    }
-  }, [isSuperAdmin, profile])
 
   const refreshList = useCallback(async () => {
     if (!selectedTenantId) return
@@ -176,32 +157,12 @@ export function AdminConfig() {
 
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-4">
-          {isSuperAdmin && (
-            <div className="min-w-[200px]">
-              <Label>选择部门</Label>
-              <Select
-                className="mt-1"
-                value={selectedTenantId}
-                onChange={(e) => setSelectedTenantId(e.target.value)}
-              >
-                <option value="">— 请选择部门 —</option>
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
-
-          {!isSuperAdmin && profile?.tenant_name && (
-            <div className="min-w-[160px]">
-              <Label>所属部门</Label>
-              <p className="mt-1 h-10 flex items-center px-3 rounded-lg border border-border-default bg-bg-secondary text-sm text-text-secondary">
-                {profile.tenant_name}
-              </p>
-            </div>
-          )}
+          <div className="min-w-[200px]">
+            <Label>当前租户范围</Label>
+            <p className="mt-1 h-10 flex items-center px-3 rounded-lg border border-border-default bg-bg-secondary text-sm text-text-secondary">
+              {profile.tenant_name || (selectedTenantId ? '已绑定租户' : '未绑定租户')}
+            </p>
+          </div>
 
           <div className="flex flex-1 justify-end gap-2">
             <Button
@@ -223,7 +184,7 @@ export function AdminConfig() {
       {!selectedTenantId ? (
         <div className="flex flex-col items-center justify-center py-24 text-text-muted">
           <Settings className="h-12 w-12 mb-4 opacity-20" />
-          <p className="text-sm">请先选择部门</p>
+          <p className="text-sm">当前账户未绑定租户范围</p>
         </div>
       ) : view === 'detail' && selectedId ? (
         <ConfigurationDetail
@@ -248,8 +209,6 @@ export function AdminConfig() {
           </Button>
           <Card className="p-6">
             <AiTemplateWizard
-              tenantId={selectedTenantId}
-              tenantName={tenants.find((tenant) => tenant.id === selectedTenantId)?.name}
               initialSessionId={draftingSessionId}
               onSessionChange={handleWizardSessionChange}
               onCommitted={handleWizardCommitted}

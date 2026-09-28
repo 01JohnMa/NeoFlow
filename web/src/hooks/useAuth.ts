@@ -85,18 +85,16 @@ export function useAuth() {
     return result
   }, [navigate, setUser, setSession, setLoading])
 
-  // Sign up with optional tenant
+  // Sign up; tenant scope is assigned by the integrating platform.
   const signUp = useCallback(async (
     email: string, 
     password: string,
-    tenantId?: string,
     displayName?: string
   ) => {
     setLoading(true)
     const result = await authService.signUp({ 
       email, 
       password, 
-      tenantId,
       displayName 
     })
     setLoading(false)

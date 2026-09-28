@@ -29,7 +29,8 @@ export function Upload() {
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadMutation = useUploadDocument()
-  const { tenantCode, profile, isLoading: profileLoading, fetchProfile } = useProfile()
+  const { profile, isLoading: profileLoading, fetchProfile } = useProfile()
+  const hasTenantScope = Boolean(profile?.tenant_id)
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -123,17 +124,17 @@ export function Upload() {
         </p>
       </div>
 
-      {profileLoading && <Card><CardContent className="py-8 text-center text-text-secondary">正在加载部门信息...</CardContent></Card>}
-      {!profileLoading && !profile && <Card className="border-error-500/50"><CardContent className="pt-6"><div className="flex items-center justify-between gap-3 text-error-500"><span>部门信息加载失败，请重试。</span><Button variant="outline" onClick={() => { void fetchProfile() }}>重新加载</Button></div></CardContent></Card>}
-      {!tenantCode && !profileLoading && profile && (
+      {profileLoading && <Card><CardContent className="py-8 text-center text-text-secondary">正在加载租户范围...</CardContent></Card>}
+      {!profileLoading && !profile && <Card className="border-error-500/50"><CardContent className="pt-6"><div className="flex items-center justify-between gap-3 text-error-500"><span>租户范围加载失败，请重试。</span><Button variant="outline" onClick={() => { void fetchProfile() }}>重新加载</Button></div></CardContent></Card>}
+      {!hasTenantScope && !profileLoading && profile && (
         <Card className="border-warning-500/50">
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 text-warning-500">
               <AlertTriangle className="h-6 w-6 flex-shrink-0" />
               <div>
-                <p className="font-medium">请先选择所属部门</p>
+                <p className="font-medium">当前账户未绑定租户范围</p>
                 <p className="text-sm text-text-muted mt-1">
-                  在设置页面选择您的所属部门后，即可使用文档上传功能
+                  请联系平台管理员为当前应用或账户分配租户范围后再上传
                 </p>
               </div>
             </div>
@@ -141,7 +142,7 @@ export function Upload() {
         </Card>
       )}
 
-      {tenantCode && !selectedFile && (
+      {hasTenantScope && !selectedFile && (
         <Card>
           <CardContent className="pt-6">
             <div
@@ -257,7 +258,7 @@ export function Upload() {
             <li className="flex items-start gap-2">
               <FileText className="h-4 w-4 mt-0.5 text-primary-400" />
               <span>
-                {tenantCode ? '上传后可在文档列表中查看文件' : '请先选择所属部门'}
+                {hasTenantScope ? '上传后可在文档列表中查看文件' : '当前账户未绑定租户范围'}
               </span>
             </li>
           </ul>

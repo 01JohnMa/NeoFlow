@@ -2,11 +2,10 @@
 """租户相关API路由"""
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Literal
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
 from loguru import logger
 
-from services.configuration_service import configuration_service
 from services.tenant_service import tenant_service
 from api.dependencies.auth import get_current_user, CurrentUser, invalidate_profile_cache
 
@@ -15,27 +14,10 @@ router = APIRouter(prefix="/tenants", tags=["租户管理"])
 
 # ============ 请求/响应模型 ============
 
-class TenantResponse(BaseModel):
-    """租户响应"""
-    id: str
-    name: str
-    code: str
-    description: Optional[str] = None
-
-
-class ExtractionConfigurationResponse(BaseModel):
-    """抽取配置响应（上传页选择用）"""
-    id: str
-    name: str
-    code: Optional[str] = None
-    description: Optional[str] = None
-    is_active: bool = True
-    extraction_strategy: Literal["full_document", "source_page_routed", "agentic_source_page_routed"] = "full_document"
-
-
 class UpdateProfileRequest(BaseModel):
     """更新用户信息请求"""
-    tenant_id: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
     display_name: Optional[str] = None
 
 
@@ -49,33 +31,9 @@ class UserProfileResponse(BaseModel):
     display_name: Optional[str] = None
 
 
-# ============ 公开接口（无需登录） ============
-
-@router.get("", response_model=List[TenantResponse])
-async def list_tenants():
-    """
-    获取所有可用租户列表（注册页下拉用）
-    
-    无需登录，只返回启用的租户
-    """
-    tenants = await tenant_service.get_all_tenants(active_only=True)
-    return tenants
-
-
-@router.get("/{tenant_id}")
-async def get_tenant(tenant_id: str):
-    """
-    获取租户详情
-    """
-    tenant = await tenant_service.get_tenant(tenant_id)
-    if not tenant:
-        raise HTTPException(status_code=404, detail="租户不存在")
-    return tenant
-
-
 # ============ 需要登录的接口 ============
 
-@router.get("/me/profile", response_model=UserProfileResponse)
+@router.get("/me/profile", response_model=UserProfileResponse, include_in_schema=False)
 async def get_my_profile(user: CurrentUser = Depends(get_current_user)):
     """
     获取当前用户的 profile 信息（含租户、角色）
@@ -90,39 +48,15 @@ async def get_my_profile(user: CurrentUser = Depends(get_current_user)):
     )
 
 
-@router.put("/me/profile")
+@router.put("/me/profile", include_in_schema=False)
 async def update_my_profile(
     request: UpdateProfileRequest,
     user: CurrentUser = Depends(get_current_user)
 ):
-    """
-    更新当前用户的 profile（租户、显示名称）
-    
-    注意：普通用户只能在首次设置时选择租户，之后不能更改
-    """
-    # 如果用户已有租户，不允许更改（除非是超级管理员或设置相同的租户）
-    if request.tenant_id and user.tenant_id and not user.is_super_admin():
-        # 如果设置的是相同的租户，视为幂等操作，直接返回成功
-        if request.tenant_id == user.tenant_id:
-            logger.debug(f"用户 {user.user_id} 尝试设置相同的租户，幂等返回")
-            return {
-                "success": True,
-                "message": "部门设置未变更",
-                "profile": {
-                    "user_id": user.user_id,
-                    "tenant_id": user.tenant_id,
-                    "display_name": user.display_name
-                }
-            }
-        raise HTTPException(
-            status_code=403, 
-            detail="已有所属部门，不能更改。如需更改请联系管理员"
-        )
-    
+    """更新显示名称。租户范围由平台或已绑定的 profile 决定，不接受调用方修改。"""
     try:
         profile = await tenant_service.update_user_profile(
             user_id=user.user_id,
-            tenant_id=request.tenant_id,
             display_name=request.display_name
         )
         invalidate_profile_cache(user.user_id)
@@ -137,31 +71,7 @@ async def update_my_profile(
         raise HTTPException(status_code=500, detail="更新失败，请稍后重试")
 
 
-@router.get("/me/templates", response_model=List[ExtractionConfigurationResponse])
-async def get_my_templates(user: CurrentUser = Depends(get_current_user)):
-    """
-    获取当前用户所属租户可用于处理的已发布抽取配置列表
-    """
-    if not user.tenant_id:
-        return []
-
-    configurations = await configuration_service.list_published_extract_configurations(
-        user.tenant_id
-    )
-    return [
-        {
-            "id": configuration["id"],
-            "name": configuration["name"],
-            "code": configuration.get("code"),
-            "description": configuration.get("description"),
-            "is_active": True,
-            "extraction_strategy": configuration.get("extraction_strategy") or "full_document",
-        }
-        for configuration in configurations
-    ]
-
-
-@router.get("/me/templates/{configuration_key}")
+@router.get("/me/templates/{configuration_key}", include_in_schema=False)
 async def get_my_template_detail(
     configuration_key: str,
     user: CurrentUser = Depends(get_current_user)
@@ -170,7 +80,7 @@ async def get_my_template_detail(
     获取指定配置的详细信息（含字段定义）
     """
     if not user.tenant_id:
-        raise HTTPException(status_code=400, detail="请先选择所属部门")
+        raise HTTPException(status_code=400, detail="请求缺少有效租户范围")
 
     configuration = await configuration_service.resolve_extraction_configuration(
         user.tenant_id, configuration_key
@@ -180,4 +90,3 @@ async def get_my_template_detail(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     return configuration
-

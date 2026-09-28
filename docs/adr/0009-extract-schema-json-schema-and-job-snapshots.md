@@ -8,6 +8,8 @@ An **Extraction Target** selects the result unit: the whole document (`per_doc`)
 
 A draft Configuration may be run without publishing: the run freezes an **execution snapshot** on the Job (schema, target, engine parameters) instead of creating a Revision. Published runs still pin a Revision (ADR-0007). This keeps the Configuration the single authoring home while letting the playground iterate without polluting revision history.
 
+The public AI Center Extract capability selects a published Extract Configuration by its tenant-scoped `configurations.code` (`template_code`). Callers never submit Configuration or Revision UUIDs. The selected `current_revision_id` is copied to the Job, so later template publication changes affect only new Jobs.
+
 The execution snapshot preserves whether `target` and `data_schema` were provided. Missing `target` defaults to `per_doc`. `data_schema` is required; the legacy `fields` fallback is removed. Explicit `null` values are invalid and must fail closed. Existing fields-only configurations are not migrated or converted; create a new schema configuration. The Builder edits `data_schema` directly; separate `ui` labels/order have no extraction semantics. A successful Extract Result always stores an object-shaped `engine` value.
 
 ## Considered Options

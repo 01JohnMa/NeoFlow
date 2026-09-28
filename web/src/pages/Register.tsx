@@ -1,14 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { getAuthErrorMessage } from '@/lib/authErrors'
-import { authService, Tenant } from '@/services/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
-import { Mail, Lock, AlertCircle, CheckCircle, Building2, User } from 'lucide-react'
+import { Mail, Lock, AlertCircle, CheckCircle, User } from 'lucide-react'
 
 export function Register() {
   const { signUp, isLoading } = useAuth()
@@ -16,26 +14,8 @@ export function Register() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [tenantId, setTenantId] = useState('')
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [loadingTenants, setLoadingTenants] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-
-  // 加载租户列表
-  useEffect(() => {
-    const loadTenants = async () => {
-      try {
-        const list = await authService.getTenants()
-        setTenants(list)
-      } catch (err) {
-        console.error('加载部门列表失败:', err)
-      } finally {
-        setLoadingTenants(false)
-      }
-    }
-    loadTenants()
-  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,13 +36,8 @@ export function Register() {
       return
     }
 
-    if (!tenantId) {
-      setError('请选择所属部门')
-      return
-    }
-
     try {
-      const result = await signUp(email, password, tenantId, displayName || undefined)
+      const result = await signUp(email, password, displayName || undefined)
       if (!result.session) {
         // Email confirmation required
         setSuccess(true)
@@ -140,30 +115,6 @@ export function Register() {
                 className="pl-10"
                 autoComplete="name"
               />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="tenant" required>所属部门</Label>
-            <div className="relative">
-              <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted z-10 pointer-events-none" />
-              <Select 
-                id="tenant"
-                value={tenantId} 
-                onChange={(e) => setTenantId(e.target.value)}
-                disabled={loadingTenants}
-                className="pl-10"
-                required
-              >
-                <option value="" disabled>
-                  {loadingTenants ? "加载中..." : "请选择部门"}
-                </option>
-                {tenants.map((tenant) => (
-                  <option key={tenant.id} value={tenant.id}>
-                    {tenant.name}
-                  </option>
-                ))}
-              </Select>
             </div>
           </div>
 

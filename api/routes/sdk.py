@@ -259,18 +259,17 @@ async def create_session(
     template_code: str | None = Form(default=None),
     parse_mode: str | None = Form(default=None),
     instruction: str | None = Form(default=None),
-    tenant_id: str | None = Form(default=None),
     user: CurrentUser = Depends(get_current_user),
 ):
     """上传样例文档并启动 MinerU 解析。
 
-    所属租户、文档类型（配置名/编码）与解析模式由操作者在第一步选定，接口负责校验；
+    租户范围来自认证身份，文档类型（配置名/编码）与解析模式由操作者选定；
     解析模式默认快速解析，可带一句可选说明引导字段建议。
     """
     _require_admin(user)
-    resolved_tenant_id = (tenant_id or user.tenant_id or "").strip()
+    resolved_tenant_id = (user.tenant_id or "").strip()
     if not resolved_tenant_id:
-        raise HTTPException(status_code=400, detail="请先选择所属租户（部门）")
+        raise HTTPException(status_code=400, detail="请求缺少有效租户范围")
     if not user.can_access_tenant(resolved_tenant_id):
         raise AuthorizationError("无权在该租户下创建模板")
 

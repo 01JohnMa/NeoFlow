@@ -589,7 +589,7 @@ def test_create_session_requires_document_kind(admin_client, monkeypatch, tmp_pa
     assert "文档类型" in response.json()["detail"]
 
 
-def test_create_session_rejects_other_tenant(admin_client, monkeypatch, tmp_path):
+def test_create_session_ignores_client_tenant_override(admin_client, monkeypatch, tmp_path):
     mocks = _patch_parse_env(monkeypatch, tmp_path)
 
     response = _create_session(
@@ -597,8 +597,9 @@ def test_create_session_rejects_other_tenant(admin_client, monkeypatch, tmp_path
         data={"tenant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
     )
 
-    assert response.status_code == 403
-    mocks["create_document"].assert_not_awaited()
+    assert response.status_code == 201
+    document_payload = mocks["create_document"].await_args.args[0]
+    assert document_payload["tenant_id"] == TENANT_ID
 
 
 def test_create_session_requires_tenant(admin_client, monkeypatch, tmp_path):

@@ -11,7 +11,7 @@ import jwt
 from jwt import PyJWKClient
 
 from services.supabase_service import supabase_service
-from api.exceptions import AuthenticationError
+from api.exceptions import AuthenticationError, AuthorizationError
 from config.settings import settings
 
 _PROFILE_CACHE_TTL = 60  # seconds
@@ -20,6 +20,7 @@ _profile_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _JWKS_KEY_LIFESPAN = 86400  # PyJWKClient 内部公钥缓存时长；遇到未知 kid 会自动重新拉取
 _ASYMMETRIC_ALGORITHMS = ("ES256", "RS256")
 _jwks_client: Optional[Tuple[str, PyJWKClient]] = None
+_PLATFORM_SCOPES = frozenset({"parse", "extract", "jobs.read", "results.read"})
 
 
 class CurrentUser(BaseModel):
@@ -54,6 +55,38 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     if not authorization or not authorization.startswith("Bearer "):
         return None
     return authorization[7:].strip()
+
+
+def require_platform_scope(scope: str):
+    """Require a scoped AI Center context on NeoFlow's private network.
+
+    AI Center authenticates the caller with its Application Key before sending
+    these requests. NeoFlow receives the tenant and scope as internal gateway
+    headers; the capability routes are not publicly reachable.
+    """
+    if scope not in _PLATFORM_SCOPES:
+        raise ValueError(f"unsupported platform scope: {scope}")
+
+    async def _dependency(
+        tenant_id: Optional[str] = Header(None, alias="x-ai-center-tenant-id"),
+        application_id: Optional[str] = Header(None, alias="x-ai-center-application-id"),
+        version_id: Optional[str] = Header(None, alias="x-ai-center-application-version-id"),
+        invocation_id: Optional[str] = Header(None, alias="x-ai-center-invocation-id"),
+        caller_id: Optional[str] = Header(None, alias="x-ai-center-caller-id"),
+        raw_scope: Optional[str] = Header(None, alias="x-ai-center-scope"),
+    ) -> CurrentUser:
+        values = (tenant_id, application_id, version_id, invocation_id, caller_id, raw_scope)
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise AuthenticationError("缺少有效的 AI Center 网关上下文")
+        scopes = set(raw_scope.split())
+        if not scopes.issubset(_PLATFORM_SCOPES):
+            raise AuthorizationError("网关上下文包含不允许的 scope")
+        if scope not in scopes:
+            raise AuthorizationError(f"网关上下文缺少 scope: {scope}")
+        return CurrentUser(user_id=caller_id, token="ai-center-private", tenant_id=tenant_id)
+
+    _dependency.__name__ = f"require_platform_{scope.replace('.', '_')}_scope"
+    return _dependency
 
 
 def _get_jwks_client() -> Optional[PyJWKClient]:

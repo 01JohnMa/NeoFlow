@@ -10,18 +10,13 @@ import {
   type ExtractResultResponse,
 } from '@/services/extract'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Select } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
-import { CONFIGURATION_STATUS_LABELS, configurationStatusVariant } from '@/lib/configuration'
 import {
   buildHistoryResultRef,
   buildResultRefs,
-  configurationDefinitionPreview,
   resolveResultTarget,
   resultMatchesJob,
-  resolveSelectedConfigId,
-  selectableConfigurations,
   type ResultRef,
 } from '@/lib/extractSelection'
 import { cn, formatDate, getStatusText } from '@/lib/utils'
@@ -75,12 +70,6 @@ function StatusDot({ status }: { status: string }) {
 function documentName(doc: Document | undefined, fallbackId: string): string {
   if (!doc) return `文档 ${fallbackId.slice(0, 8)}`
   return doc.display_name || doc.original_file_name || doc.file_name || fallbackId
-}
-
-function extractionStrategyLabel(strategy?: string): string {
-  if (strategy === 'agentic_source_page_routed') return 'Agentic Plus'
-  if (strategy === 'source_page_routed') return 'Agentic'
-  return 'Normal'
 }
 
 function engineSummary(engine?: ExtractEngine | null): string | null {
@@ -191,7 +180,7 @@ function HistoryDrawer({
 
 export function ExtractPlayground() {
   const [activeTab, setActiveTab] = useState<Tab>('build')
-  const [configId, setConfigId] = useState('')
+  const [templateCode, setTemplateCode] = useState('')
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [results, setResults] = useState<ResultRef[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
@@ -207,18 +196,6 @@ export function ExtractPlayground() {
   const queryClient = useQueryClient()
   const uploadMutation = useUploadDocument()
 
-  const configsQuery = useQuery({
-    queryKey: ['extract-configs'],
-    queryFn: () => extractService.listConfigurations(),
-    staleTime: 0,
-  })
-  const configs = useMemo(
-    () => selectableConfigurations(configsQuery.data || []),
-    [configsQuery.data],
-  )
-  const selectedConfig = configs.find((config) => config.id === configId) || null
-  const definitionPreview = configurationDefinitionPreview(selectedConfig)
-
   const documentsQuery = useQuery({
     queryKey: ['extract-documents'],
     queryFn: () => documentsService.list({ page: 1, limit: 50 }),
@@ -233,11 +210,6 @@ export function ExtractPlayground() {
     () => new Map(documents.map((doc) => [doc.id, documentName(doc, doc.id)])),
     [documents],
   )
-
-  // 默认选中首个可用配置
-  useEffect(() => {
-    setConfigId((prev) => resolveSelectedConfigId(configs, prev))
-  }, [configs])
 
   // Job 轮询：结果列表中的任一任务排队/执行中时 1.5s 刷新
   const trackedJobIds = useMemo(
@@ -360,13 +332,13 @@ export function ExtractPlayground() {
   }
 
   const handleRun = async () => {
-    if (!selectedConfig || selectedDocIds.length === 0) return
+    if (!templateCode.trim() || selectedDocIds.length === 0) return
     setRunError('')
     setRunning(true)
     try {
       const documentIds = [...selectedDocIds].sort()
       const response = await extractService.createJobs({
-        configuration_id: selectedConfig.id,
+        template_code: templateCode.trim(),
         document_ids: documentIds,
       })
       const refs = buildResultRefs(documentIds, response.job_ids)
@@ -474,77 +446,20 @@ export function ExtractPlayground() {
           <div className="flex-1 overflow-auto p-4">
             <div className="mx-auto w-full max-w-3xl space-y-5">
               <div>
-                <label htmlFor="extract-config" className="text-sm font-semibold text-text-primary">
-                  抽取配置
+                <label htmlFor="extract-template-code" className="text-sm font-semibold text-text-primary">
+                  模板编码
                 </label>
-                {configsQuery.isLoading ? (
-                  <div className="mt-2 flex justify-center py-4">
-                    <Spinner />
-                  </div>
-                ) : configsQuery.isError ? (
-                  <div className="mt-2 flex items-center gap-3 rounded-lg border border-error-500/30 bg-error-500/10 p-3 text-xs text-error-500">
-                    <span>配置加载失败：{getApiErrorMessage(configsQuery.error, '请稍后重试')}</span>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={() => void configsQuery.refetch()}
-                    >
-                      重试
-                    </Button>
-                  </div>
-                ) : configs.length === 0 ? (
-                  <p className="mt-2 rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
-                    暂无可用的 Extract 配置，请联系管理员
-                  </p>
-                ) : (
-                  <>
-                    <div className="mt-2 flex items-center gap-2">
-                      <Select
-                        id="extract-config"
-                        value={configId}
-                        onChange={(event) => setConfigId(event.target.value)}
-                      >
-                        <option value="" disabled>
-                          选择配置
-                        </option>
-                        {configs.map((config) => (
-                          <option key={config.id} value={config.id}>
-                            {config.name} · {extractionStrategyLabel(config.draft_definition?.extraction_strategy)}
-                          </option>
-                        ))}
-                      </Select>
-                      {selectedConfig && (
-                        <>
-                          <Badge variant={configurationStatusVariant(selectedConfig.status)}>
-                            {CONFIGURATION_STATUS_LABELS[selectedConfig.status]}
-                          </Badge>
-                          <Badge variant="outline">
-                            抽取模式：{extractionStrategyLabel(selectedConfig.draft_definition?.extraction_strategy)}
-                          </Badge>
-                        </>
-                      )}
-                    </div>
-                    <p className="mt-2 text-xs text-text-muted">
-                      抽取模式在管理员配置中选择：Normal、Agentic 或 Agentic Plus。
-                    </p>
-                    <div className="mt-3">
-                      {definitionPreview.kind === 'schema' ? (
-                        <pre className="max-h-40 overflow-auto rounded-lg border border-border-default bg-bg-secondary p-3 font-mono text-[11px] leading-relaxed text-text-secondary">
-                          {JSON.stringify(definitionPreview.schema, null, 2)}
-                        </pre>
-                      ) : definitionPreview.kind === 'empty' ? (
-                        <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
-                          配置没有可预览的定义
-                        </p>
-                      ) : (
-                        <p className="rounded-lg border border-border-default bg-bg-secondary p-3 text-xs text-text-muted">
-                          已发布模板（定义在执行时读取）
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
+                <Input
+                  id="extract-template-code"
+                  value={templateCode}
+                  onChange={(event) => setTemplateCode(event.target.value)}
+                  placeholder="例如 inspection_report"
+                  className="mt-2 font-mono"
+                  autoComplete="off"
+                />
+                <p className="mt-2 text-xs text-text-muted">
+                  使用已发布配置的 template_code；平台按当前租户解析对应模板，不展示模板列表。
+                </p>
               </div>
 
               <div>
@@ -665,7 +580,7 @@ export function ExtractPlayground() {
               <Button
                 className="w-full"
                 onClick={handleRun}
-                disabled={running || !selectedConfig || selectedDocIds.length === 0}
+                disabled={running || !templateCode.trim() || selectedDocIds.length === 0}
               >
                 <Play className="mr-1 h-4 w-4" />
                 {running ? '提交中…' : 'Run Extract'}

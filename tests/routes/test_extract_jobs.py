@@ -18,6 +18,7 @@ SCHEMA = {
 def _draft_config(definition=None):
     return {
         "id": "cfg-1",
+        "code": "inspection_report",
         "tenant_id": TENANT_ID,
         "type": "extract",
         "status": "draft",
@@ -30,6 +31,7 @@ def _draft_config(definition=None):
 def _published_config():
     return {
         "id": "cfg-1",
+        "code": "inspection_report",
         "tenant_id": TENANT_ID,
         "type": "extract",
         "status": "published",
@@ -47,7 +49,7 @@ def _patch(monkeypatch, configuration, *, revision=None):
 
     monkeypatch.setattr(
         extract_mod.configuration_service,
-        "get_configuration",
+        "get_published_extract_configuration_by_code",
         AsyncMock(return_value=configuration),
     )
     monkeypatch.setattr(
@@ -56,7 +58,7 @@ def _patch(monkeypatch, configuration, *, revision=None):
         AsyncMock(
             return_value=revision
             if revision is not None
-            else {"id": "rev-1", "definition": {"target": "per_doc", "data_schema": SCHEMA}}
+            else {"id": "rev-1", "definition": configuration.get("draft_definition") or {}}
         ),
     )
     monkeypatch.setattr(
@@ -77,7 +79,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 201
@@ -90,7 +92,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 201
@@ -106,7 +108,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 201
@@ -125,7 +127,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 422
@@ -145,7 +147,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 422
@@ -160,7 +162,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 422
@@ -179,7 +181,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 409
@@ -200,7 +202,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 422
@@ -215,7 +217,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 201
@@ -232,7 +234,7 @@ class TestCreateExtractJobs:
 
         resp = client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
 
         assert resp.status_code == 422
@@ -241,7 +243,7 @@ class TestCreateExtractJobs:
     def test_unauthenticated_rejected(self, unauth_client):
         resp = unauth_client.post(
             "/api/extract/jobs",
-            json={"configuration_id": "cfg-1", "document_ids": [DOCUMENT_ID]},
+            json={"template_code": "inspection_report", "document_ids": [DOCUMENT_ID]},
         )
         assert resp.status_code == 401
 

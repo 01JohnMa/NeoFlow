@@ -27,8 +27,6 @@ import type {
 import { cn } from '@/lib/utils'
 
 interface AiTemplateWizardProps {
-  tenantId: string
-  tenantName?: string
   initialSessionId?: string | null
   onSessionChange?: (sessionId: string | null) => void
   onCommitted: (configurationId: string) => void | Promise<void>
@@ -50,8 +48,6 @@ const createEmptyField = (index: number): SDKDetectedField => ({
 })
 
 export function AiTemplateWizard({
-  tenantId,
-  tenantName,
   initialSessionId,
   onSessionChange,
   onCommitted,
@@ -128,7 +124,6 @@ export function AiTemplateWizard({
     if (!file || !templateName.trim() || !templateCode.trim()) return
     void runAction('upload', async () => {
       const created = await sdkApi.createSDKSession(file, {
-        tenantId,
         templateName: templateName.trim(),
         templateCode: templateCode.trim(),
         parseMode,
@@ -317,9 +312,6 @@ export function AiTemplateWizard({
             </p>
 
             <div className="mb-3 rounded-lg border border-border-default bg-bg-card p-3">
-              <p className="text-xs text-text-muted">
-                所属租户：<span className="text-text-primary">{tenantName || tenantId}</span>
-              </p>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <div>
                   <Label>文档类型名称</Label>

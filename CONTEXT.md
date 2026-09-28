@@ -8,6 +8,8 @@ NeoFlow turns source documents into structured extraction records via reusable C
 The ownership and data-isolation boundary for one organization using NeoFlow. It is established upstream by the integrating application and the enterprise AI middle platform that registers applications, and arrives with each request; NeoFlow isolates by it but never onboards, registers, or manages it. A Tenant owns one or more Projects.
 _Avoid_: account, customer workspace, department (internal org units are not Tenants)
 
+AI Center supplies the verified Tenant scope over the private gateway network. NeoFlow does not expose department selection or tenant switching to capability callers; `tenant_id` remains an internal isolation key.
+
 **Integrating Application**:
 An application registered in the enterprise AI middle platform that consumes NeoFlow capabilities on behalf of one Tenant. NeoFlow does not manage its registration or credentials.
 _Avoid_: client, API consumer, customer

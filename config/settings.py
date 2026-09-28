@@ -23,7 +23,6 @@ class Settings(BaseSettings):
 
     # ============ 安全配置 ============
     JWT_ALGORITHM: str = "HS256"
-
     # ============ Supabase配置 (本地部署) ============
     SUPABASE_URL: str = "http://localhost:8000"
     SUPABASE_ANON_KEY: str = ""

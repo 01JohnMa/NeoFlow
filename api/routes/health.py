@@ -32,17 +32,18 @@ async def jobs_health():
 @router.get("/health/config")
 async def config_check():
     """配置检查接口"""
+    connection = settings.llm_connection()
     return {
         "app_name": settings.APP_NAME,
         "debug": settings.DEBUG,
         "supabase_url": settings.SUPABASE_URL,
         "llm_model": settings.LLM_MODEL_ID,
-        "llm_base_url": settings.LLM_BASE_URL,
+        "llm_provider": "litellm" if settings.LITELLM_BASE_URL else "direct",
+        "llm_base_url": connection["base_url"],
         "upload_folder": settings.UPLOAD_FOLDER,
         "max_file_size": settings.MAX_FILE_SIZE,
         "allowed_extensions": settings.allowed_extensions_list
     }
-
 
 
 

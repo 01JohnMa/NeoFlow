@@ -1,4 +1,4 @@
-﻿import { supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { api } from './api'
 import type { AuthChangeEvent, User, Session } from '@supabase/supabase-js'
 
@@ -11,93 +11,62 @@ export interface AuthResponse {
 export interface SignUpOptions {
   email: string
   password: string
-  tenantId?: string
   displayName?: string
 }
 
-export interface Tenant {
-  id: string
-  name: string
-  code: string
-  description?: string
-}
-
 // localStorage keys for pending profile data (used when email confirmation is required)
-const PENDING_TENANT_KEY = 'neoflow_pending_tenant_id'
 const PENDING_DISPLAY_NAME_KEY = 'neoflow_pending_display_name'
 
 // Cache pending profile data for first login
-export function cachePendingProfile(tenantId?: string, displayName?: string) {
-  if (tenantId) {
-    localStorage.setItem(PENDING_TENANT_KEY, tenantId)
-  }
+export function cachePendingProfile(displayName?: string) {
   if (displayName) {
     localStorage.setItem(PENDING_DISPLAY_NAME_KEY, displayName)
   }
 }
 
 // Get cached pending profile data
-export function getPendingProfile(): { tenantId?: string; displayName?: string } {
+export function getPendingProfile(): { displayName?: string } {
   return {
-    tenantId: localStorage.getItem(PENDING_TENANT_KEY) || undefined,
     displayName: localStorage.getItem(PENDING_DISPLAY_NAME_KEY) || undefined,
   }
 }
 
 // Clear cached pending profile data
 export function clearPendingProfile() {
-  localStorage.removeItem(PENDING_TENANT_KEY)
+  // Remove the legacy key once; tenant scope is no longer browser-managed.
+  localStorage.removeItem('neoflow_pending_tenant_id')
   localStorage.removeItem(PENDING_DISPLAY_NAME_KEY)
 }
 
 export const authService = {
-  // Get available tenants for registration
-  async getTenants(): Promise<Tenant[]> {
-    try {
-      const { data } = await api.get<Tenant[]>('/tenants')
-      return data || []
-    } catch (error) {
-      console.error('鑾峰彇绉熸埛鍒楄〃澶辫触:', error)
-      return []
-    }
-  },
-
-  // Sign up with email/password and optional tenant
+  // Sign up with email/password. Tenant scope is assigned by the integrating platform.
   async signUp(options: SignUpOptions): Promise<AuthResponse> {
-    const { email, password, tenantId, displayName } = options
-    
+    const { email, password, displayName } = options
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           display_name: displayName || email,
-          tenant_id: tenantId,
         }
       }
     })
-    
-    // If signup successful and we have tenant_id
-    if (!error && data.user && tenantId) {
+
+    // Display name may be persisted after authentication. Tenant scope is
+    // never accepted from the browser and is assigned by the platform.
+    if (!error && data.user && displayName) {
       if (data.session) {
-        // Session available (email confirmation disabled), update profile immediately
         try {
-          await api.put('/tenants/me/profile', {
-            tenant_id: tenantId,
-            display_name: displayName || email
-          })
-        } catch (profileError) {
-          console.warn('鏇存柊鐢ㄦ埛 profile 澶辫触:', profileError)
-          // Cache for fallback on first login
-          cachePendingProfile(tenantId, displayName || email)
+          await api.put('/tenants/me/profile', { display_name: displayName })
+        } catch {
+          cachePendingProfile(displayName)
         }
       } else {
-        // No session (email confirmation required), cache for first login
-        console.log('缂撳瓨寰呮洿鏂扮殑 profile 鏁版嵁锛堢瓑寰呴偖绠辩‘璁ゅ悗棣栨鐧诲綍鏃舵洿鏂帮級')
-        cachePendingProfile(tenantId, displayName || email)
+        cachePendingProfile(displayName)
       }
     }
-    
+
     return {
       user: data.user,
       session: data.session,
@@ -178,6 +147,4 @@ export const authService = {
 }
 
 export default authService
-
-
 

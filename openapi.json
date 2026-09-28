@@ -1,6 +1,122 @@
 {
   "components": {
     "schemas": {
+      "Body_create_direct_extract_api_extract_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "template_code": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Template Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "template_code"
+        ],
+        "title": "Body_create_direct_extract_api_extract_post",
+        "type": "object"
+      },
+      "Body_create_direct_parse_api_parse_post": {
+        "properties": {
+          "enable_formula": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Formula"
+          },
+          "enable_table": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Table"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "parse_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pipeline",
+                  "vlm"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Mode"
+          },
+          "remove_watermark": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remove Watermark"
+          },
+          "target_pages": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Pages"
+          },
+          "watermark_keywords": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watermark Keywords"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_create_direct_parse_api_parse_post",
+        "type": "object"
+      },
       "Body_create_session_api_sdk_sessions_post": {
         "properties": {
           "file": {
@@ -51,17 +167,6 @@
               }
             ],
             "title": "Template Name"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tenant Id"
           }
         },
         "required": [
@@ -430,29 +535,6 @@
         "title": "CreateConfigurationRequest",
         "type": "object"
       },
-      "CreateExtractRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "configuration_id": {
-            "title": "Configuration Id",
-            "type": "string"
-          },
-          "document_ids": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Document Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "configuration_id",
-          "document_ids"
-        ],
-        "title": "CreateExtractRequest",
-        "type": "object"
-      },
       "CreateJobRequest": {
         "description": "创建 Job：固定一个已发布 Configuration Revision。",
         "properties": {
@@ -472,107 +554,6 @@
           "configuration_revision_id"
         ],
         "title": "CreateJobRequest",
-        "type": "object"
-      },
-      "CreateParseRequestModel": {
-        "additionalProperties": false,
-        "properties": {
-          "document_ids": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Document Ids",
-            "type": "array"
-          },
-          "enable_formula": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Formula"
-          },
-          "enable_table": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Table"
-          },
-          "language": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Language"
-          },
-          "page_ranges": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ParsePageRangesModel"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "parse_mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "pipeline",
-                  "vlm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parse Mode"
-          },
-          "remove_watermark": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remove Watermark"
-          },
-          "watermark_keywords": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Watermark Keywords"
-          }
-        },
-        "required": [
-          "document_ids"
-        ],
-        "title": "CreateParseRequestModel",
         "type": "object"
       },
       "DetectedField": {
@@ -627,62 +608,6 @@
         "title": "DocumentAnalysis",
         "type": "object"
       },
-      "ExtractionConfigurationResponse": {
-        "description": "抽取配置响应（上传页选择用）",
-        "properties": {
-          "code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Code"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "extraction_strategy": {
-            "default": "full_document",
-            "enum": [
-              "full_document",
-              "source_page_routed",
-              "agentic_source_page_routed"
-            ],
-            "title": "Extraction Strategy",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ],
-        "title": "ExtractionConfigurationResponse",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -694,24 +619,6 @@
           }
         },
         "title": "HTTPValidationError",
-        "type": "object"
-      },
-      "ParsePageRangesModel": {
-        "additionalProperties": false,
-        "properties": {
-          "target_pages": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Pages"
-          }
-        },
-        "title": "ParsePageRangesModel",
         "type": "object"
       },
       "ParseRetryRequest": {
@@ -963,41 +870,6 @@
         "title": "SDKSessionState",
         "type": "string"
       },
-      "TenantResponse": {
-        "description": "租户响应",
-        "properties": {
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "code"
-        ],
-        "title": "TenantResponse",
-        "type": "object"
-      },
       "UpdateConfigurationRequest": {
         "properties": {
           "code": {
@@ -1062,98 +934,6 @@
           }
         },
         "title": "UpdateConfigurationRequest",
-        "type": "object"
-      },
-      "UpdateProfileRequest": {
-        "description": "更新用户信息请求",
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tenant Id"
-          }
-        },
-        "title": "UpdateProfileRequest",
-        "type": "object"
-      },
-      "UserProfileResponse": {
-        "description": "用户信息响应",
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "role": {
-            "default": "user",
-            "title": "Role",
-            "type": "string"
-          },
-          "tenant_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tenant Code"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tenant Id"
-          },
-          "tenant_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tenant Name"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id"
-        ],
-        "title": "UserProfileResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -2282,13 +2062,14 @@
         ]
       }
     },
-    "/api/extract/jobs": {
+    "/api/extract": {
       "post": {
-        "operationId": "create_extract_jobs_api_extract_jobs_post",
+        "description": "Direct platform capability: upload one file and enqueue Extract.\n\n``template_code`` is intentionally the only public template selector.  A\nconfiguration UUID, revision UUID, tenant, or department field is never\naccepted on this endpoint.",
+        "operationId": "create_direct_extract_api_extract_post",
         "parameters": [
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-ai-center-tenant-id",
             "required": false,
             "schema": {
               "anyOf": [
@@ -2299,22 +2080,102 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Ai-Center-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-application-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Application-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-application-version-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Application-Version-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-invocation-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Invocation-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-caller-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Caller-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Scope"
             }
           }
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/CreateExtractRequest"
+                "$ref": "#/components/schemas/Body_create_direct_extract_api_extract_post"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "201": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {}
@@ -2333,7 +2194,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Extract Jobs",
+        "summary": "Create Direct Extract",
         "tags": [
           "抽取能力",
           "抽取能力"
@@ -2755,14 +2616,14 @@
         ]
       }
     },
-    "/api/parse/jobs": {
+    "/api/parse": {
       "post": {
-        "description": "提交 Parse 能力：一次请求为每个文档创建一个 Job。\n\n- Idempotency-Key（可选）：同键同请求返回原 Job（终态后仍成立）\n- 活动复用：相同发起人 + 相同文档集合 + 相同冻结规格返回原 Job\n- 输入与活动请求重叠但规格不同 → 409",
-        "operationId": "create_parse_jobs_api_parse_jobs_post",
+        "description": "Direct platform capability: upload one file and enqueue Parse.",
+        "operationId": "create_direct_parse_api_parse_post",
         "parameters": [
           {
             "in": "header",
-            "name": "Idempotency-Key",
+            "name": "x-ai-center-tenant-id",
             "required": false,
             "schema": {
               "anyOf": [
@@ -2773,12 +2634,12 @@
                   "type": "null"
                 }
               ],
-              "title": "Idempotency-Key"
+              "title": "X-Ai-Center-Tenant-Id"
             }
           },
           {
             "in": "header",
-            "name": "authorization",
+            "name": "x-ai-center-application-id",
             "required": false,
             "schema": {
               "anyOf": [
@@ -2789,22 +2650,86 @@
                   "type": "null"
                 }
               ],
-              "title": "Authorization"
+              "title": "X-Ai-Center-Application-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-application-version-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Application-Version-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-invocation-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Invocation-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-caller-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Caller-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-ai-center-scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ai-Center-Scope"
             }
           }
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/CreateParseRequestModel"
+                "$ref": "#/components/schemas/Body_create_direct_parse_api_parse_post"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {}
@@ -2823,7 +2748,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Parse Jobs",
+        "summary": "Create Direct Parse",
         "tags": [
           "解析能力",
           "解析能力"
@@ -2832,7 +2757,7 @@
     },
     "/api/sdk/sessions": {
       "post": {
-        "description": "上传样例文档并启动 MinerU 解析。\n\n所属租户、文档类型（配置名/编码）与解析模式由操作者在第一步选定，接口负责校验；\n解析模式默认快速解析，可带一句可选说明引导字段建议。",
+        "description": "上传样例文档并启动 MinerU 解析。\n\n租户范围来自认证身份，文档类型（配置名/编码）与解析模式由操作者选定；\n解析模式默认快速解析，可带一句可选说明引导字段建议。",
         "operationId": "create_session_api_sdk_sessions_post",
         "parameters": [
           {
@@ -3370,296 +3295,6 @@
         "tags": [
           "AI模板生成",
           "AI模板生成"
-        ]
-      }
-    },
-    "/api/tenants": {
-      "get": {
-        "description": "获取所有可用租户列表（注册页下拉用）\n\n无需登录，只返回启用的租户",
-        "operationId": "list_tenants_api_tenants_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TenantResponse"
-                  },
-                  "title": "Response List Tenants Api Tenants Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Tenants",
-        "tags": [
-          "租户管理",
-          "租户管理"
-        ]
-      }
-    },
-    "/api/tenants/me/profile": {
-      "get": {
-        "description": "获取当前用户的 profile 信息（含租户、角色）",
-        "operationId": "get_my_profile_api_tenants_me_profile_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserProfileResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get My Profile",
-        "tags": [
-          "租户管理",
-          "租户管理"
-        ]
-      },
-      "put": {
-        "description": "更新当前用户的 profile（租户、显示名称）\n\n注意：普通用户只能在首次设置时选择租户，之后不能更改",
-        "operationId": "update_my_profile_api_tenants_me_profile_put",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProfileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update My Profile",
-        "tags": [
-          "租户管理",
-          "租户管理"
-        ]
-      }
-    },
-    "/api/tenants/me/templates": {
-      "get": {
-        "description": "获取当前用户所属租户可用于处理的已发布抽取配置列表",
-        "operationId": "get_my_templates_api_tenants_me_templates_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ExtractionConfigurationResponse"
-                  },
-                  "title": "Response Get My Templates Api Tenants Me Templates Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get My Templates",
-        "tags": [
-          "租户管理",
-          "租户管理"
-        ]
-      }
-    },
-    "/api/tenants/me/templates/{configuration_key}": {
-      "get": {
-        "description": "获取指定配置的详细信息（含字段定义）",
-        "operationId": "get_my_template_detail_api_tenants_me_templates__configuration_key__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "configuration_key",
-            "required": true,
-            "schema": {
-              "title": "Configuration Key",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get My Template Detail",
-        "tags": [
-          "租户管理",
-          "租户管理"
-        ]
-      }
-    },
-    "/api/tenants/{tenant_id}": {
-      "get": {
-        "description": "获取租户详情",
-        "operationId": "get_tenant_api_tenants__tenant_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "tenant_id",
-            "required": true,
-            "schema": {
-              "title": "Tenant Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Tenant",
-        "tags": [
-          "租户管理",
-          "租户管理"
         ]
       }
     },

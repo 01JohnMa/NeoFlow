@@ -14,4 +14,5 @@ NeoFlow provides capability APIs only; application registration and access contr
 - The console keeps authenticating its own administrators; external identity and credential mechanics are an integration concern owned by the middle platform, tracked separately.
 - Every resource NeoFlow persists still carries the Tenant key, and every read or write validates that the request's Tenant matches the resource's Tenant.
 - If a request cannot present a verified Tenant scope, NeoFlow fails closed rather than falling back to a default tenant.
-- The concrete assertion format (signed token versus trusted internal channel) is decided at integration time; the invariant is that only the middle platform's assertion is trusted.
+- AI Center capability calls use private-network gateway context headers with `tenant_id`, `application_id`, `version_id`, `invocation_id`, `caller_id`, and `scope`. The caller's Application Key is verified at the Gateway; NeoFlow does not repeat that verification.
+- NeoFlow does not expose department selection or tenant switching to capability callers; the existing `tenant_id` columns, foreign keys, and RLS policies remain the data-isolation boundary.

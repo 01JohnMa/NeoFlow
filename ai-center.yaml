@@ -1,8 +1,8 @@
 # Minimal AI Center publication contract for NeoFlow.
 runtime:
   kind: python-http
-  command: [uvicorn, api.main:app, --host, 0.0.0.0, --port, "8000"]
-  port: 8000
+  command: [uvicorn, api.main:app, --host, 0.0.0.0, --port, "8080"]
+  port: 8080
   healthcheck_path: /api/health
 environment:
   - name: SUPABASE_URL
@@ -18,7 +18,7 @@ environment:
     required: false
     sensitive: true
   - name: JWKS_URL
-    required: true
+    required: false
     sensitive: false
   - name: MINERU_API_KEY
     required: true

@@ -11,10 +11,10 @@
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.dependencies.auth import get_current_user, CurrentUser
+from api.dependencies.auth import CurrentUser, get_current_user, require_platform_scope
 from api.exceptions import AuthorizationError
 from api.jobs import create_job, get_job
 from api.routes.jobs import _can_access_job
@@ -29,6 +29,11 @@ from services.result_service import result_service
 from services.extract_result_view import resolve_result_view
 from services.supabase_service import supabase_service
 from services.template_contract import is_canonical_schema, project_fields
+from api.routes.parse import (
+    _delete_uploaded_document,
+    reject_forbidden_direct_fields,
+    save_uploaded_document,
+)
 
 router = APIRouter(tags=["抽取能力"])
 
@@ -38,7 +43,7 @@ EXTRACT_SAMPLE_KEY = "extract"
 class CreateExtractRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    configuration_id: str
+    template_code: str = Field(min_length=1, max_length=50)
     document_ids: List[str] = Field(min_length=1)
 
 
@@ -64,14 +69,18 @@ async def _load_definition_and_spec(
     return None, spec
 
 
-@router.post("/extract/jobs", status_code=201)
+@router.post("/extract/jobs", status_code=201, include_in_schema=False)
 async def create_extract_jobs(
     request: CreateExtractRequest,
     user: CurrentUser = Depends(get_current_user),
 ):
-    configuration = await configuration_service.get_configuration(request.configuration_id)
+    if not user.tenant_id:
+        raise AuthorizationError("请求没有有效的租户范围")
+    configuration = await configuration_service.get_published_extract_configuration_by_code(
+        user.tenant_id, request.template_code.strip()
+    )
     if not configuration:
-        raise HTTPException(status_code=404, detail="配置不存在")
+        raise HTTPException(status_code=404, detail="抽取模板不存在")
     if not user.can_access_tenant(configuration["tenant_id"]):
         raise AuthorizationError("无权使用该 Configuration")
     if configuration.get("type") != "extract":
@@ -111,9 +120,72 @@ async def create_extract_jobs(
         "success": True,
         "data": {
             "job_ids": job_ids,
-            "configuration_id": configuration["id"],
+            "template_code": request.template_code.strip(),
             "revision_id": revision_id,
             "mode": "published" if revision_id else "draft",
+        },
+    }
+
+
+@router.post("/extract", status_code=202)
+async def create_direct_extract(
+    request: Request,
+    file: UploadFile = File(...),
+    template_code: str = Form(..., min_length=1, max_length=50),
+    user: CurrentUser = Depends(require_platform_scope("extract")),
+):
+    """Direct platform capability: upload one file and enqueue Extract.
+
+    ``template_code`` is intentionally the only public template selector.  A
+    configuration UUID, revision UUID, tenant, or department field is never
+    accepted on this endpoint.
+    """
+    await reject_forbidden_direct_fields(request)
+    if not user.tenant_id:
+        raise AuthorizationError("请求没有有效的租户范围")
+    code = template_code.strip()
+    if not code:
+        raise HTTPException(status_code=422, detail="template_code 不能为空")
+
+    configuration = await configuration_service.get_published_extract_configuration_by_code(
+        user.tenant_id, code
+    )
+    if not configuration:
+        raise HTTPException(status_code=404, detail="抽取模板不存在")
+
+    uploaded = await save_uploaded_document(file, user)
+    try:
+        revision_id, _spec = await _load_definition_and_spec(configuration)
+        if not revision_id:
+            # The strict resolver above requires a published revision.  Keep
+            # this guard in case a mocked/legacy store returns malformed data.
+            raise HTTPException(status_code=409, detail="配置没有可用的已发布修订")
+        job_id = await create_job(
+            created_by=user.user_id,
+            related_document_ids=[uploaded["document_id"]],
+            tenant_id=user.tenant_id,
+            configuration_revision_id=revision_id,
+            execution_spec=None,
+        )
+    except HTTPException:
+        await _delete_uploaded_document(uploaded["document_id"], uploaded["file_path"])
+        raise
+    except ExtractFailure as exc:
+        await _delete_uploaded_document(uploaded["document_id"], uploaded["file_path"])
+        status = 422 if exc.reason in ("schema_invalid", "schema_missing", "target_not_supported") else 409
+        raise HTTPException(status_code=status, detail=f"{exc.reason}: {exc.message}")
+    except Exception:
+        await _delete_uploaded_document(uploaded["document_id"], uploaded["file_path"])
+        raise
+
+    return {
+        "success": True,
+        "data": {
+            "document_id": uploaded["document_id"],
+            "job_id": job_id,
+            "job_ids": [job_id],
+            "template_code": code,
+            "revision_id": revision_id,
         },
     }
 

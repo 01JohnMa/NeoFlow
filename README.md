@@ -51,6 +51,18 @@ docker compose -f supabase/docker-compose.yml -f docker-compose.prod.yml up -d -
 
 默认路由：`/` → 前端；`/api` → 后端；`/supabase` → Supabase Auth/REST 直连。
 
+使用外置 PostgreSQL 时，先在目标环境准备数据库，再启动 API/worker：
+
+```bash
+docker compose --env-file .env.local \
+  -f supabase/docker-compose.yml \
+  -f supabase/docker-compose.external.yml \
+  -f docker-compose.prod.yml \
+  run --rm --no-deps migrations
+```
+
+迁移容器只执行 `supabase/migrations` 并记录 `schema_migrations`；它不会把另一套 Supabase 项目中的用户、文档或 Configuration 数据复制过来。LiteLLM 的 URL 和 key 在部署目标环境注入后，再启动 API 与 worker。
+
 ### 2. 启动后端 API
 
 ```bash
@@ -77,7 +89,7 @@ npm run dev
 
 ## API 概览
 
-鉴权走 Supabase Auth JWT；管理员接口需租户管理员权限。完整 schema 见 `/docs`（Swagger）。
+AI Center 调用只允许从私有网络进入；Gateway 校验 Application Key 后转发租户和 capability scope。直接维护或调试时仍可使用 Supabase Auth JWT。管理员接口需租户管理员权限。完整 schema 见 `/docs`（Swagger）。
 
 ### 文档
 
@@ -94,6 +106,7 @@ DELETE /api/documents/{id}                     # 删除（活动任务占用时 
 ### Parse 能力
 
 ```bash
+POST /api/parse                              # 直接上传文件并异步解析
 POST /api/parse/jobs                          # 受理解析（支持 Idempotency-Key 头）
 GET  /api/jobs/{job_id}/parse-result          # 指定 Job 的解析结果
 ```
@@ -101,10 +114,19 @@ GET  /api/jobs/{job_id}/parse-result          # 指定 Job 的解析结果
 ### Extract 能力
 
 ```bash
+POST /api/extract                            # 文件 + template_code，直接异步抽取
 POST /api/extract/jobs                        # 受理抽取（每文档一个 Job）
 GET  /api/documents/{id}/extract-result       # 文档最新正式抽取结果
 GET  /api/jobs/{job_id}/extract-result        # 指定 Job 的正式抽取结果
 ```
+
+直接调用 Extract 时只提交模板编码，不提交 Configuration ID：
+
+```json
+{"template_code":"inspection_report"}
+```
+
+Parse 不绑定模板。模板编码由 `configurations.code` 提供，服务端按当前租户查找已发布 Extract Configuration，并在 Job 中固定实际 Revision。调用方不提交 `tenant_id`、`department_id`、`configuration_id` 或 `configuration_revision_id`。
 
 ### 任务与配置
 
@@ -116,9 +138,10 @@ PUT  /api/configurations/{id}                 # 更新草稿
 POST /api/configurations/{id}/publish         # 发布为不可变 Revision
 POST /api/configurations/{id}/archive         # 归档
 GET  /api/configurations/{id}/revisions       # 修订历史
-GET  /api/tenants                             # 租户列表
 POST /api/sdk/sessions                        # AI 模板向导（草拟抽取配置）
 ```
+
+租户、配置、SDK 和 Studio 管理接口属于内部管理面，不是 AI Center 对外能力。AI Center 公共合同只导出 Parse、Extract、Job 状态和结果操作；发布预检只执行 `/health`，不会自动创建真实解析或抽取任务。
 
 ## 项目结构
 
@@ -177,10 +200,14 @@ ANON_KEY=...
 SERVICE_ROLE_KEY=...
 JWT_SECRET=...            # 自建项目用于 API 验签；云项目可改用 JWKS_URL
 
-# LLM（OpenAI 兼容，默认 DeepSeek）
+# LLM（中台部署使用 LiteLLM）
+LITELLM_BASE_URL=https://<litellm-gateway>/v1
+LITELLM_API_KEY=...       # 由 GitLab/Jenkins/部署 Secret 注入，不提交到仓库
+LLM_MODEL_ID=deepseek-chat
+
+# 本地直连回退（中台部署不配置）
 LLM_API_KEY=...
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL_ID=deepseek-chat
 
 # MinerU 解析
 MINERU_API_KEY=...
@@ -195,6 +222,8 @@ EXTRACT_MAX_ATTEMPTS=2
 EXTRACT_MAX_REQUESTS_PER_JOB=200
 EXTRACT_TIMEOUT_SECONDS=900
 ```
+
+中台应用注册不承载 LiteLLM 凭据。部署到 GitLab/Jenkins 或其他运行环境时，由部署编排把 `LITELLM_BASE_URL` 注入普通环境变量，把 `LITELLM_API_KEY` 注入 Secret；两者不写入 Configuration、数据库、AI Center manifest 或代码。API 的 `/api/health/config` 只返回生效的 provider 与 URL，不返回 key。
 
 ## 测试
 

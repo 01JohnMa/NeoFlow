@@ -14,7 +14,7 @@ describe('extract service', () => {
     vi.clearAllMocks()
   })
 
-  it('提交抽取并透传配置与文档', async () => {
+  it('提交抽取并透传模板编码与文档', async () => {
     apiMock.post.mockResolvedValue({
       data: {
         success: true,
@@ -28,12 +28,12 @@ describe('extract service', () => {
     })
 
     const result = await extractService.createJobs({
-      configuration_id: 'config-1',
+      template_code: 'inspection_report',
       document_ids: ['doc-a', 'doc-b'],
     })
 
     expect(apiMock.post).toHaveBeenCalledWith('/extract/jobs', {
-      configuration_id: 'config-1',
+      template_code: 'inspection_report',
       document_ids: ['doc-a', 'doc-b'],
     })
     expect(result.job_ids).toEqual(['job-1', 'job-2'])
@@ -84,54 +84,4 @@ describe('extract service', () => {
     expect(result.data).toEqual([])
   })
 
-  it('管理员读取 extract 配置并规范化', async () => {
-    apiMock.get.mockResolvedValue({
-      data: [
-        {
-          id: 'config-1',
-          name: '检测报告',
-          code: 'quality_v1',
-          status: 'published',
-          type: 'extract',
-          current_revision_id: 'revision-1',
-          draft_definition: {
-            target: 'per_doc',
-            extraction_strategy: 'source_page_routed',
-            data_schema: { type: 'object' },
-          },
-        },
-      ],
-    })
-
-    const configs = await extractService.listConfigurations()
-
-    expect(apiMock.get).toHaveBeenCalledWith('/admin/configurations', {
-      params: { type: 'extract' },
-    })
-    expect(configs).toHaveLength(1)
-    expect(configs[0].draft_definition?.target).toBe('per_doc')
-    expect(configs[0].draft_definition?.extraction_strategy).toBe('source_page_routed')
-  })
-
-  it('非管理员 403 时回退到已发布模板', async () => {
-    apiMock.get
-      .mockRejectedValueOnce(Object.assign(new Error('forbidden'), { response: { status: 403 } }))
-      .mockResolvedValueOnce({
-        data: [{ id: 'template-1', name: '源文件模板', code: 'source', description: null, extraction_strategy: 'source_page_routed' }],
-      })
-
-    const configs = await extractService.listConfigurations()
-
-    expect(apiMock.get).toHaveBeenNthCalledWith(1, '/admin/configurations', {
-      params: { type: 'extract' },
-    })
-    expect(apiMock.get).toHaveBeenNthCalledWith(2, '/tenants/me/templates')
-    expect(configs[0]).toMatchObject({
-      id: 'template-1',
-      status: 'published',
-      type: 'extract',
-      current_revision_id: null,
-    })
-    expect(configs[0].draft_definition?.extraction_strategy).toBe('source_page_routed')
-  })
 })

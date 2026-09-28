@@ -393,6 +393,37 @@ class ConfigurationService(SupabaseClientMixin):
             logger.error(f"按 {field} 解析配置失败: {e}")
             return None
 
+    async def get_published_extract_configuration_by_code(
+        self,
+        tenant_id: str,
+        code: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve the public Extract selector without ID/name fallbacks.
+
+        ``code`` is the only stable selector accepted by the public Extract
+        endpoint.  Keep the lifecycle predicates here so callers cannot
+        accidentally run a draft, archived, or non-Extract configuration.
+        """
+        normalized_tenant = str(tenant_id or "").strip()
+        normalized_code = str(code or "").strip()
+        if not normalized_tenant or not normalized_code:
+            return None
+        try:
+            result = await self._run_sync(
+                lambda: self._get_client().table("configurations").select("*")
+                .eq("tenant_id", normalized_tenant)
+                .eq("code", normalized_code)
+                .eq("type", "extract")
+                .eq("status", "published")
+                .not_.is_("current_revision_id", "null")
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as exc:
+            logger.error("按公开 template_code 获取已发布配置失败: {}", exc)
+            raise
+
     async def resolve_extraction_configuration(
         self,
         tenant_id: Optional[str],

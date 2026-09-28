@@ -6,9 +6,9 @@
 -- 执行顺序：在 001_multi_tenant.sql 之后执行。
 -- ============================================================
 
--- 质量管理中心
+-- wetrial
 INSERT INTO tenants (id, name, code, description, is_active) VALUES
-    ('a0000000-0000-0000-0000-000000000001', '质量管理中心', 'quality', '负责产品质量检验报告处理', TRUE)
+    ('a0000000-0000-0000-0000-000000000001', 'wetrial', 'wetrial', 'wetrial 文档处理租户', TRUE)
 ON CONFLICT (code) DO NOTHING;
 
 -- 照明事业部
