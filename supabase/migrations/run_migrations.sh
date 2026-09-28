@@ -8,6 +8,7 @@ DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-your-super-secret-password}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
 AUTH_WAIT_SECONDS="${AUTH_WAIT_SECONDS:-300}"
+MIGRATION_SKIP_FILES="${MIGRATION_SKIP_FILES:-}"
 
 # 固定排序规则，保证迁移顺序可预测（重复编号按文件名字典序执行）
 LC_ALL=C
@@ -137,6 +138,14 @@ check_duplicate_numbering() {
 apply_migration() {
   file="$1"
   base_name=$(basename "$file")
+
+  case ",${MIGRATION_SKIP_FILES}," in
+    *,"${base_name}",*)
+      log "跳过配置排除的迁移: $base_name"
+      return 0
+      ;;
+  esac
+
   # 确保使用绝对路径
   full_path="${MIGRATIONS_DIR}/${base_name}"
 
