@@ -35,3 +35,19 @@ class TestStuckDocumentRecovery:
 
         # 必须有 warning/error 日志
         assert mock_logger.error.called or mock_logger.warning.called
+
+
+class TestRootHealthContract:
+    def test_root_health_returns_preflight_contract_status(self):
+        """AI Center Runtime 预检要求根路径 /health 返回 status == "ok"。"""
+        from fastapi.testclient import TestClient
+
+        from api.main import app
+
+        with TestClient(app) as client:
+            root = client.get("/health")
+            api_health = client.get("/api/health")
+        assert root.status_code == 200
+        assert root.json()["status"] == "ok"
+        assert api_health.status_code == 200
+        assert api_health.json()["status"] == "healthy"

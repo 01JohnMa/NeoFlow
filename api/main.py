@@ -126,8 +126,13 @@ app.include_router(health_router, prefix="/api", tags=["健康检查"])
 
 @app.get("/health", tags=["健康检查"])
 async def root_health_check():
-    """Compatibility health endpoint for runtimes that probe the root path."""
-    return await health_check()
+    """Compatibility health endpoint for runtimes that probe the root path.
+
+    AI Center Runtime 预检合同要求该端点返回 ``status == "ok"``；
+    ``/api/health`` 保持业务语义的 ``"healthy"`` 不变。
+    """
+    result = await health_check()
+    return {**result, "status": "ok"}
 
 
 app.include_router(documents_router, prefix="/api/documents", tags=["文档处理"])
