@@ -3,6 +3,7 @@
 
 import asyncio
 import time
+from uuid import UUID, NAMESPACE_URL, uuid5
 from typing import Optional, Tuple, Dict, Any
 from fastapi import Header, Depends
 from pydantic import BaseModel
@@ -57,6 +58,30 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     return authorization[7:].strip()
 
 
+def _canonical_platform_user_id(raw_user_id: str) -> str:
+    candidate = raw_user_id.removeprefix("caller-")
+    try:
+        return str(UUID(candidate))
+    except (ValueError, AttributeError):
+        return str(uuid5(NAMESPACE_URL, f"ai-center:caller:{raw_user_id}"))
+
+
+async def _canonical_platform_tenant_id(raw_tenant_id: str) -> str:
+    try:
+        return str(UUID(raw_tenant_id))
+    except (ValueError, AttributeError):
+        pass
+    code = "wetrial" if raw_tenant_id == "default" else raw_tenant_id
+    result = await supabase_service.client.table("tenants").select("id").eq("code", code).limit(1).execute()
+    row = (result.data or [None])[0]
+    if not isinstance(row, dict) or not row.get("id"):
+        raise AuthenticationError("AI Center 网关租户未映射到 NeoFlow 租户")
+    try:
+        return str(UUID(str(row["id"])))
+    except ValueError as exc:
+        raise AuthenticationError("NeoFlow 租户标识不是 UUID") from exc
+
+
 def require_platform_scope(scope: str):
     """Require a scoped AI Center context on NeoFlow's private network.
 
@@ -83,9 +108,42 @@ def require_platform_scope(scope: str):
             raise AuthorizationError("网关上下文包含不允许的 scope")
         if scope not in scopes:
             raise AuthorizationError(f"网关上下文缺少 scope: {scope}")
-        return CurrentUser(user_id=caller_id, token="ai-center-private", tenant_id=tenant_id)
+        return CurrentUser(
+            user_id=_canonical_platform_user_id(caller_id),
+            token="ai-center-private",
+            tenant_id=await _canonical_platform_tenant_id(tenant_id),
+        )
 
     _dependency.__name__ = f"require_platform_{scope.replace('.', '_')}_scope"
+    return _dependency
+
+
+def require_platform_or_user_scope(scope: str):
+    """Accept private AI Center headers or the existing Supabase Bearer user."""
+    private_dependency = require_platform_scope(scope)
+
+    async def _dependency(
+        authorization: Optional[str] = Header(None),
+        tenant_id: Optional[str] = Header(None, alias="x-ai-center-tenant-id"),
+        application_id: Optional[str] = Header(None, alias="x-ai-center-application-id"),
+        version_id: Optional[str] = Header(None, alias="x-ai-center-application-version-id"),
+        invocation_id: Optional[str] = Header(None, alias="x-ai-center-invocation-id"),
+        caller_id: Optional[str] = Header(None, alias="x-ai-center-caller-id"),
+        raw_scope: Optional[str] = Header(None, alias="x-ai-center-scope"),
+    ) -> CurrentUser:
+        values = (tenant_id, application_id, version_id, invocation_id, caller_id, raw_scope)
+        if any(value is not None for value in values):
+            return await private_dependency(
+                tenant_id=tenant_id,
+                application_id=application_id,
+                version_id=version_id,
+                invocation_id=invocation_id,
+                caller_id=caller_id,
+                raw_scope=raw_scope,
+            )
+        return await get_current_user(authorization)
+
+    _dependency.__name__ = f"require_platform_or_user_{scope.replace('.', '_')}_scope"
     return _dependency
 
 

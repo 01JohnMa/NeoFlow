@@ -81,6 +81,12 @@ cp env.example.txt .env   # 填入 SUPABASE_*、LLM_API_KEY、MINERU_API_KEY
 uvicorn api.main:app --reload --port 8080
 ```
 
+`requirements.txt` 包含三种 Extract 策略的完整运行依赖；本地测试工具的开发依赖放在 `requirements.dev.txt`，需要运行完整测试时再安装：
+
+```bash
+pip install -r requirements.dev.txt
+```
+
 ### 3. 启动文档 worker（独立进程，负责认领并执行 Job）
 
 ```bash

@@ -14,7 +14,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.dependencies.auth import CurrentUser, get_current_user, require_platform_scope
+from api.dependencies.auth import (
+    CurrentUser,
+    get_current_user,
+    require_platform_or_user_scope,
+    require_platform_scope,
+)
 from api.exceptions import AuthorizationError
 from api.jobs import create_job, get_job
 from api.routes.jobs import _can_access_job
@@ -250,7 +255,7 @@ async def get_document_extract_result(
 @router.get("/jobs/{job_id}/extract-result")
 async def get_job_extract_result(
     job_id: str,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_platform_or_user_scope("results.read")),
 ):
     job = await get_job(job_id)
     if not job or not await _can_access_job(job, user):
