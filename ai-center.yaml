@@ -41,6 +41,9 @@ environment:
   - name: LLM_MODEL_ID
     required: false
     sensitive: false
+    # 平台主 key 的模型授权为 deepseek-flash / qwen3.7-text-embedding-flash；
+    # 默认值与平台模型白名单对齐（应用可按需覆盖为其他已授权模型）。
+    default: deepseek-flash
   - name: SDK_MODEL_ID
     required: false
     sensitive: false
