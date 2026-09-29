@@ -84,12 +84,18 @@ def _canonical_platform_user_id(raw_user_id: str) -> str:
 
 
 async def _canonical_platform_tenant_id(raw_tenant_id: str) -> str:
-    try:
-        return str(UUID(raw_tenant_id))
-    except (ValueError, AttributeError):
-        pass
-    code = "wetrial" if raw_tenant_id == "default" else raw_tenant_id
-    result = await supabase_service.client.table("tenants").select("id").eq("code", code).limit(1).execute()
+    """按 tenants.ai_center_tenant_id 精确映射网关租户。
+
+    取值由中台数据模型决定（applications.tenant_id），NeoFlow 不预设格式、
+    不特判具体值：只有映射列命中才放行，未映射一律拒绝。
+    """
+    result = await supabase_service._run_sync(
+        lambda: supabase_service.client.table("tenants")
+        .select("id")
+        .eq("ai_center_tenant_id", raw_tenant_id)
+        .limit(1)
+        .execute()
+    )
     row = (result.data or [None])[0]
     if not isinstance(row, dict) or not row.get("id"):
         raise AuthenticationError("AI Center 网关租户未映射到 NeoFlow 租户")

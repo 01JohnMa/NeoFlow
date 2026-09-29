@@ -112,7 +112,13 @@ async def test_direct_extract_selects_published_template_code_and_pins_revision(
 
 
 @pytest.mark.asyncio
-async def test_private_gateway_context_requires_tenant_and_scope():
+async def test_private_gateway_context_requires_tenant_and_scope(monkeypatch):
+    async def fake_canonical_tenant(raw_tenant_id):
+        return TENANT_ID
+
+    monkeypatch.setattr(
+        "api.dependencies.auth._canonical_platform_tenant_id", fake_canonical_tenant
+    )
     dependency = require_platform_scope("extract")
     user = await dependency(
         tenant_id=TENANT_ID,
