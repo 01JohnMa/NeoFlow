@@ -243,6 +243,7 @@ class ParseRequestService(SupabaseClientMixin):
         target_pages: Optional[List[int]],
         idempotency_key: Optional[str],
         options: Optional[Dict[str, Any]] = None,
+        platform_invocation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """调用 admit_parse_request；返回 {status, request_id, job_ids, reason}。"""
         mode = resolve_parse_mode(parse_mode)
@@ -265,6 +266,7 @@ class ParseRequestService(SupabaseClientMixin):
             "p_policy_version": settings.PARSE_POLICY_VERSION,
             "p_max_files": settings.PARSE_MAX_FILES_PER_REQUEST,
             "p_max_active_jobs": settings.PARSE_MAX_ACTIVE_JOBS_PER_TENANT,
+            "p_platform_invocation_id": platform_invocation_id,
         }
 
         try:

@@ -101,6 +101,7 @@ async def create_job(
     tenant_id: Optional[str] = None,
     configuration_revision_id: Optional[str] = None,
     execution_spec: Optional[Dict[str, Any]] = None,
+    platform_invocation_id: Optional[str] = None,
 ) -> str:
     """创建持久化 Job，返回 job_id。
 
@@ -119,6 +120,7 @@ async def create_job(
         "tenant_id": tenant_id,
         "configuration_revision_id": configuration_revision_id,
         "execution_spec": execution_spec,
+        "platform_invocation_id": platform_invocation_id,
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
     }

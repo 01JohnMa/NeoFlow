@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.5
     LITELLM_BASE_URL: str = ""
     LITELLM_API_KEY: str = ""
+    # ============ AI Center Relay（平台注入；本地 direct 见 NEOFLOW_LLM_MODE）============
+    AI_CENTER_MODEL_GATEWAY_URL_TEMPLATE: str = ""
+    AI_CENTER_RUNTIME_CREDENTIAL: str = ""
+    AI_CENTER_MODEL_OPERATIONS: str = ""
+    # 仅本地开发/测试显式开启 direct（平台从不注入，ai-center.yaml 不声明）。
+    NEOFLOW_LLM_MODE: str = ""
 
     # ============ OpenAI Agents SDK 配置 ============
     SDK_MODEL_ID: str = ""

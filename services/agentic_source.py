@@ -15,6 +15,7 @@ from services.parse_result import Page, ParseResult
 from services.schema_queries import schema_field_queries
 from services.source_page_index import SourcePageCandidate, retrieve_source_pages
 from services.llm_invoke import is_retryable_transport_error
+from services import platform_model_client
 from config.settings import settings
 
 
@@ -227,7 +228,11 @@ async def route_with_agent(
         # Keep this construction deliberately small; tool functions are the contract.
         # The model alias is only for LlamaIndex's context metadata. The actual
         # provider model is sent through additional_kwargs for OpenAI-compatible APIs.
-        connection = settings.llm_connection()
+        # Relay 模式下按当前 Job 绑定的 Invocation 解析 Relay 连接；本地 direct
+        # 模式回退 llm_connection()。缺 Invocation 等构造失败直接抛出。
+        connection = (
+            platform_model_client.relay_openai_connection() or settings.llm_connection()
+        )
         llm = OpenAI(
             model="gpt-4o-mini",
             api_key=connection["api_key"],

@@ -24,6 +24,21 @@ _jwks_client: Optional[Tuple[str, PyJWKClient]] = None
 _PLATFORM_SCOPES = frozenset({"parse", "extract", "jobs.read", "results.read"})
 
 
+class PlatformContext(BaseModel):
+    """AI Center → NeoFlow 私网调用的完整平台上下文。
+
+    Header 只允许 AI Center 注入，外部调用方不可填写；invocation_id 用于
+    模型归因（保存到 processing_jobs.platform_invocation_id）。
+    """
+
+    tenant_id: str
+    application_id: str
+    application_version_id: str
+    invocation_id: str
+    caller_id: str
+    scopes: Tuple[str, ...] = ()
+
+
 class CurrentUser(BaseModel):
     """当前用户信息（含租户）"""
     user_id: str
@@ -33,10 +48,12 @@ class CurrentUser(BaseModel):
     tenant_name: Optional[str] = None
     role: str = "user"  # super_admin / tenant_admin / user
     display_name: Optional[str] = None
-    
+    # AI Center 私网网关上下文（平台直连路由才有；供模型归因与一致性校验使用）
+    platform_context: Optional[PlatformContext] = None
+
     class Config:
         arbitrary_types_allowed = True
-    
+
     def is_super_admin(self) -> bool:
         """是否为超级管理员"""
         return self.role == "super_admin"
@@ -87,18 +104,20 @@ def require_platform_scope(scope: str):
 
     AI Center authenticates the caller with its Application Key before sending
     these requests. NeoFlow receives the tenant and scope as internal gateway
-    headers; the capability routes are not publicly reachable.
+    headers; the capability routes are not publicly reachable. The headers are
+    excluded from the generated OpenAPI so they never become caller-facing
+    contract parameters.
     """
     if scope not in _PLATFORM_SCOPES:
         raise ValueError(f"unsupported platform scope: {scope}")
 
     async def _dependency(
-        tenant_id: Optional[str] = Header(None, alias="x-ai-center-tenant-id"),
-        application_id: Optional[str] = Header(None, alias="x-ai-center-application-id"),
-        version_id: Optional[str] = Header(None, alias="x-ai-center-application-version-id"),
-        invocation_id: Optional[str] = Header(None, alias="x-ai-center-invocation-id"),
-        caller_id: Optional[str] = Header(None, alias="x-ai-center-caller-id"),
-        raw_scope: Optional[str] = Header(None, alias="x-ai-center-scope"),
+        tenant_id: Optional[str] = Header(None, alias="x-ai-center-tenant-id", include_in_schema=False),
+        application_id: Optional[str] = Header(None, alias="x-ai-center-application-id", include_in_schema=False),
+        version_id: Optional[str] = Header(None, alias="x-ai-center-application-version-id", include_in_schema=False),
+        invocation_id: Optional[str] = Header(None, alias="x-ai-center-invocation-id", include_in_schema=False),
+        caller_id: Optional[str] = Header(None, alias="x-ai-center-caller-id", include_in_schema=False),
+        raw_scope: Optional[str] = Header(None, alias="x-ai-center-scope", include_in_schema=False),
     ) -> CurrentUser:
         values = (tenant_id, application_id, version_id, invocation_id, caller_id, raw_scope)
         if any(not isinstance(value, str) or not value.strip() for value in values):
@@ -112,6 +131,14 @@ def require_platform_scope(scope: str):
             user_id=_canonical_platform_user_id(caller_id),
             token="ai-center-private",
             tenant_id=await _canonical_platform_tenant_id(tenant_id),
+            platform_context=PlatformContext(
+                tenant_id=tenant_id.strip(),
+                application_id=application_id.strip(),
+                application_version_id=version_id.strip(),
+                invocation_id=invocation_id.strip(),
+                caller_id=caller_id.strip(),
+                scopes=tuple(sorted(scopes)),
+            ),
         )
 
     _dependency.__name__ = f"require_platform_{scope.replace('.', '_')}_scope"
@@ -124,12 +151,12 @@ def require_platform_or_user_scope(scope: str):
 
     async def _dependency(
         authorization: Optional[str] = Header(None),
-        tenant_id: Optional[str] = Header(None, alias="x-ai-center-tenant-id"),
-        application_id: Optional[str] = Header(None, alias="x-ai-center-application-id"),
-        version_id: Optional[str] = Header(None, alias="x-ai-center-application-version-id"),
-        invocation_id: Optional[str] = Header(None, alias="x-ai-center-invocation-id"),
-        caller_id: Optional[str] = Header(None, alias="x-ai-center-caller-id"),
-        raw_scope: Optional[str] = Header(None, alias="x-ai-center-scope"),
+        tenant_id: Optional[str] = Header(None, alias="x-ai-center-tenant-id", include_in_schema=False),
+        application_id: Optional[str] = Header(None, alias="x-ai-center-application-id", include_in_schema=False),
+        version_id: Optional[str] = Header(None, alias="x-ai-center-application-version-id", include_in_schema=False),
+        invocation_id: Optional[str] = Header(None, alias="x-ai-center-invocation-id", include_in_schema=False),
+        caller_id: Optional[str] = Header(None, alias="x-ai-center-caller-id", include_in_schema=False),
+        raw_scope: Optional[str] = Header(None, alias="x-ai-center-scope", include_in_schema=False),
     ) -> CurrentUser:
         values = (tenant_id, application_id, version_id, invocation_id, caller_id, raw_scope)
         if any(value is not None for value in values):

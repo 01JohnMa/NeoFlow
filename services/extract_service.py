@@ -838,6 +838,9 @@ async def _run_unit(
                     json_mode=True,
                     max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
                     timeout=remaining,
+                    # 稳定 logical call id：同一 unit 的 attempt/传输重试复用，
+                    # 避免同一逻辑调用被重复记账（仅 Relay 路径使用）。
+                    logical_call_id=f"{job_id}:unit:{unit.get('id')}",
                 ),
                 deadline,
             )

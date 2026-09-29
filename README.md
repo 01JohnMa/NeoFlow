@@ -216,12 +216,14 @@ ANON_KEY=...
 SERVICE_ROLE_KEY=...
 JWT_SECRET=...            # 自建项目用于 API 验签；云项目可改用 JWKS_URL
 
-# LLM（中台部署使用 LiteLLM）
-LITELLM_BASE_URL=https://<litellm-gateway>/v1
-LITELLM_API_KEY=...       # 由平台部署进程注入，不提交到仓库
+# LLM（中台部署经 AI Center Relay）
+AI_CENTER_MODEL_GATEWAY_URL_TEMPLATE=https://<ai-center>/api/v1/model-gateway/{invocation_id}/v1
+AI_CENTER_RUNTIME_CREDENTIAL=...   # per-Deployment Relay 凭据，由平台部署进程注入
+AI_CENTER_MODEL_OPERATIONS=chat.completions,embeddings
 LLM_MODEL_ID=deepseek-chat
 
-# 本地直连回退（中台部署不配置）
+# 本地开发直连（显式 NEOFLOW_LLM_MODE=direct 才启用；平台从不注入）
+NEOFLOW_LLM_MODE=direct
 LLM_API_KEY=...
 LLM_BASE_URL=https://api.deepseek.com
 
@@ -239,9 +241,19 @@ EXTRACT_MAX_REQUESTS_PER_JOB=200
 EXTRACT_TIMEOUT_SECONDS=900
 ```
 
-中台应用注册不承载 LiteLLM 凭据。AI Center 部署进程读取平台级 `AINEXUS_RUNTIME_MODEL_GATEWAY_URL` 与 `LITELLM_API_KEY`，创建应用容器时注入为 `LITELLM_BASE_URL` / `LITELLM_API_KEY`。地址在平台部署环境配置一次，key 使用平台的 Runtime Integration virtual key，不是调用 NeoFlow 的 Application API Key。不要把它们加入应用注册表单、Configuration、AI Center manifest 或源码；自托管时才由运维在 `.env` 或部署 Secret 中成对配置。
+中台应用注册不承载模型凭据。2026-09-29 起 Python 应用改为 Relay-only：AI Center 部署进程在创建应用容器时注入
+`AI_CENTER_MODEL_GATEWAY_URL_TEMPLATE`（带 `{invocation_id}` 的平台 Relay 地址）、
+`AI_CENTER_RUNTIME_CREDENTIAL`（per-Deployment 凭据，哈希入库、随部署轮换）与
+`AI_CENTER_MODEL_OPERATIONS`（operation 白名单），**不再注入 `LITELLM_BASE_URL` /
+`LITELLM_API_KEY`**——平台主 key 不进入应用容器。模型调用的归因（schema v2、session id、
+traceparent）由平台 Relay 注入；`/parse`、`/extract` 受理时保存的 `platform_invocation_id`
+让 Worker 在 202 之后仍能经 Relay 访问模型（窗口取版本 `model_access.async_job_timeout_seconds`，
+默认 900s）。这些变量属于部署级 Runtime Integration，不要加入应用注册表单、Configuration、
+AI Center manifest 或源码；本地开发需显式 `NEOFLOW_LLM_MODE=direct` 才走直连回退，
+该开关平台从不注入、`ai-center.yaml` 也不声明。未接入 Relay 的能力（Classify、Split、
+DashScope 图片 Embedding）被调用时返回明确的 `MODEL_CAPABILITY_UNAVAILABLE`，绝不静默直连。
 
-注册前先准备运行目标可访问的 PostgreSQL、Auth、PostgREST、迁移和已发布模板；`SUPABASE_URL` 指向 PostgREST。发布还需确认中台运行版本支持 `ai-center.yaml` 的独立 worker、API 与 worker 共用持久上传目录，并且两者均收到相同的 LiteLLM/数据库环境变量。平台源码存在 worker 配置不等于运行环境已具备该能力；必须用真实 Job 验证。`/api/health/config` 只显示生效 provider 与 URL，不回显 key，也不能单独证明模型调用成功。
+注册前先准备运行目标可访问的 PostgreSQL、Auth、PostgREST、迁移和已发布模板；`SUPABASE_URL` 指向 PostgREST。发布还需确认中台运行版本支持 `ai-center.yaml` 的独立 worker、API 与 worker 共用持久上传目录，并且两者均收到相同的 LiteLLM/数据库环境变量。平台源码存在 worker 配置不等于运行环境已具备该能力；必须用真实 Job 验证。`/api/health/config` 只显示模型访问模式（relay/direct/unconfigured），不回显地址与 key，也不能单独证明模型调用成功。
 
 ## 测试
 

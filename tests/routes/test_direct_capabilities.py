@@ -143,3 +143,101 @@ async def test_direct_capabilities_reject_internal_selectors():
             _Request({"configuration_id": "internal", "file": _upload()})
         )
     assert exc.value.status_code == 422
+
+
+def _platform_user() -> CurrentUser:
+    from api.dependencies.auth import PlatformContext
+
+    return CurrentUser(
+        user_id=USER_ID,
+        token="platform",
+        tenant_id=TENANT_ID,
+        platform_context=PlatformContext(
+            tenant_id=TENANT_ID,
+            application_id="app-neoflow",
+            application_version_id="version-1",
+            invocation_id="invocation-platform-9",
+            caller_id="caller-1",
+            scopes=("parse", "extract"),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_parse_persists_platform_invocation(monkeypatch, tmp_path):
+    monkeypatch.setattr(parse_route.settings, "UPLOAD_FOLDER", str(tmp_path))
+    monkeypatch.setattr(parse_route.supabase_service, "create_document", AsyncMock())
+    monkeypatch.setattr(parse_route.supabase_service, "delete_document", AsyncMock())
+    admit = AsyncMock(return_value={"status": "ok", "job_ids": ["job-1"]})
+    monkeypatch.setattr(parse_route.parse_request_service, "admit", admit)
+
+    await parse_route.create_direct_parse(
+        request=_Request(),
+        file=_upload(),
+        parse_mode=None,
+        language=None,
+        enable_formula=None,
+        enable_table=None,
+        remove_watermark=None,
+        watermark_keywords=None,
+        target_pages=None,
+        user=_platform_user(),
+    )
+
+    admit.assert_awaited_once()
+    assert admit.call_args.kwargs["platform_invocation_id"] == "invocation-platform-9"
+
+
+@pytest.mark.asyncio
+async def test_direct_parse_without_platform_context_passes_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(parse_route.settings, "UPLOAD_FOLDER", str(tmp_path))
+    monkeypatch.setattr(parse_route.supabase_service, "create_document", AsyncMock())
+    admit = AsyncMock(return_value={"status": "ok", "job_ids": ["job-1"]})
+    monkeypatch.setattr(parse_route.parse_request_service, "admit", admit)
+
+    await parse_route.create_direct_parse(
+        request=_Request(),
+        file=_upload(),
+        parse_mode=None,
+        language=None,
+        enable_formula=None,
+        enable_table=None,
+        remove_watermark=None,
+        watermark_keywords=None,
+        target_pages=None,
+        user=_user(),
+    )
+
+    assert admit.call_args.kwargs["platform_invocation_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_direct_extract_persists_platform_invocation(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        extract_route, "save_uploaded_document", AsyncMock(
+            return_value={"document_id": "doc-1", "file_path": str(tmp_path / "f.pdf")}
+        )
+    )
+    monkeypatch.setattr(
+        extract_route.configuration_service,
+        "get_published_extract_configuration_by_code",
+        AsyncMock(
+            return_value={"id": "cfg-1", "code": "T1", "status": "published"}
+        ),
+    )
+    monkeypatch.setattr(extract_route.supabase_service, "create_document", AsyncMock())
+    monkeypatch.setattr(
+        extract_route, "_load_definition_and_spec", AsyncMock(return_value=("rev-1", {}))
+    )
+    create_job = AsyncMock(return_value="job-9")
+    monkeypatch.setattr(extract_route, "create_job", create_job)
+
+    await extract_route.create_direct_extract(
+        request=_Request(),
+        file=_upload(),
+        template_code="T1",
+        user=_platform_user(),
+    )
+
+    create_job.assert_awaited_once()
+    assert create_job.call_args.kwargs["platform_invocation_id"] == "invocation-platform-9"

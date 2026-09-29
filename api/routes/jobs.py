@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from api.public_schemas import PUBLIC_ERROR_RESPONSES
 from api.dependencies.auth import CurrentUser, get_current_user, require_platform_or_user_scope
 from api.exceptions import AuthorizationError
 from api.jobs import create_job, get_job, list_jobs
@@ -173,7 +174,7 @@ async def _extract_revision_ids(tenant_id: Optional[str]) -> List[str]:
     return await configuration_service.list_revision_ids(configuration_ids)
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}", responses=PUBLIC_ERROR_RESPONSES)
 async def get_job_status(
     job_id: str,
     user: CurrentUser = Depends(require_platform_or_user_scope("jobs.read")),
@@ -185,7 +186,7 @@ async def get_job_status(
     return job
 
 
-@router.get("/jobs/{job_id}/parse-result")
+@router.get("/jobs/{job_id}/parse-result", responses=PUBLIC_ERROR_RESPONSES)
 async def get_job_parse_result(
     job_id: str,
     user: CurrentUser = Depends(require_platform_or_user_scope("results.read")),

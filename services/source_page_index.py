@@ -26,6 +26,7 @@ import numpy as np
 from loguru import logger
 
 from config.settings import settings
+from services import platform_model_client
 
 # Hybrid-scoring weights. ADR-0011 keeps these in the generic router core for
 # now; moving them into a strategy profile stays deferred until measurements
@@ -271,6 +272,19 @@ async def _post(url, api_key, body, reason):
 
 
 async def _openai_text_embeddings(inputs: Sequence[str], *, query: bool = False) -> List[List[float]]:
+    # Relay 模式：文本 Embedding 必须经平台 Relay（归因由平台注入）；
+    # 本地 direct 模式才允许使用应用自配的 EMBEDDING_BASE_URL。
+    if platform_model_client.model_access_mode() == "relay":
+        try:
+            return await platform_model_client.text_embeddings(
+                inputs,
+                model=settings.EMBEDDING_MODEL,
+                dimensions=settings.EMBEDDING_DIMENSION or None,
+            )
+        except platform_model_client.PlatformModelError as exc:
+            raise SourcePageIndexError(
+                "source_text_embedding_unavailable", exc.reason
+            ) from exc
     if not settings.EMBEDDING_API_KEY or not settings.EMBEDDING_BASE_URL:
         raise SourcePageIndexError("source_text_embedding_unavailable")
     payload = await _post(settings.EMBEDDING_BASE_URL.rstrip("/") + "/embeddings", settings.EMBEDDING_API_KEY, {
@@ -281,6 +295,13 @@ async def _openai_text_embeddings(inputs: Sequence[str], *, query: bool = False)
 
 
 async def _dashscope_embeddings(contents: Sequence[dict]) -> List[List[float]]:
+    # P0：DashScope 多模态图片 Embedding 尚未接入 Relay（非 OpenAI 兼容格式）。
+    # 平台 Relay 模式下明确失败，绝不静默直连外部 Provider。
+    if platform_model_client.model_access_mode() == "relay":
+        raise SourcePageIndexError(
+            "source_image_model_capability_unavailable",
+            "image embedding is not routed through the platform relay yet",
+        )
     if not settings.SOURCE_PAGE_IMAGE_API_KEY:
         raise SourcePageIndexError("source_image_embedding_unavailable")
     if settings.SOURCE_PAGE_IMAGE_MODEL != "qwen3-vl-embedding" or settings.SOURCE_PAGE_IMAGE_DIMENSION != 1024:

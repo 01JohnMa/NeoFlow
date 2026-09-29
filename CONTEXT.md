@@ -48,6 +48,10 @@ _Avoid_: OCR text, raw text
 A Job-local derived page-level retrieval artifact that maps an Extract Job's questions to candidate physical pages. It helps route work to Parse pages, but it is not a Parse Result, field value, or authoritative extraction evidence.
 _Avoid_: canonical ParseResult, Extraction Result, business answer
 
+**Platform Invocation**:
+The opaque AI Center parent Invocation reference saved on each processing Job at admission time (`platform_invocation_id`). It is the only model-attribution handle a Worker may use: model calls go through the AI Center Relay addressed by this reference, and retries restore it from the database rather than from request context. It is not a tenant, credential, or caller identity, and job status queries never overwrite it.
+_Avoid_: invocation context, caller identity, model key
+
 **Parse Mode**:
 The parsing pipeline a Parse job runs — fast (`pipeline`) or high-precision (`vlm`). It is never inferred from document content; it may be supplied by the caller or defaulted by tenant policy.
 _Avoid_: tier, model version, OCR mode

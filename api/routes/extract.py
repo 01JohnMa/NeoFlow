@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.public_schemas import AcceptedJobResponse, PUBLIC_ERROR_RESPONSES
 from api.dependencies.auth import (
     CurrentUser,
     get_current_user,
@@ -132,7 +133,12 @@ async def create_extract_jobs(
     }
 
 
-@router.post("/extract", status_code=202)
+@router.post(
+    "/extract",
+    status_code=202,
+    response_model=AcceptedJobResponse,
+    responses=PUBLIC_ERROR_RESPONSES,
+)
 async def create_direct_extract(
     request: Request,
     file: UploadFile = File(...),
@@ -171,6 +177,10 @@ async def create_direct_extract(
             tenant_id=user.tenant_id,
             configuration_revision_id=revision_id,
             execution_spec=None,
+            # 平台父 Invocation 引用：Worker 在 202 之后据此经 Relay 访问模型
+            platform_invocation_id=(
+                user.platform_context.invocation_id if user.platform_context else None
+            ),
         )
     except HTTPException:
         await _delete_uploaded_document(uploaded["document_id"], uploaded["file_path"])
@@ -252,7 +262,7 @@ async def get_document_extract_result(
     return await _result_response(row, job, user)
 
 
-@router.get("/jobs/{job_id}/extract-result")
+@router.get("/jobs/{job_id}/extract-result", responses=PUBLIC_ERROR_RESPONSES)
 async def get_job_extract_result(
     job_id: str,
     user: CurrentUser = Depends(require_platform_or_user_scope("results.read")),

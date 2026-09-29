@@ -14,6 +14,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.public_schemas import AcceptedJobResponse, PUBLIC_ERROR_RESPONSES
 from api.dependencies.auth import (
     CurrentUser,
     get_current_user,
@@ -211,7 +212,12 @@ async def create_parse_jobs(
     }
 
 
-@router.post("/parse", status_code=202)
+@router.post(
+    "/parse",
+    status_code=202,
+    response_model=AcceptedJobResponse,
+    responses=PUBLIC_ERROR_RESPONSES,
+)
 async def create_direct_parse(
     request: Request,
     file: UploadFile = File(...),
@@ -249,6 +255,10 @@ async def create_direct_parse(
             target_pages=normalized_pages,
             idempotency_key=None,
             options=options,
+            # 平台父 Invocation 引用：Worker 在 202 之后据此经 Relay 访问模型
+            platform_invocation_id=(
+                user.platform_context.invocation_id if user.platform_context else None
+            ),
         )
     except ParseRequestError as exc:
         await _delete_uploaded_document(uploaded["document_id"], uploaded["file_path"])

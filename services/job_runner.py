@@ -189,19 +189,54 @@ class JobRunner:
         return configuration.get("type"), revision, configuration
 
     async def run(self, job: Dict[str, Any]) -> Any:
-        """判别执行定义并分发到对应 handler。"""
+        """判别执行定义并分发到对应 handler。
+
+        Relay 模式（平台部署）下：
+        - 绑定 Job 行上的 platform_invocation_id，供模型客户端归因；
+        - 缺少 Invocation 的模型类 Job 直接失败（模型归因不可缺）；
+        - classify/split 属 P1 能力（未接入 Relay 前明确失败，不静默直连）。
+        """
         execution_type, revision, configuration = await self._resolve_dispatch(job)
 
         handler = self._handlers.get(execution_type)
         if handler is None:
             raise JobRunnerError(f"未注册的执行能力: {execution_type}")
 
+        from services import platform_model_client
+
+        relay_mode = platform_model_client.model_access_mode() == "relay"
+        model_kinds = {
+            EXTRACT_CONFIGURATION_TYPE,
+            PARSE_CONFIGURATION_TYPE,
+            CLASSIFY_CONFIGURATION_TYPE,
+            SPLIT_CONFIGURATION_TYPE,
+        }
+        if relay_mode and execution_type in {CLASSIFY_CONFIGURATION_TYPE, SPLIT_CONFIGURATION_TYPE}:
+            # P0 只放行 Parse/Extract 的 chat 与文本 Embedding；Classify/Split
+            # 的模型通道尚未接入 Relay，被调用时明确失败（P1 移除此守卫）。
+            raise JobRunnerError(
+                f"MODEL_CAPABILITY_UNAVAILABLE: {execution_type} 尚未接入平台 Relay"
+            )
+
+        invocation_id = str(job.get("platform_invocation_id") or "").strip()
+        if relay_mode and not invocation_id and execution_type in model_kinds:
+            raise JobRunnerError(
+                "MODEL_INVOCATION_MISSING: 平台模式下模型 Job 缺少 Invocation 引用"
+            )
+
         logger.info(
             f"JobRunner 分发: job_id={job.get('job_id')} "
             f"capability={execution_type} "
-            f"revision={job.get('configuration_revision_id') or 'none'}"
+            f"revision={job.get('configuration_revision_id') or 'none'} "
+            f"platform_invocation={'yes' if invocation_id else 'no'}"
         )
-        return await handler(job=job, revision=revision, configuration=configuration)
+        token = platform_model_client.bind_platform_invocation(
+            invocation_id if invocation_id else None
+        )
+        try:
+            return await handler(job=job, revision=revision, configuration=configuration)
+        finally:
+            platform_model_client.restore_platform_invocation(token)
 
 
 # 单例执行入口

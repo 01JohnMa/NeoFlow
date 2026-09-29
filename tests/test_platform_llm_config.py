@@ -20,16 +20,32 @@ def test_litellm_requires_both_values():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("url,key,provider", [("http://platform/v1", "platform-secret", "litellm"), ("", "", "direct")])
-async def test_config_health_reports_effective_connection_without_credentials(monkeypatch, url, key, provider):
+@pytest.mark.parametrize(
+    "url,key,provider",
+    [
+        ("http://relay/v1", "relay-secret", "relay"),
+        ("", "", "unconfigured"),
+    ],
+)
+async def test_config_health_reports_mode_without_endpoints_or_credentials(monkeypatch, url, key, provider):
     import json
     from api.routes import health
 
-    settings = Settings(_env_file=None, LITELLM_BASE_URL=url, LITELLM_API_KEY=key,
-                        LLM_BASE_URL="http://local/v1", LLM_API_KEY="local-secret")
+    settings = Settings(
+        _env_file=None,
+        AI_CENTER_MODEL_GATEWAY_URL_TEMPLATE=url,
+        AI_CENTER_RUNTIME_CREDENTIAL=key,
+        AI_CENTER_MODEL_OPERATIONS="chat.completions" if url else "",
+        LLM_BASE_URL="http://local/v1",
+        LLM_API_KEY="local-secret",
+    )
     monkeypatch.setattr(health, "settings", settings)
     result = await health.config_check()
     assert result["llm_provider"] == provider
-    assert result["llm_base_url"] == (url or "http://local/v1")
-    assert "platform-secret" not in json.dumps(result)
-    assert "local-secret" not in json.dumps(result)
+    # readiness 只回显模式；不回显端点地址与任何凭据
+    assert "llm_base_url" not in result
+    dumped = json.dumps(result)
+    assert "relay-secret" not in dumped
+    assert "local-secret" not in dumped
+    assert "http://relay/v1" not in dumped
+    assert "http://local/v1" not in dumped

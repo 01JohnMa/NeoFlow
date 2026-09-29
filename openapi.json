@@ -1,6 +1,88 @@
 {
   "components": {
     "schemas": {
+      "AcceptedJobData": {
+        "properties": {
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "job_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "template_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Code"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "title": "AcceptedJobData",
+        "type": "object"
+      },
+      "AcceptedJobResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AcceptedJobData"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "title": "AcceptedJobResponse",
+        "type": "object"
+      },
       "Body_create_direct_extract_api_extract_post": {
         "properties": {
           "file": {
@@ -2066,104 +2148,6 @@
       "post": {
         "description": "Direct platform capability: upload one file and enqueue Extract.\n\n``template_code`` is intentionally the only public template selector.  A\nconfiguration UUID, revision UUID, tenant, or department field is never\naccepted on this endpoint.",
         "operationId": "create_direct_extract_api_extract_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "x-ai-center-tenant-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Tenant-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-application-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Application-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-application-version-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Application-Version-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-invocation-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Invocation-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-caller-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Caller-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-scope",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Scope"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -2178,20 +2162,30 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedJobResponse"
+                }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "description": "缺少或无效的 AI Center 平台上下文"
+          },
+          "403": {
+            "description": "网关上下文缺少所需 scope"
+          },
+          "404": {
+            "description": "模板或资源不存在"
+          },
+          "409": {
+            "description": "活动请求冲突或配置没有已发布修订"
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "请求参数校验失败"
+          },
+          "504": {
+            "description": "上游服务超时"
           }
         },
         "summary": "Create Direct Extract",
@@ -2223,7 +2217,7 @@
     },
     "/api/health/config": {
       "get": {
-        "description": "配置检查接口",
+        "description": "配置检查接口。\n\n只回显模式与模型名，不回显任何端点地址或凭据（Relay 地址属于平台\n内部拓扑，不进入 readiness 响应）。",
         "operationId": "config_check_api_health_config_get",
         "responses": {
           "200": {
@@ -2483,15 +2477,23 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "description": "缺少或无效的 AI Center 平台上下文"
+          },
+          "403": {
+            "description": "网关上下文缺少所需 scope"
+          },
+          "404": {
+            "description": "模板或资源不存在"
+          },
+          "409": {
+            "description": "活动请求冲突或配置没有已发布修订"
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "请求参数校验失败"
+          },
+          "504": {
+            "description": "上游服务超时"
           }
         },
         "summary": "Get Job Status",
@@ -2540,15 +2542,23 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "description": "缺少或无效的 AI Center 平台上下文"
+          },
+          "403": {
+            "description": "网关上下文缺少所需 scope"
+          },
+          "404": {
+            "description": "模板或资源不存在"
+          },
+          "409": {
+            "description": "活动请求冲突或配置没有已发布修订"
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "请求参数校验失败"
+          },
+          "504": {
+            "description": "上游服务超时"
           }
         },
         "summary": "Get Job Extract Result",
@@ -2598,15 +2608,23 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "description": "缺少或无效的 AI Center 平台上下文"
+          },
+          "403": {
+            "description": "网关上下文缺少所需 scope"
+          },
+          "404": {
+            "description": "模板或资源不存在"
+          },
+          "409": {
+            "description": "活动请求冲突或配置没有已发布修订"
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "请求参数校验失败"
+          },
+          "504": {
+            "description": "上游服务超时"
           }
         },
         "summary": "Get Job Parse Result",
@@ -2620,104 +2638,6 @@
       "post": {
         "description": "Direct platform capability: upload one file and enqueue Parse.",
         "operationId": "create_direct_parse_api_parse_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "x-ai-center-tenant-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Tenant-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-application-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Application-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-application-version-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Application-Version-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-invocation-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Invocation-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-caller-id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Caller-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-ai-center-scope",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Ai-Center-Scope"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -2732,20 +2652,30 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedJobResponse"
+                }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "description": "缺少或无效的 AI Center 平台上下文"
+          },
+          "403": {
+            "description": "网关上下文缺少所需 scope"
+          },
+          "404": {
+            "description": "模板或资源不存在"
+          },
+          "409": {
+            "description": "活动请求冲突或配置没有已发布修订"
+          },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "请求参数校验失败"
+          },
+          "504": {
+            "description": "上游服务超时"
           }
         },
         "summary": "Create Direct Parse",

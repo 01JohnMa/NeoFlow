@@ -14,6 +14,7 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from config.settings import settings
+from services import platform_model_client
 from .exceptions import WorkflowError, WorkflowErrorType
 from .json_cleaner import parse_llm_json
 from .result_builder import build_error, build_single_success
@@ -45,7 +46,21 @@ class DocumentWorkflow:
         reraise=True,
     )
     async def _llm_invoke_with_retry(self, prompt: str) -> str:
-        """带重试的 LLM 调用。重试耗尽后抛出最后一次异常。"""
+        """带重试的 LLM 调用。重试耗尽后抛出最后一次异常。
+
+        Relay 模式经平台客户端调用（归因由平台注入，logical call id 由
+        prompt 派生、同一次逻辑调用的重试天然复用）；direct 模式用本地
+        ChatOpenAI。
+        """
+        from services.llm_invoke import invoke_llm
+
+        if platform_model_client.model_access_mode() == "relay":
+            result = await invoke_llm(
+                [{"role": "user", "content": prompt}],
+                json_mode=True,
+                timeout=min(120.0, float(settings.EXTRACT_TIMEOUT_SECONDS)),
+            )
+            return result.content
         response = await self.llm.ainvoke(prompt)
         return response.content
 

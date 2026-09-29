@@ -206,3 +206,93 @@ class TestExtractHandler:
 
         assert result == {"report_no": "WT-1"}
         mock_handle.assert_awaited_once_with(job, revision, configuration)
+
+
+class TestPlatformInvocationBinding:
+    """Relay 模式下的 Invocation 绑定与 P0 能力守卫。"""
+
+    @pytest.mark.asyncio
+    async def test_binds_platform_invocation_during_handler(self):
+        from services import platform_model_client
+        from services.job_runner import JobRunner
+
+        async def fake_handler(*, job, revision, configuration):
+            return platform_model_client.current_invocation_id()
+
+        runner = JobRunner(handlers={"extract": fake_handler})
+        with patch(
+            "services.platform_model_client.model_access_mode", return_value="relay"
+        ), patch("services.job_runner.configuration_service") as mock_svc:
+            mock_svc.get_revision = AsyncMock(
+                return_value={"id": REVISION_ID, "configuration_id": CONFIG_ID}
+            )
+            mock_svc.get_configuration = AsyncMock(
+                return_value={"id": CONFIG_ID, "type": "extract"}
+            )
+            result = await runner.run(
+                _job(platform_invocation_id="invocation-platform-1")
+            )
+        assert result == "invocation-platform-1"
+        assert platform_model_client.current_invocation_id() is None
+
+    @pytest.mark.asyncio
+    async def test_relay_mode_rejects_model_job_without_invocation(self):
+        from services.job_runner import JobRunner, JobRunnerError
+
+        async def fake_handler(*, job, revision, configuration):  # pragma: no cover
+            raise AssertionError("不应执行")
+
+        runner = JobRunner(handlers={"extract": fake_handler})
+        with patch(
+            "services.platform_model_client.model_access_mode", return_value="relay"
+        ), patch("services.job_runner.configuration_service") as mock_svc:
+            mock_svc.get_revision = AsyncMock(
+                return_value={"id": REVISION_ID, "configuration_id": CONFIG_ID}
+            )
+            mock_svc.get_configuration = AsyncMock(
+                return_value={"id": CONFIG_ID, "type": "extract"}
+            )
+            with pytest.raises(JobRunnerError, match="MODEL_INVOCATION_MISSING"):
+                await runner.run(_job())
+
+    @pytest.mark.asyncio
+    async def test_relay_mode_rejects_classify_and_split_p0(self):
+        from services.job_runner import JobRunner, JobRunnerError
+
+        async def fake_handler(*, job, revision, configuration):  # pragma: no cover
+            raise AssertionError("不应执行")
+
+        runner = JobRunner(handlers={"classify": fake_handler, "split": fake_handler})
+        for kind in ("classify", "split"):
+            with patch(
+                "services.platform_model_client.model_access_mode", return_value="relay"
+            ), patch("services.job_runner.configuration_service") as mock_svc:
+                mock_svc.get_revision = AsyncMock(
+                    return_value={"id": REVISION_ID, "configuration_id": CONFIG_ID}
+                )
+                mock_svc.get_configuration = AsyncMock(
+                    return_value={"id": CONFIG_ID, "type": kind}
+                )
+                with pytest.raises(JobRunnerError, match="MODEL_CAPABILITY_UNAVAILABLE"):
+                    await runner.run(
+                        _job(platform_invocation_id="invocation-platform-1")
+                    )
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_allows_job_without_invocation(self):
+        from services.job_runner import JobRunner
+
+        async def fake_handler(*, job, revision, configuration):
+            return "ok"
+
+        runner = JobRunner(handlers={"extract": fake_handler})
+        with patch(
+            "services.platform_model_client.model_access_mode", return_value="direct"
+        ), patch("services.job_runner.configuration_service") as mock_svc:
+            mock_svc.get_revision = AsyncMock(
+                return_value={"id": REVISION_ID, "configuration_id": CONFIG_ID}
+            )
+            mock_svc.get_configuration = AsyncMock(
+                return_value={"id": CONFIG_ID, "type": "extract"}
+            )
+            assert await runner.run(_job()) == "ok"

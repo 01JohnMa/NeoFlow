@@ -46,3 +46,9 @@ environment:
     sensitive: false
 worker:
   command: [python, -m, workers.document_worker]
+
+# 平台注入说明（不在本合同内声明）：
+# AI Center 部署进程按版本 runtime_request.model_access 注入
+#   AI_CENTER_MODEL_GATEWAY_URL_TEMPLATE / AI_CENTER_RUNTIME_CREDENTIAL / AI_CENTER_MODEL_OPERATIONS
+# 三元组（relay 模式）；不注入 LITELLM_BASE_URL / LITELLM_API_KEY。
+# 这些名称属于平台保留名，应用 manifest 不得声明或覆盖。
