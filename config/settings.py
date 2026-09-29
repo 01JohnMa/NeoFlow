@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     EXTRACT_TIMEOUT_SECONDS: int = 900
     LLM_CONTEXT_WINDOW_TOKENS: int = 128000
     LLM_MAX_OUTPUT_TOKENS: int = 8000
+    # per_page 单元并发上限（1 = 保持串行；预算仍逐请求走原子 RPC）
+    EXTRACT_UNIT_CONCURRENCY: int = 4
 
     # ============ Document Page Index embeddings (#36) ============
     EMBEDDING_API_KEY: str = ""
@@ -103,6 +105,8 @@ class Settings(BaseSettings):
     SOURCE_PAGE_IMAGE_MODEL: str = "qwen3-vl-embedding"
     SOURCE_PAGE_IMAGE_DIMENSION: int = 1024
     SOURCE_PAGE_MAX_SELECTED_PAGES: int = 24
+    # 每字段检索取 top-K chunk（ADR-0011 基线为 2；调参时保持可观测）
+    SOURCE_PAGE_TOP_K_PER_FIELD: int = 2
 
     # ============ Agentic source-page routing ==========
     AGENTIC_MAX_SEARCH_TOOLS: int = 2

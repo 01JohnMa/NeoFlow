@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from services.agentic_source import route_with_agent, AgenticSourceError
 from services.parse_result import ParseResult, Page
@@ -38,3 +39,43 @@ async def test_requires_real_parse():
         async def arun(self, prompt): return None
     with pytest.raises(AgenticSourceError, match='no_parse'):
         await route_with_agent(index(), {}, lambda p: ParseResult(), agent_factory=lambda **kw: Agent())
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_retries_once_on_transport_error(monkeypatch):
+    async def retrieve(idx, queries, request_gate=None):
+        return {k: [SourcePageCandidate(2, .9, ['text'])] for k in queries}
+    monkeypatch.setattr('services.agentic_source.retrieve_source_pages', retrieve)
+
+    async def parse(pages):
+        return ParseResult(pages=[Page(p, 10, 10, markdown=f'p{p}') for p in pages])
+
+    attempts = []
+
+    class FlakyAgent:
+        def __init__(self, tools): self.tools = tools
+
+        async def arun(self, prompt):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise httpx.ConnectError("offline")
+            await self.tools['parse_pages']([2])
+
+    out = await route_with_agent(
+        index(), {'type': 'object'}, parse, agent_factory=lambda **kw: FlakyAgent(kw['tools'])
+    )
+    assert len(attempts) == 2
+    assert [p.page_no for p in out.parse_result.pages] == [2]
+    assert out.stats.llm_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_non_transport_error_fails_fast():
+    class BadAgent:
+        async def arun(self, prompt): raise ValueError("bad prompt shape")
+
+    with pytest.raises(AgenticSourceError, match='agent_runtime_failed'):
+        await route_with_agent(
+            index(), {'type': 'object'}, lambda p: ParseResult(),
+            agent_factory=lambda **kw: BadAgent(),
+        )

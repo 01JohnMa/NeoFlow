@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 import httpx
 
@@ -12,8 +14,8 @@ async def test_build_index_routes_native_text_and_images(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "_source_hash", lambda path: "sha")
     monkeypatch.setattr(
         module,
-        "_native_text",
-        lambda path, page: "native text " * 10 if page != 2 else "",
+        "_native_pages_text",
+        lambda path, count: ["native text " * 10, "", "native text " * 10],
     )
     monkeypatch.setattr(module, "_render_page", lambda path, page: f"data:image/png;base64,{page}")
     monkeypatch.setattr(module.settings, "SOURCE_PAGE_MIN_TEXT_CHARS", 20)
@@ -31,6 +33,90 @@ async def test_build_index_routes_native_text_and_images(monkeypatch, tmp_path):
     assert [page.modality for page in result.pages] == ["text", "image", "text"]
     assert len(result.vectors) == 3
     assert calls == ["source_page_text_embedding", "source_page_image_embedding"]
+
+
+@pytest.mark.asyncio
+async def test_build_index_falls_back_to_per_page_text_on_split_mismatch(monkeypatch, tmp_path):
+    pdf = tmp_path / "mismatch.pdf"
+    pdf.write_bytes(b"pdf")
+    monkeypatch.setattr(module, "_page_count", lambda path: 2)
+    monkeypatch.setattr(module, "_source_hash", lambda path: "sha")
+    monkeypatch.setattr(module, "_native_pages_text", lambda path, count: None)
+    requested_pages = []
+
+    def per_page_text(path, page):
+        requested_pages.append(page)
+        return f"native text page {page} " * 10
+
+    monkeypatch.setattr(module, "_native_text", per_page_text)
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_MIN_TEXT_CHARS", 20)
+    monkeypatch.setattr(module.settings, "EMBEDDING_MAX_BATCH_SIZE", 20)
+    monkeypatch.setattr(module, "_openai_text_embeddings", _vectors)
+
+    result = await module.build_source_page_index(str(pdf))
+    assert requested_pages == [1, 2]
+    assert [page.modality for page in result.pages] == ["text", "text"]
+    assert result.pages[1].text.startswith("native text page 2")
+
+
+@pytest.mark.asyncio
+async def test_build_index_pipelines_image_render_and_embedding(monkeypatch, tmp_path):
+    pdf = tmp_path / "scanned.pdf"
+    pdf.write_bytes(b"pdf")
+    monkeypatch.setattr(module, "_page_count", lambda path: 3)
+    monkeypatch.setattr(module, "_source_hash", lambda path: "sha")
+    monkeypatch.setattr(module, "_native_pages_text", lambda path, count: ["", "", ""])
+    rendered_pages = []
+    monkeypatch.setattr(
+        module, "_render_page",
+        lambda path, page: rendered_pages.append(page) or f"data:image/png;base64,{page}",
+    )
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_MIN_TEXT_CHARS", 20)
+    embedded_images = []
+
+    async def image_vectors(values, **kwargs):
+        embedded_images.extend(values)
+        return [[1.0, 0.0] for _ in values]
+
+    monkeypatch.setattr(module, "_dashscope_image_embeddings", image_vectors)
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_IMAGE_API_KEY", "key")
+    calls = []
+
+    async def gate(stage):
+        calls.append(stage)
+
+    result = await module.build_source_page_index(str(pdf), request_gate=gate)
+    # Render tasks run in a thread pool, so their start order is not
+    # deterministic; embedding consumption order is.
+    assert sorted(rendered_pages) == [1, 2, 3]
+    assert embedded_images == [f"data:image/png;base64,{page}" for page in (1, 2, 3)]
+    assert calls == ["source_page_image_embedding"] * 3
+    assert [page.modality for page in result.pages] == ["image", "image", "image"]
+    assert len(result.vectors) == 3
+
+
+def test_render_page_retries_oversize_at_lower_dpi(monkeypatch):
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_RENDER_DPI", 144)
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_MAX_IMAGE_BYTES", 100)
+    attempted_dpis = []
+
+    def fake_png(path, page, dpi):
+        attempted_dpis.append(dpi)
+        return b"x" * 200 if len(attempted_dpis) == 1 else b"x" * 10
+
+    monkeypatch.setattr(module, "_render_page_png", fake_png)
+    result = module._render_page("doc.pdf", 7)
+    assert attempted_dpis == [144, 108]
+    assert result == "data:image/png;base64," + base64.b64encode(b"x" * 10).decode("ascii")
+
+
+def test_render_page_fails_when_oversize_at_every_dpi(monkeypatch):
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_RENDER_DPI", 144)
+    monkeypatch.setattr(module.settings, "SOURCE_PAGE_MAX_IMAGE_BYTES", 100)
+    monkeypatch.setattr(module, "_render_page_png", lambda path, page, dpi: b"x" * 200)
+    with pytest.raises(module.SourcePageIndexError) as exc:
+        module._render_page("doc.pdf", 7)
+    assert exc.value.reason == "source_image_too_large"
 
 
 async def _vectors(values, **kwargs):

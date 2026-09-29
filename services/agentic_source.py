@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Iterable, Mapping, Optional, Sequence
 
 from services.parse_result import Page, ParseResult
-from services.source_page_index import retrieve_source_pages
+from services.schema_queries import schema_field_queries
+from services.source_page_index import SourcePageCandidate, retrieve_source_pages
+from services.llm_invoke import is_retryable_transport_error
 from config.settings import settings
 
 
@@ -23,6 +25,7 @@ class AgenticSourceStats:
     unique_pages: int = 0
     agent_turns: int = 0
     llm_calls: int = 0
+    tool_calls: int = 0
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     model: Optional[str] = None
@@ -37,8 +40,25 @@ class AgenticSourceResult:
     route_metadata: dict[str, Any]
 
 
+@dataclass
+class InitialSchemaSearch:
+    """Deterministic schema-wide search that anchors the agent run and serves
+    as the degrade path when the agent itself fails."""
+    queries: dict[str, str]
+    hits: dict[str, list[SourcePageCandidate]]
+    top1_pages: list[int]
+    top2_pages: list[int]
+
+    @property
+    def unresolved(self) -> list[str]:
+        return [path for path, rows in self.hits.items() if not rows]
+
+
 class AgenticSourceError(RuntimeError):
-    pass
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(f"{reason}: {detail}" if detail else reason)
+        self.reason = reason
+        self.detail = detail
 
 
 async def _maybe_await(value):
@@ -54,29 +74,29 @@ def _merge_pages(base: dict[int, Page], result: ParseResult | Sequence[Page]) ->
         base.setdefault(int(page.page_no), copy.deepcopy(page))
 
 
-def _schema_queries(schema: Mapping[str, Any], path: str = "") -> list[str]:
-    properties = schema.get("properties") if isinstance(schema, Mapping) else None
-    if not isinstance(properties, Mapping):
-        return [" ".join(str(x) for x in (path, schema.get("description", "")) if x)] if path else []
-    queries: list[str] = []
-    for key, node in properties.items():
-        if not isinstance(node, Mapping):
-            continue
-        child = f"{path}/{key}" if path else str(key)
-        nested = node.get("properties")
-        if isinstance(nested, Mapping) and nested:
-            queries.extend(_schema_queries(node, child))
-            continue
-        enum = node.get("enum")
-        enum_text = " ".join(str(item) for item in enum) if isinstance(enum, list) else ""
-        query = " ".join(
-            str(value)
-            for value in (child, node.get("description", ""), enum_text)
-            if value
-        ).strip()
-        if query:
-            queries.append(query)
-    return queries
+async def run_initial_schema_search(
+    index: Any,
+    schema: Mapping[str, Any],
+    *,
+    request_gate: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> Optional[InitialSchemaSearch]:
+    """Run the deterministic batched schema-wide search before the agent starts.
+
+    It gives the flexible loop a quality floor without hard-coding document or
+    clinical field names, and doubles as the degrade selection when the agent
+    run itself fails.
+    """
+    queries = schema_field_queries(schema)
+    if not queries:
+        return None
+    hits = await retrieve_source_pages(index, queries, request_gate=request_gate)
+    candidates = [candidate for rows in hits.values() for candidate in rows]
+    return InitialSchemaSearch(
+        queries=queries,
+        hits=hits,
+        top1_pages=sorted({rows[0].page_no for rows in hits.values() if rows}),
+        top2_pages=sorted({candidate.page_no for candidate in candidates}),
+    )
 
 
 async def route_with_agent(
@@ -91,12 +111,15 @@ async def route_with_agent(
     max_unique_pages: int = 24,
     max_agent_turns: int = 6,
     agent_factory: Optional[Callable[..., Any]] = None,
+    initial: Optional[InitialSchemaSearch] = None,
 ) -> AgenticSourceResult:
     """Run a bounded page-routing agent and return one immutable ParseResult.
 
     ``agent_factory`` is a narrow test seam. It receives ``tools`` and ``limits`` and
     may return an object exposing ``run()``/``arun()``; production uses LlamaIndex
-    FunctionAgent when installed.
+    FunctionAgent when installed. ``initial`` is the pre-computed deterministic
+    schema search (see ``run_initial_schema_search``); passing ``None`` simply
+    leaves the agent without top-1 anchors.
     """
     stats = AgenticSourceStats()
     pages: dict[int, Page] = {}
@@ -111,12 +134,12 @@ async def route_with_agent(
         await guard()
         if request_gate is not None:
             await request_gate(stage)
-        stats.llm_calls += 1
 
     async def search_pages(queries: list[str]) -> list[dict[str, Any]]:
         async with lock:
             await guard()
             await agent_turn_gate("agentic_agent_llm")
+            stats.tool_calls += 1
             stats.agent_turns += 1
             if stats.agent_turns > max_agent_turns:
                 raise AgenticSourceError("agent_turn_budget_exceeded")
@@ -143,6 +166,7 @@ async def route_with_agent(
         async with lock:
             await guard()
             await agent_turn_gate("agentic_agent_llm")
+            stats.tool_calls += 1
             stats.agent_turns += 1
             if stats.agent_turns > max_agent_turns:
                 raise AgenticSourceError("agent_turn_budget_exceeded")
@@ -171,30 +195,25 @@ async def route_with_agent(
                     summaries.append({"page": page.page_no, "snippet": text[:800]})
             return {"parsed_pages": wanted, "unique_pages": len(pages), "summaries": summaries}
 
-    # Do one deterministic, batched schema-wide search before the Agent starts.
-    # This gives the flexible loop a quality floor without hard-coding document
-    # or clinical field names.
-    initial_queries = _schema_queries(schema)
-    initial_hits = await retrieve_source_pages(
-        index,
-        {f"q{n}": query for n, query in enumerate(initial_queries)},
-        request_gate=request_gate,
-    ) if initial_queries else {}
-    initial_candidates = [candidate for rows in initial_hits.values() for candidate in rows]
-    initial_top1 = sorted({rows[0].page_no for rows in initial_hits.values() if rows})
-    initial_top2 = sorted({candidate.page_no for candidate in initial_candidates})
-    for candidate in initial_candidates:
-        page_priority[candidate.page_no] = max(
-            page_priority.get(candidate.page_no, float("-inf")),
-            float(candidate.score),
-        )
-    stats.searches += 1 if initial_queries else 0
-    stats.trace.append({
-        "tool": "initial_schema_search",
-        "queries": len(initial_queries),
-        "top1_pages": initial_top1,
-        "top2_pages": initial_top2,
-    })
+    initial_top1: list[int] = []
+    initial_top2: list[int] = []
+    if initial is not None:
+        initial_top1 = list(initial.top1_pages)
+        initial_top2 = list(initial.top2_pages)
+        for rows in initial.hits.values():
+            for candidate in rows:
+                page_priority[candidate.page_no] = max(
+                    page_priority.get(candidate.page_no, float("-inf")),
+                    float(candidate.score),
+                )
+        stats.searches += 1
+        stats.unresolved = list(initial.unresolved)
+        stats.trace.append({
+            "tool": "initial_schema_search",
+            "queries": len(initial.queries),
+            "top1_pages": initial_top1,
+            "top2_pages": initial_top2,
+        })
 
     tools = {"search_pages": search_pages, "parse_pages": parse_selected}
     limits = {"max_search_tools": max_search_tools, "max_parse_calls": max_parse_calls,
@@ -248,12 +267,25 @@ async def route_with_agent(
         raise AgenticSourceError("agent_factory_missing_runner")
     await guard()
     await agent_turn_gate("agentic_agent_llm")
+    stats.llm_calls += 1
     try:
         await _maybe_await(runner(prompt))
     except AgenticSourceError:
         raise
     except Exception as exc:
-        raise AgenticSourceError(f"agent_runtime_failed: {exc}") from exc
+        if not is_retryable_transport_error(exc):
+            raise AgenticSourceError("agent_runtime_failed", str(exc)) from exc
+        # Transient transport failure: one gated retry. Both attempts share
+        # the same search/parse/page budgets through the closures above.
+        await guard()
+        await agent_turn_gate("agentic_agent_llm")
+        stats.llm_calls += 1
+        try:
+            await _maybe_await(runner(prompt))
+        except AgenticSourceError:
+            raise
+        except Exception as retry_exc:
+            raise AgenticSourceError("agent_runtime_failed", str(retry_exc)) from retry_exc
     await guard()
     if not pages:
         raise AgenticSourceError("agent_no_parse_result")

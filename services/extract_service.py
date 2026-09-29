@@ -13,18 +13,11 @@
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-import httpx
 from loguru import logger
-from openai import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
-    InternalServerError,
-    RateLimitError,
-)
 
 from api.jobs import (
     commit_extract_parse_result,
@@ -45,8 +38,12 @@ from services.extract_prompt import (
 from services.extract_schema import check_schema, schema_hash, validate_value
 from services.business_validation import clear_unsupported_enum_values, validate_template_values
 from services.template_contract import is_canonical_schema, load_template
-from services.agentic_source import AgenticSourceError, route_with_agent
-from services.llm_invoke import LLMResult, invoke_llm
+from services.agentic_source import (
+    AgenticSourceError,
+    route_with_agent,
+    run_initial_schema_search,
+)
+from services.llm_invoke import LLMResult, invoke_llm, is_retryable_transport_error
 from services.parse_service import (
     annotate_parse_provenance,
     apply_parse_postprocess,
@@ -61,6 +58,7 @@ from services.source_page_index import (
     select_source_pages,
 )
 from services.result_service import result_service
+from services.schema_queries import schema_field_queries
 from services.supabase_service import supabase_service
 
 EXTRACT_CAPABILITY = "extract"
@@ -409,70 +407,23 @@ async def ensure_parse_binding(
     )
 
 
-def _source_field_query(path: str, node: Dict[str, Any]) -> str:
-    enum = node.get("enum")
-    enum_text = " ".join(str(item) for item in enum) if isinstance(enum, list) else ""
-    return " ".join(part for part in (path, node.get("description", ""), enum_text) if part)
-
-
-async def _source_page_parse_and_bind(
+async def _parse_selected_pages_and_bind(
     *,
-    spec: Dict[str, Any],
-    job: Dict[str, Any],
     document: Dict[str, Any],
+    job: Dict[str, Any],
     tenant_id: str,
-    job_id: str,
     worker_id: str,
     attempts: int,
-    lost: asyncio.Event,
     deadline: Optional[datetime],
-    usage: Dict[str, int],
-    parse_params: Optional[Dict[str, Any]] = None,
+    request_gate: Callable[[str], Awaitable[None]],
+    selected: List[int],
+    candidate_sources: Dict[str, List[str]],
+    index: Any,
+    base_parse_params: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    # A retry of the same Extract Job must reuse its own bound ParseResult.
-    # A new Job intentionally arrives without parse_result_id and builds a new
-    # source index/partial parse, even for the same Document.
-    bound_id = job.get("parse_result_id")
-    if bound_id:
-        bound = await _load_bound_result(str(bound_id), job, document, tenant_id)
-        return bound, {"reused_job_parse_result": True}
-
-    async def request_gate(stage: str) -> None:
-        _ensure_execution_window(lost, deadline, stage)
-        try:
-            consumed = await _await_with_deadline(
-                consume_extract_request(job_id, worker_id, attempts), deadline
-            )
-        except asyncio.TimeoutError as exc:
-            raise ExtractFailure("deadline_exceeded", stage) from exc
-        if not consumed.get("allowed"):
-            raise ExtractFailure(f"budget_{consumed.get('reason') or 'denied'}", stage)
-        used = consumed.get("requests_used")
-        usage["requests"] = int(used) if isinstance(used, int) else usage["requests"] + 1
-
-    try:
-        index = await build_source_page_index(
-            document["file_path"], request_gate=request_gate
-        )
-        queries = {
-            path: _source_field_query(path, node)
-            for path, node in _schema_leaves(spec["data_schema"])
-        }
-        candidates = await retrieve_source_pages(
-            index, queries=queries, request_gate=request_gate
-        )
-    except SourcePageIndexError as exc:
-        raise ExtractFailure(exc.reason, exc.message) from exc
-
-    selected, candidate_sources = select_source_pages(
-        candidates,
-        max_pages=settings.SOURCE_PAGE_MAX_SELECTED_PAGES,
-    )
-    if not selected:
-        raise ExtractFailure("source_page_no_candidates")
+    """Parse one deterministic page selection inside this Job and bind it."""
     page_ranges = compact_page_ranges(selected)
     await request_gate("source_page_parse")
-    base_parse_params = dict(parse_params or build_parse_params())
     parse_params = {
         **base_parse_params,
         "model_version": base_parse_params.get("model_version") or "pipeline",
@@ -512,6 +463,72 @@ async def _source_page_parse_and_bind(
     return bound, metadata
 
 
+async def _source_page_parse_and_bind(
+    *,
+    spec: Dict[str, Any],
+    job: Dict[str, Any],
+    document: Dict[str, Any],
+    tenant_id: str,
+    job_id: str,
+    worker_id: str,
+    attempts: int,
+    lost: asyncio.Event,
+    deadline: Optional[datetime],
+    usage: Dict[str, int],
+    parse_params: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    # A retry of the same Extract Job must reuse its own bound ParseResult.
+    # A new Job intentionally arrives without parse_result_id and builds a new
+    # source index/partial parse, even for the same Document.
+    bound_id = job.get("parse_result_id")
+    if bound_id:
+        bound = await _load_bound_result(str(bound_id), job, document, tenant_id)
+        return bound, {"reused_job_parse_result": True}
+
+    request_gate = RequestGate(job_id, worker_id, attempts, lost, deadline, usage)
+
+    try:
+        index = await build_source_page_index(
+            document["file_path"], request_gate=request_gate
+        )
+        candidates = await retrieve_source_pages(
+            index, queries=schema_field_queries(spec["data_schema"]), request_gate=request_gate
+        )
+    except SourcePageIndexError as exc:
+        raise ExtractFailure(exc.reason, exc.message) from exc
+
+    selected, candidate_sources = select_source_pages(
+        candidates,
+        max_pages=settings.SOURCE_PAGE_MAX_SELECTED_PAGES,
+    )
+    if not selected:
+        raise ExtractFailure("source_page_no_candidates")
+    bound, metadata = await _parse_selected_pages_and_bind(
+        document=document,
+        job=job,
+        tenant_id=tenant_id,
+        worker_id=worker_id,
+        attempts=attempts,
+        deadline=deadline,
+        request_gate=request_gate,
+        selected=selected,
+        candidate_sources=candidate_sources,
+        index=index,
+        base_parse_params=dict(parse_params or build_parse_params()),
+    )
+    return bound, {**metadata, "embedding_requests": request_gate.embedding_requests}
+
+
+# Agent failures that may degrade to the deterministic initial retrieval.
+# Budget guards and deadline exhaustion stay hard failures: there is either no
+# time left or the integrity limits must not be papered over.
+DEGRADABLE_AGENT_REASONS = frozenset({
+    "agent_runtime_failed",
+    "agent_no_parse_result",
+    "llama_index_unavailable",
+})
+
+
 async def _agentic_source_page_parse_and_bind(
     *,
     spec: Dict[str, Any],
@@ -532,18 +549,7 @@ async def _agentic_source_page_parse_and_bind(
         bound = await _load_bound_result(str(bound_id), job, document, tenant_id)
         return bound, {"reused_job_parse_result": True}
 
-    async def request_gate(stage: str) -> None:
-        _ensure_execution_window(lost, deadline, stage)
-        try:
-            consumed = await _await_with_deadline(
-                consume_extract_request(job_id, worker_id, attempts), deadline
-            )
-        except asyncio.TimeoutError as exc:
-            raise ExtractFailure("deadline_exceeded", stage) from exc
-        if not consumed.get("allowed"):
-            raise ExtractFailure(f"budget_{consumed.get('reason') or 'denied'}", stage)
-        used = consumed.get("requests_used")
-        usage["requests"] = int(used) if isinstance(used, int) else usage["requests"] + 1
+    request_gate = RequestGate(job_id, worker_id, attempts, lost, deadline, usage)
 
     try:
         index = await build_source_page_index(document["file_path"], request_gate=request_gate)
@@ -573,7 +579,14 @@ async def _agentic_source_page_parse_and_bind(
         except AgenticSourceError:
             raise
         except Exception as exc:
-            raise AgenticSourceError(f"agent_parse_failed: {exc}") from exc
+            raise AgenticSourceError("agent_parse_failed", str(exc)) from exc
+
+    try:
+        initial = await run_initial_schema_search(
+            index, spec["data_schema"], request_gate=request_gate
+        )
+    except SourcePageIndexError as exc:
+        raise ExtractFailure(exc.reason, exc.message) from exc
 
     remaining = _remaining_seconds(deadline)
     agent_deadline = None
@@ -590,9 +603,49 @@ async def _agentic_source_page_parse_and_bind(
             max_parse_calls=settings.AGENTIC_MAX_PARSE_CALLS,
             max_unique_pages=settings.AGENTIC_MAX_UNIQUE_PAGES,
             max_agent_turns=settings.AGENTIC_MAX_TURNS,
+            initial=initial,
         )
     except AgenticSourceError as exc:
-        raise ExtractFailure("agentic_source_failed", str(exc)) from exc
+        if initial is None or exc.reason not in DEGRADABLE_AGENT_REASONS:
+            raise ExtractFailure("agentic_source_failed", str(exc)) from exc
+        # Degrade to the deterministic selection the agent was anchored on.
+        # This is still a bounded partial parse owned by this Job — never a
+        # full-document fallback (ADR-0011) — and is recorded as degraded.
+        logger.warning(
+            f"Agentic 路由失败，降级为确定性检索: job_id={job_id} reason={exc.reason}"
+        )
+        selected, candidate_sources = select_source_pages(
+            initial.hits, max_pages=settings.SOURCE_PAGE_MAX_SELECTED_PAGES
+        )
+        if not selected:
+            raise ExtractFailure(
+                "source_page_no_candidates", f"agentic_degraded: {exc.reason}"
+            ) from exc
+        bound, metadata = await _parse_selected_pages_and_bind(
+            document=document,
+            job=job,
+            tenant_id=tenant_id,
+            worker_id=worker_id,
+            attempts=attempts,
+            deadline=deadline,
+            request_gate=request_gate,
+            selected=selected,
+            candidate_sources=candidate_sources,
+            index=index,
+            base_parse_params=dict(parse_params or build_parse_params()),
+        )
+        return bound, {
+            **metadata,
+            "strategy": "agentic_source_page_routed",
+            "degraded": True,
+            "degrade_reason": exc.reason,
+            "initial_top1_pages": list(initial.top1_pages),
+            "initial_top2_pages": list(initial.top2_pages),
+            "unresolved_fields": initial.unresolved,
+            "searches": 1,
+            "parse_calls": 1,
+            "embedding_requests": request_gate.embedding_requests,
+        }
 
     all_pages = sorted({int(page.page_no) for page in routed.parse_result.pages})
     merged_params = {
@@ -607,6 +660,7 @@ async def _agentic_source_page_parse_and_bind(
             "searches": stats.searches,
             "parse_calls": stats.parse_calls,
             "llm_calls": stats.llm_calls,
+            "tool_calls": stats.tool_calls,
             "agent_turns": stats.agent_turns,
             "unique_pages": stats.unique_pages,
             "trace": stats.trace[:16],
@@ -634,11 +688,14 @@ async def _agentic_source_page_parse_and_bind(
             if page.page_no in all_pages
         },
         "index_profile": index.profile,
+        "embedding_requests": request_gate.embedding_requests,
         "searches": stats.searches,
         "parse_calls": stats.parse_calls,
         "llm_calls": stats.llm_calls,
+        "tool_calls": stats.tool_calls,
         "agent_turns": stats.agent_turns,
         "unique_pages": stats.unique_pages,
+        "unresolved_fields": list(stats.unresolved),
         "trace": stats.trace[:16],
     }
     return bound, metadata
@@ -646,24 +703,6 @@ async def _agentic_source_page_parse_and_bind(
 
 def _escape_pointer_token(value: str) -> str:
     return value.replace("~", "~0").replace("/", "~1")
-
-
-def _unescape_pointer_token(value: str) -> str:
-    return value.replace("~1", "/").replace("~0", "~")
-
-
-def _schema_leaves(schema: Dict[str, Any], path: str = "") -> List[Tuple[str, Dict[str, Any]]]:
-    properties = schema.get("properties")
-    if isinstance(properties, dict) and properties:
-        leaves: List[Tuple[str, Dict[str, Any]]] = []
-        for key, child in properties.items():
-            if isinstance(child, dict):
-                child_path = f"{path}/{_escape_pointer_token(str(key))}"
-                leaves.extend(_schema_leaves(child, child_path))
-        return leaves
-    if path:
-        return [(path, schema)]
-    return []
 
 
 def _ensure_unit_fits(messages: List[Dict[str, str]], unit_id: str) -> None:
@@ -703,30 +742,48 @@ async def _await_with_deadline(
     return await asyncio.wait_for(awaitable, timeout=remaining)
 
 
-def _is_retryable_transport_error(error: Exception) -> bool:
-    """只把网络/超时/限流/服务端错误纳入本单元的请求预算重试。"""
-    if isinstance(
-        error,
-        (
-            httpx.TimeoutException,
-            httpx.NetworkError,
-            httpx.RemoteProtocolError,
-            APIConnectionError,
-            APITimeoutError,
-            RateLimitError,
-            InternalServerError,
-        ),
+class RequestGate:
+    """Shared budget gate for one Extract execution: claim/deadline window,
+    atomic request RPC, and embedding-request telemetry for route metadata."""
+
+    def __init__(
+        self,
+        job_id: str,
+        worker_id: str,
+        attempts: int,
+        lost: asyncio.Event,
+        deadline: Optional[datetime],
+        usage: Dict[str, int],
     ):
-        return True
-    if isinstance(error, APIStatusError):
-        status_code = error.status_code
-        return status_code in {408, 429} or (
-            isinstance(status_code, int) and status_code >= 500
+        self._job_id = job_id
+        self._worker_id = worker_id
+        self._attempts = attempts
+        self._lost = lost
+        self._deadline = deadline
+        self._usage = usage
+        self.embedding_requests = 0
+
+    async def __call__(self, stage: str) -> None:
+        if "embedding" in stage:
+            self.embedding_requests += 1
+        _ensure_execution_window(self._lost, self._deadline, stage)
+        try:
+            consumed = await _await_with_deadline(
+                consume_extract_request(self._job_id, self._worker_id, self._attempts),
+                self._deadline,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ExtractFailure("deadline_exceeded", stage) from exc
+        if not consumed.get("allowed"):
+            raise ExtractFailure(f"budget_{consumed.get('reason') or 'denied'}", stage)
+        used = consumed.get("requests_used")
+        self._usage["requests"] = (
+            int(used) if isinstance(used, int) else self._usage["requests"] + 1
         )
-    status_code = getattr(error, "status_code", None)
-    return status_code in {408, 429} or (
-        isinstance(status_code, int) and status_code >= 500
-    )
+
+
+def _is_retryable_transport_error(error: Exception) -> bool:
+    return is_retryable_transport_error(error)
 
 
 async def _run_unit(
@@ -870,26 +927,77 @@ async def _run_units(
     usage: Dict[str, int],
     deadline: datetime,
 ) -> Tuple[List[Any], List[Dict[str, Any]]]:
-    outputs: List[Any] = []
-    calls: List[Dict[str, Any]] = []
-    for unit in units:
+    concurrency = max(1, int(settings.EXTRACT_UNIT_CONCURRENCY))
+    if concurrency == 1 or len(units) <= 1:
+        outputs: List[Any] = []
+        calls: List[Dict[str, Any]] = []
+        for unit in units:
+            if lost.is_set():
+                raise ExtractFailure("claim_lost")
+            outputs.append(
+                await _run_unit(
+                    unit=unit,
+                    target=target,
+                    schema=schema,
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    attempts=attempts,
+                    lost=lost,
+                    calls=calls,
+                    usage=usage,
+                    deadline=deadline,
+                )
+            )
+        return outputs, calls
+
+    # Bounded fan-out (per_page).  Each unit keeps its own lost pre-check,
+    # budget RPC, and repair loop; outputs and call records are reassembled in
+    # unit order so the result payload and engine metadata stay deterministic.
+    started = time.perf_counter()
+    semaphore = asyncio.Semaphore(concurrency)
+    outputs = [None] * len(units)
+    unit_calls: List[List[Dict[str, Any]]] = [[] for _ in units]
+    first_failure: Optional[ExtractFailure] = None
+
+    async def run_one(index: int, unit: Dict[str, Any]) -> None:
+        nonlocal first_failure
         if lost.is_set():
             raise ExtractFailure("claim_lost")
-        outputs.append(
-            await _run_unit(
-                unit=unit,
-                target=target,
-                schema=schema,
-                job_id=job_id,
-                worker_id=worker_id,
-                attempts=attempts,
-                lost=lost,
-                calls=calls,
-                usage=usage,
-                deadline=deadline,
-            )
-        )
-    return outputs, calls
+        async with semaphore:
+            try:
+                outputs[index] = await _run_unit(
+                    unit=unit,
+                    target=target,
+                    schema=schema,
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    attempts=attempts,
+                    lost=lost,
+                    calls=unit_calls[index],
+                    usage=usage,
+                    deadline=deadline,
+                )
+            except ExtractFailure as exc:
+                if first_failure is None:
+                    first_failure = exc
+                raise
+
+    try:
+        async with asyncio.TaskGroup() as group:
+            for index, unit in enumerate(units):
+                group.create_task(run_one(index, unit))
+    except BaseExceptionGroup:
+        # Several units may fail on the same tick; surface the first
+        # ExtractFailure ungrouped so failure handling matches the
+        # sequential path exactly.
+        if first_failure is not None:
+            raise first_failure from None
+        raise
+    logger.info(
+        f"Extract units done: units={len(units)} concurrency={concurrency} "
+        f"requests={usage['requests']} elapsed_ms={int((time.perf_counter() - started) * 1000)}"
+    )
+    return list(outputs), [entry for entries in unit_calls for entry in entries]
 
 
 def _sum_tokens(calls: List[Dict[str, Any]], field: str) -> Optional[int]:
@@ -1099,23 +1207,7 @@ async def handle_extract_job(
             source_metadata: Optional[Dict[str, Any]] = None
             agentic_metadata: Optional[Dict[str, Any]] = None
             usage = {"requests": 0}
-
-            async def request_gate(stage: str) -> None:
-                _ensure_execution_window(lost, deadline, stage)
-                try:
-                    consumed = await _await_with_deadline(
-                        consume_extract_request(job_id, worker_id, attempts), deadline
-                    )
-                except asyncio.TimeoutError as exc:
-                    raise ExtractFailure("deadline_exceeded", stage) from exc
-                if not consumed.get("allowed"):
-                    raise ExtractFailure(
-                        f"budget_{consumed.get('reason') or 'denied'}", stage
-                    )
-                used = consumed.get("requests_used")
-                usage["requests"] = (
-                    int(used) if isinstance(used, int) else usage["requests"] + 1
-                )
+            request_gate = RequestGate(job_id, worker_id, attempts, lost, deadline, usage)
 
             if spec["extraction_strategy"] == AGENTIC_SOURCE_PAGE_ROUTED_STRATEGY:
                 parse_row, agentic_metadata = await _agentic_source_page_parse_and_bind(

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from services import extract_service
+from services.agentic_source import AgenticSourceError, InitialSchemaSearch
 from services.extract_service import (
     ExtractFailure,
     build_execution_spec,
@@ -179,6 +180,9 @@ def _patch_env(
         extract_service, "commit_extract_job", AsyncMock(return_value=commit_status)
     )
     monkeypatch.setattr(extract_service, "get_job", AsyncMock(return_value=None))
+    # Existing tests assert deterministic FIFO responses; keep them on the
+    # sequential path.  Concurrency has its own dedicated test.
+    monkeypatch.setattr(extract_service.settings, "EXTRACT_UNIT_CONCURRENCY", 1)
 
     responses = list(llm_responses or [])
 
@@ -447,6 +451,96 @@ class TestHandleExtract:
         _, engine = _committed_ok()
         assert engine["extraction_strategy"] == "agentic_source_page_routed"
         assert engine["agentic_source_page_routed"]["parse_calls"] == 1
+
+    @pytest.mark.asyncio
+    async def test_agentic_degrades_to_deterministic_routing_on_agent_failure(self, monkeypatch):
+        job = _job(
+            execution_spec={
+                "capability": "extract",
+                "spec_version": "1",
+                "effective_params": {
+                    "target": "per_doc",
+                    "data_schema": SCHEMA,
+                    "extraction_strategy": "agentic_source_page_routed",
+                },
+            }
+        )
+        _patch_env(monkeypatch, llm_responses=[_llm_result('{"report_no": "DEGRADED-1"}')])
+        index = SourcePageIndex(
+            source_hash="sha",
+            pages=[SourcePage(3, "text", text="page 3")],
+            vectors=[[1.0, 0.0]],
+            profile="test",
+            chunks=[SourceChunk("p3-c0", 3, "text", "page 3")],
+        )
+        monkeypatch.setattr(extract_service, "build_source_page_index", AsyncMock(return_value=index))
+
+        async def fake_initial(idx, schema, request_gate=None):
+            return InitialSchemaSearch(
+                queries={"/report_no": "/report_no", "/conclusion": "/conclusion"},
+                hits={
+                    "/report_no": [SourcePageCandidate(3, 0.99, ["text-vector"])],
+                    "/conclusion": [],
+                },
+                top1_pages=[3],
+                top2_pages=[3],
+            )
+
+        monkeypatch.setattr(extract_service, "run_initial_schema_search", fake_initial)
+
+        async def failing_agent(*args, **kwargs):
+            raise AgenticSourceError("agent_runtime_failed", "boom")
+
+        monkeypatch.setattr(extract_service, "route_with_agent", failing_agent)
+
+        payload = await handle_extract_job(job)
+
+        assert payload == {"report_no": "DEGRADED-1"}
+        _, engine = _committed_ok()
+        assert engine["extraction_strategy"] == "agentic_source_page_routed"
+        block = engine["agentic_source_page_routed"]
+        assert block["degraded"] is True
+        assert block["degrade_reason"] == "agent_runtime_failed"
+        assert block["selected_pages"] == [3]
+        assert block["unresolved_fields"] == ["/conclusion"]
+
+    @pytest.mark.asyncio
+    async def test_agentic_agent_failure_without_initial_stays_failed(self, monkeypatch):
+        job = _job(
+            execution_spec={
+                "capability": "extract",
+                "spec_version": "1",
+                "effective_params": {
+                    "target": "per_doc",
+                    "data_schema": SCHEMA,
+                    "extraction_strategy": "agentic_source_page_routed",
+                },
+            }
+        )
+        _patch_env(monkeypatch, llm_responses=[])
+        index = SourcePageIndex(
+            source_hash="sha",
+            pages=[SourcePage(3, "text", text="page 3")],
+            vectors=[[1.0, 0.0]],
+            profile="test",
+            chunks=[SourceChunk("p3-c0", 3, "text", "page 3")],
+        )
+        monkeypatch.setattr(extract_service, "build_source_page_index", AsyncMock(return_value=index))
+
+        async def no_initial(idx, schema, request_gate=None):
+            return None
+
+        monkeypatch.setattr(extract_service, "run_initial_schema_search", no_initial)
+
+        async def failing_agent(*args, **kwargs):
+            raise AgenticSourceError("agent_runtime_failed", "boom")
+
+        monkeypatch.setattr(extract_service, "route_with_agent", failing_agent)
+
+        result = await handle_extract_job(job)
+
+        assert result is None
+        assert "agentic_source_failed" in _committed_failure()
 
     @pytest.mark.asyncio
     async def test_new_extract_job_does_not_read_document_latest_parse(self, monkeypatch):
@@ -955,6 +1049,75 @@ class TestHandleExtract:
 
         assert exc.value.reason == "claim_lost"
         assert extract_service.invoke_llm.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_concurrent_units_preserve_output_and_call_order(self, monkeypatch):
+        _patch_env(monkeypatch, llm_responses=[])
+        monkeypatch.setattr(extract_service.settings, "EXTRACT_UNIT_CONCURRENCY", 4)
+        marker_values = {"PAGE-ONE": "C1", "PAGE-TWO": "C2", "PAGE-THREE": "C3"}
+
+        async def routed_invoke(messages, **kwargs):
+            content = messages[1]["content"]
+            for marker, value in marker_values.items():
+                if marker in content:
+                    # The first unit finishes last; outputs must still come
+                    # back in unit order, not completion order.
+                    await asyncio.sleep(0.05 if marker == "PAGE-ONE" else 0.0)
+                    return _llm_result(f'{{"report_no": "{value}"}}')
+            raise AssertionError("unit source marker missing")
+
+        monkeypatch.setattr(extract_service, "invoke_llm", AsyncMock(side_effect=routed_invoke))
+
+        outputs, calls = await extract_service._run_units(
+            units=[
+                {"id": "p1", "label": "页1", "source": "PAGE-ONE"},
+                {"id": "p2", "label": "页2", "source": "PAGE-TWO"},
+                {"id": "p3", "label": "页3", "source": "PAGE-THREE"},
+            ],
+            target="per_page",
+            schema=SCHEMA,
+            job_id=JOB_ID,
+            worker_id="worker-1",
+            attempts=1,
+            lost=extract_service.asyncio.Event(),
+            usage={"requests": 0},
+            deadline=datetime.now(timezone.utc) + timedelta(seconds=600),
+        )
+
+        assert outputs == [{"report_no": "C1"}, {"report_no": "C2"}, {"report_no": "C3"}]
+        assert [call["unit"] for call in calls] == ["p1", "p2", "p3"]
+        assert extract_service.invoke_llm.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_concurrent_unit_failure_surfaces_single_failure(self, monkeypatch):
+        _patch_env(monkeypatch, llm_responses=[])
+        monkeypatch.setattr(extract_service.settings, "EXTRACT_UNIT_CONCURRENCY", 4)
+
+        async def routed_invoke(messages, **kwargs):
+            content = messages[1]["content"]
+            if "PAGE-BAD" in content:
+                return _llm_result("", finish_reason="content_filter")
+            return _llm_result('{"report_no": "OK"}')
+
+        monkeypatch.setattr(extract_service, "invoke_llm", AsyncMock(side_effect=routed_invoke))
+
+        with pytest.raises(ExtractFailure) as exc:
+            await extract_service._run_units(
+                units=[
+                    {"id": "p1", "label": "页1", "source": "PAGE-GOOD"},
+                    {"id": "p2", "label": "页2", "source": "PAGE-BAD"},
+                ],
+                target="per_page",
+                schema=SCHEMA,
+                job_id=JOB_ID,
+                worker_id="worker-1",
+                attempts=1,
+                lost=extract_service.asyncio.Event(),
+                usage={"requests": 0},
+                deadline=datetime.now(timezone.utc) + timedelta(seconds=600),
+            )
+
+        assert exc.value.reason == "response_filtered"
 
     @pytest.mark.asyncio
     async def test_claim_lost_detected_after_llm_return(self, monkeypatch):

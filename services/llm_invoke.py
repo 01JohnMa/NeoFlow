@@ -11,9 +11,43 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import httpx
 from langchain_openai import ChatOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from config.settings import settings
+
+
+def is_retryable_transport_error(error: Exception) -> bool:
+    """只把网络/超时/限流/服务端错误视为可在请求预算内重试的传输错误。"""
+    if isinstance(
+        error,
+        (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            APIConnectionError,
+            APITimeoutError,
+            RateLimitError,
+            InternalServerError,
+        ),
+    ):
+        return True
+    if isinstance(error, APIStatusError):
+        status_code = error.status_code
+        return status_code in {408, 429} or (
+            isinstance(status_code, int) and status_code >= 500
+        )
+    status_code = getattr(error, "status_code", None)
+    return status_code in {408, 429} or (
+        isinstance(status_code, int) and status_code >= 500
+    )
 
 
 @dataclass
