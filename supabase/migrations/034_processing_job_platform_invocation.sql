@@ -178,11 +178,11 @@ BEGIN
 
     FOREACH v_doc_id IN ARRAY p_document_ids LOOP
         INSERT INTO processing_jobs (
-            job_id, job_type, status, stage, progress, document_ids, error,
+            job_id, status, stage, progress, document_ids, error,
             created_by, tenant_id, execution_spec, request_id,
             platform_invocation_id, created_at, updated_at
         ) VALUES (
-            gen_random_uuid(), 'parse', 'queued', 'queued', 0, ARRAY[v_doc_id], NULL,
+            gen_random_uuid(), 'queued', 'queued', 0, ARRAY[v_doc_id], NULL,
             p_requester_id, p_tenant_id,
             COALESCE(p_spec, '{}'::jsonb) || jsonb_build_object('document_id', v_doc_id),
             v_request_id,
