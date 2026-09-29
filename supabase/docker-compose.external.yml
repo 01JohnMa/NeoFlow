@@ -54,7 +54,8 @@ services:
     networks: [supabase-network]
 
   rest:
-    image: postgrest/postgrest:v11.2.2
+    # PG16 外置库需要 PostgREST v12（v11 只支持到 PG15，schema cache 会静默为空）
+    image: postgrest/postgrest:v12.2.0
     container_name: supabase-rest
     extra_hosts:
       - "host.docker.internal:host-gateway"
