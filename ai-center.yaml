@@ -52,3 +52,12 @@ worker:
 #   AI_CENTER_MODEL_GATEWAY_URL_TEMPLATE / AI_CENTER_RUNTIME_CREDENTIAL / AI_CENTER_MODEL_OPERATIONS
 # 三元组（relay 模式）；不注入 LITELLM_BASE_URL / LITELLM_API_KEY。
 # 这些名称属于平台保留名，应用 manifest 不得声明或覆盖。
+
+# 平台模型访问声明（2026-09-29 起）：模型调用统一经 AI Center Relay，
+# 平台按此注入 Relay 三元组并授予异步访问窗口；不再注入 LITELLM_*。
+model_access:
+  mode: relay
+  operations:
+    - chat.completions
+    - embeddings
+  async_job_timeout_seconds: 900
