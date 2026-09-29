@@ -43,7 +43,7 @@ def main():
  rub=load(base/'rubric.json'); raw=load(a.outcomes) if a.outcomes.endswith('.json') else [json.loads(x) for x in pathlib.Path(a.outcomes).read_text().splitlines() if x.strip()]; by={c['case_id']:c for c in m['cases']}; rows=[]; seen={}
  for j in raw:
   c=by.get(j.get('case_id')); key=tuple(j.get(x) for x in ('case_id','strategy','scenario','repetition')); seen[key]=j; rows.append(dict(score(j,load(base/c['gold']),rub),**{x:j.get(x) for x in ('case_id','strategy','scenario','repetition','stratum')})) if c else rows.append({'case_id':j.get('case_id'),'failed':True,'error':'not_in_manifest'})
- required=[(c['case_id'],s,sc,rep) for c in m['cases'] for s in ('full_document','page_routed') for sc in m['scenarios'] for rep in [0]]
+ required=[(c['case_id'],s,sc,rep) for c in m['cases'] for s in ('full_document','source_page_routed') for sc in m['scenarios'] for rep in [0]]
  for k in required:
   if k not in seen: rows.append({'case_id':k[0],'strategy':k[1],'scenario':k[2],'repetition':k[3],'failed':True,'error':'missing_outcome','field_correctness':0.0,'unsupported_rate':0.0})
  strata={}
@@ -52,7 +52,7 @@ def main():
  for st,xs in strata.items():
   def avg(strategy,field):
    z=[x.get(field) for x in xs if x.get('strategy')==strategy and x.get(field) is not None]; return sum(z)/len(z) if z else None
-  fc,fp=avg('full_document','field_correctness'),avg('page_routed','field_correctness'); ur,up=avg('full_document','unsupported_rate'),avg('page_routed','unsupported_rate'); gates[st]={'full_correctness':fc,'page_routed_correctness':fp,'full_unsupported_rate':ur,'page_routed_unsupported_rate':up,'pass':fc is not None and fp is not None and fp>=fc and up<=ur}
+  fc,fp=avg('full_document','field_correctness'),avg('source_page_routed','field_correctness'); ur,up=avg('full_document','unsupported_rate'),avg('source_page_routed','unsupported_rate'); gates[st]={'full_correctness':fc,'source_page_routed_correctness':fp,'full_unsupported_rate':ur,'source_page_routed_unsupported_rate':up,'pass':fc is not None and fp is not None and fp>=fc and up<=ur}
  report={'manifest_version':m['manifest_version'],'rubric_version':rub['rubric_version'],'rows':rows,'denominator':len(rows),'strata':gates,'rollout_decision':'NO_GO','evaluation_complete':bool(raw) and not any(x.get('error')=='missing_outcome' for x in rows),'gaps':['manifest not frozen'] if m.get('status')!='frozen' else []}
  text=json.dumps(report,ensure_ascii=False,indent=2)+'\n'; pathlib.Path(a.output).write_text(text) if a.output else print(text,end='')
 if __name__=='__main__': main()
